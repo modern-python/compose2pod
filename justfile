@@ -18,6 +18,15 @@ lint-ci:
     uv run ruff format --check
     uv run ruff check --no-fix
     uv run ty check
+    uv run python planning/index.py --check
+
+# Print the generated planning change/decision index to stdout.
+index:
+    uv run python planning/index.py
+
+# Validate planning bundles/decisions; prints "planning: OK" or violations.
+check-planning:
+    uv run python planning/index.py --check
 
 # Run pytest with NO coverage (targeted runs won't trip the gate). Passes args through.
 test *args:
