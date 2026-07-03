@@ -1,8 +1,17 @@
-# compose2pod Extraction Implementation Plan
+# compose2pod-extraction — implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or
+> superpowers:executing-plans to implement this plan task-by-task. Steps
+> use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Port the chats compose-to-podman-pod converter into the standalone public package `compose2pod`, split into focused modules, with the four review fixes, an optional YAML input path, and CI.
+
+**Spec:** [`design.md`](./design.md)
+
+**Branch:** shipped via `chore: scaffold compose2pod package` → `docs: implementation plan for the converter port` → `Port the compose-to-podman-pod converter into compose2pod (#1)`, squash-merged to `main` at `287bb86`.
+
+**Commit strategy:** Per-task commits (as listed in each task's final step).
 
 **Architecture:** A dependency-free, stdlib-only Python package (root layout, `uv_build`) that reads a Docker Compose document (dict) and emits a POSIX `sh` script running the services as a single Podman pod. `exceptions` → `healthcheck`/`graph` → `parsing`/`emit` → `cli` → `__main__`, acyclic. YAML input is an optional extra; the core reads JSON.
 
@@ -16,7 +25,7 @@
 - Quality gates: ruff `select=ALL` (config already in `pyproject.toml`; it **autofixes destructively** — always use `ruff check --no-fix`), ty clean, `eof-fixer` clean, `just test-ci` at **100% line coverage** (`--cov-fail-under=100`).
 - The emitted script is POSIX `sh` (`set -eu`).
 - Warnings/errors printed by the CLI are prefixed `compose2pod: ` (renamed from the chats prototype's `compose-to-pod: `).
-- Package location: `/Users/kevinsmith/src/pypi/compose2pod` (this repo). Source of truth for behavior is the chats prototype `bin/compose_to_pod.py`; the four fixes below are the only behavior changes.
+- Package location: `/Users/kevinsmith/src/pypi/compose2pod`. Source of truth for behavior is the chats prototype `bin/compose_to_pod.py`; the four fixes below are the only behavior changes.
 - Environment note: this repo's deps are all on public PyPI (pytest, ruff, ty, eof-fixer, PyYAML), so `just install` and `just test` run locally without the internal artifactory.
 - Commit messages: conventional-commit subjects, **no `Co-authored-by` trailer**.
 
@@ -52,12 +61,12 @@ A shared fixture `CHATS_COMPOSE` is duplicated only where needed; to keep tests 
 - Create: `tests/conftest.py`
 - Modify: none (scaffold `pyproject.toml`, `justfile` already exist)
 
-- [ ] **Step 1: Install deps**
+- [x] **Step 1: Install deps**
 
 Run: `cd /Users/kevinsmith/src/pypi/compose2pod && just install`
 Expected: uv resolves from public PyPI, creates `.venv`, installs the `yaml` extra + `lint` group. No error.
 
-- [ ] **Step 2: Add the shared fixture**
+- [x] **Step 2: Add the shared fixture**
 
 Create `tests/conftest.py`:
 
@@ -120,7 +129,7 @@ def chats_compose() -> dict:
     }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/conftest.py
@@ -138,7 +147,7 @@ git commit -m "test: add shared chats_compose fixture"
 **Interfaces:**
 - Produces: `UnsupportedComposeError(Exception)`; `has_healthcheck(svc: dict[str, Any]) -> bool`; `health_cmd(test: object) -> str | None`; `interval_seconds(duration: object) -> int`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_healthcheck.py`:
 
@@ -217,12 +226,12 @@ class TestHasHealthcheck:
         assert has_healthcheck({"healthcheck": {"test": "NONE"}}) is False
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `just test tests/test_healthcheck.py`
 Expected: FAIL — `ModuleNotFoundError: No module named 'compose2pod.healthcheck'`.
 
-- [ ] **Step 3: Implement `exceptions.py`**
+- [x] **Step 3: Implement `exceptions.py`**
 
 ```python
 """Exceptions for compose2pod."""
@@ -232,7 +241,7 @@ class UnsupportedComposeError(Exception):
     """Raised when the compose file uses a construct outside the supported subset."""
 ```
 
-- [ ] **Step 4: Implement `healthcheck.py`** (fix #3: single `_CMD_MIN_LENGTH`)
+- [x] **Step 4: Implement `healthcheck.py`** (fix #3: single `_CMD_MIN_LENGTH`)
 
 ```python
 """Healthcheck translation: compose healthcheck -> podman --health-* values."""
@@ -287,12 +296,12 @@ def interval_seconds(duration: object) -> int:
     return max(int(float(text)), 1)
 ```
 
-- [ ] **Step 5: Run tests + lint**
+- [x] **Step 5: Run tests + lint**
 
 Run: `just test tests/test_healthcheck.py` → Expected: PASS (20 tests).
 Run: `just lint-ci` → Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add compose2pod/exceptions.py compose2pod/healthcheck.py tests/test_healthcheck.py
@@ -311,7 +320,7 @@ git commit -m "feat: healthcheck translation and UnsupportedComposeError"
 - Consumes: `UnsupportedComposeError` from `compose2pod.exceptions`.
 - Produces: `depends_on(svc: dict[str, Any]) -> dict[str, str]`; `hostnames(services: dict[str, Any]) -> list[str]`; `startup_order(services: dict[str, Any], target: str) -> list[str]`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_graph.py`:
 
@@ -386,12 +395,12 @@ class TestStartupOrder:
         assert order[-1] == "target"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `just test tests/test_graph.py`
 Expected: FAIL — `ModuleNotFoundError: No module named 'compose2pod.graph'`.
 
-- [ ] **Step 3: Implement `graph.py`**
+- [x] **Step 3: Implement `graph.py`**
 
 ```python
 """Dependency graph: normalize depends_on, collect hostnames, compute startup order."""
@@ -445,12 +454,12 @@ def startup_order(services: dict[str, Any], target: str) -> list[str]:
     return order
 ```
 
-- [ ] **Step 4: Run tests + lint**
+- [x] **Step 4: Run tests + lint**
 
 Run: `just test tests/test_graph.py` → Expected: PASS.
 Run: `just lint-ci` → Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add compose2pod/graph.py tests/test_graph.py
@@ -469,7 +478,7 @@ git commit -m "feat: dependency graph and startup order"
 - Consumes: `UnsupportedComposeError` (exceptions), `depends_on` (graph), `has_healthcheck` (healthcheck).
 - Produces: `validate(compose: dict[str, Any]) -> list[str]`; module constants `SUPPORTED_SERVICE_KEYS`, `IGNORED_SERVICE_KEYS`, `SUPPORTED_HEALTHCHECK_KEYS`, `SUPPORTED_TOP_LEVEL_KEYS`, `DEPENDS_ON_CONDITIONS`.
 
-- [ ] **Step 1: Write the failing tests** (ports the chats `TestValidate` + a new non-dict test)
+- [x] **Step 1: Write the failing tests** (ports the chats `TestValidate` + a new non-dict test)
 
 Create `tests/test_parsing.py`:
 
@@ -557,12 +566,12 @@ class TestValidate:
             validate(compose)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `just test tests/test_parsing.py`
 Expected: FAIL — `ModuleNotFoundError: No module named 'compose2pod.parsing'`.
 
-- [ ] **Step 3: Implement `parsing.py`** (fix #1 is the `isinstance` guard at the top of `validate`)
+- [x] **Step 3: Implement `parsing.py`** (fix #1 is the `isinstance` guard at the top of `validate`)
 
 ```python
 """Validate a compose document against the supported subset."""
@@ -643,12 +652,12 @@ def validate(compose: dict[str, Any]) -> list[str]:
     return warnings
 ```
 
-- [ ] **Step 4: Run tests + lint**
+- [x] **Step 4: Run tests + lint**
 
 Run: `just test tests/test_parsing.py` → Expected: PASS.
 Run: `just lint-ci` → Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add compose2pod/parsing.py tests/test_parsing.py
@@ -669,7 +678,7 @@ git commit -m "feat: compose subset validation with non-dict guard"
 
 **Design note (for reviewer/Artur):** fix #2 implements the spec's refined decision — `start_period`/`retries` are passed to `podman run` as `--health-start-period`/`--health-retries`; the `wait_healthy` budget is unchanged (still `HEALTHY_WAIT_BUDGET_SECONDS // interval` attempts). This deliberately does not shorten the wait to `retries × interval`, which would risk premature failure for a long `start_period`.
 
-- [ ] **Step 1: Write the failing tests** (ports `TestRunFlags`, `TestImageAndCommand`, `TestEmitScript`, plus fix-#2 cases)
+- [x] **Step 1: Write the failing tests** (ports `TestRunFlags`, `TestImageAndCommand`, `TestEmitScript`, plus fix-#2 cases)
 
 Create `tests/test_emit.py`:
 
@@ -819,12 +828,12 @@ class TestEmitScript:
         assert target_line.rstrip().endswith("python -m chats.api")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `just test tests/test_emit.py`
 Expected: FAIL — `ModuleNotFoundError: No module named 'compose2pod.emit'`.
 
-- [ ] **Step 3: Implement `emit.py`** (fix #2 in `run_flags`; fix #4 splits `_emit_target`/`_run_tokens`/`_render`)
+- [x] **Step 3: Implement `emit.py`** (fix #2 in `run_flags`; fix #4 splits `_emit_target`/`_run_tokens`/`_render`)
 
 ```python
 """Render the podman-pod test script for a target service and its dependencies."""
@@ -997,12 +1006,12 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
     return "\n".join(lines) + "\n"
 ```
 
-- [ ] **Step 4: Run tests + lint**
+- [x] **Step 4: Run tests + lint**
 
 Run: `just test tests/test_emit.py` → Expected: PASS.
 Run: `just lint-ci` → Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add compose2pod/emit.py tests/test_emit.py
@@ -1022,7 +1031,7 @@ git commit -m "feat: pod script emission with start_period/retries pass-through"
 - Consumes: `validate` (parsing), `EmitOptions`/`emit_script` (emit), `UnsupportedComposeError` (exceptions).
 - Produces: `main(argv: list[str] | None = None) -> int`; `POD_NAME_PATTERN`; package exports `validate`, `emit_script`, `EmitOptions`, `UnsupportedComposeError`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_cli.py`:
 
@@ -1137,12 +1146,12 @@ class TestModuleEntrypoint:
         assert result.stdout.startswith("#!/bin/sh")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `just test tests/test_cli.py`
 Expected: FAIL — `ModuleNotFoundError: No module named 'compose2pod.cli'`.
 
-- [ ] **Step 3: Implement `cli.py`** (module-level optional yaml import; `# noqa: ANN401` where returning parsed data)
+- [x] **Step 3: Implement `cli.py`** (module-level optional yaml import; `# noqa: ANN401` where returning parsed data)
 
 ```python
 """Command-line interface: read a compose document and emit the pod script."""
@@ -1241,7 +1250,7 @@ def main(argv: list[str] | None = None) -> int:
 
 Note: the non-mapping case (`42`, `"not json"` under `auto`) reaches `validate`, which raises `UnsupportedComposeError` (fix #1) → caught in the second `try` → exit 2. The `test_non_mapping_document_returns_2` test asserts that path.
 
-- [ ] **Step 4: Implement `__main__.py`**
+- [x] **Step 4: Implement `__main__.py`**
 
 ```python
 """python -m compose2pod entry point."""
@@ -1255,7 +1264,7 @@ if __name__ == "__main__":  # pragma: no cover - exercised via subprocess in tes
     sys.exit(main())
 ```
 
-- [ ] **Step 5: Implement `__init__.py` exports**
+- [x] **Step 5: Implement `__init__.py` exports**
 
 ```python
 """compose2pod: convert a Docker Compose file into a single-Podman-pod run script."""
@@ -1273,13 +1282,13 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 6: Run tests + lint + full coverage**
+- [x] **Step 6: Run tests + lint + full coverage**
 
 Run: `just test tests/test_cli.py` → Expected: PASS.
 Run: `just test-ci` → Expected: PASS at 100% line coverage.
 Run: `just lint-ci` → Expected: clean.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add compose2pod/cli.py compose2pod/__main__.py compose2pod/__init__.py tests/test_cli.py
@@ -1295,7 +1304,7 @@ git commit -m "feat: CLI with JSON/YAML input and public API exports"
 
 **Interfaces:** none (CI only). Mirrors `modern-di`, minus the docs and planning-bundle jobs.
 
-- [ ] **Step 1: Create `.github/workflows/ci.yml`**
+- [x] **Step 1: Create `.github/workflows/ci.yml`**
 
 ```yaml
 name: main
@@ -1314,7 +1323,7 @@ jobs:
     uses: ./.github/workflows/_checks.yml
 ```
 
-- [ ] **Step 2: Create `.github/workflows/_checks.yml`**
+- [x] **Step 2: Create `.github/workflows/_checks.yml`**
 
 ```yaml
 name: checks
@@ -1354,7 +1363,7 @@ jobs:
       - run: just test-ci
 ```
 
-- [ ] **Step 3: Create `.github/workflows/release.yml`**
+- [x] **Step 3: Create `.github/workflows/release.yml`**
 
 ```yaml
 name: Release
@@ -1397,17 +1406,17 @@ jobs:
           draft: false
 ```
 
-- [ ] **Step 4: Validate workflow YAML**
+- [x] **Step 4: Validate workflow YAML**
 
 Run: `python3 -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]; print('ok')"`
 Expected: `ok`.
 
-- [ ] **Step 5: Final full-suite gate**
+- [x] **Step 5: Final full-suite gate**
 
 Run: `just test-ci` → Expected: PASS at 100% line coverage.
 Run: `just lint-ci` → Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .github/workflows/
@@ -1431,3 +1440,7 @@ git commit -m "ci: lint + pytest matrix and tag-driven PyPI trusted publishing"
 - Coverage is line-based (`--cov-fail-under=100`), matching modern-di. `# pragma: no cover` is used on the optional-yaml `except ImportError` (PyYAML is installed via `--all-extras`, so that line never runs in CI) and on the `__main__` guard.
 - Never run bare `ruff check` in this repo — the config autofixes destructively. Use `just lint-ci` (`ruff check --no-fix`).
 - Commit messages: conventional-commit subjects, no `Co-authored-by` trailer.
+
+## Status
+
+All tasks shipped: `72422be` (scaffold), `048231e` (this plan, as `docs/superpowers/plans/2026-07-03-compose2pod-extraction.md`), `287bb86` (`#1`, squash-merged to `main`). This bundle is the planning-convention home for that history; see [`design.md`](./design.md) for the spec it implements.
