@@ -1,0 +1,82 @@
+[project]
+name = "compose2pod"
+description = "Convert a Docker Compose file into a script that runs its services as a single Podman pod"
+authors = [{ name = "Artur Shiriev", email = "me@shiriev.ru" }]
+requires-python = ">=3.10,<4"
+license = "MIT"
+readme = "README.md"
+keywords = ["podman", "docker-compose", "compose", "pod", "ci", "testing", "containers"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Testing",
+]
+version = "0"
+
+[project.optional-dependencies]
+yaml = ["PyYAML>=6"]
+
+[project.scripts]
+compose2pod = "compose2pod.cli:main"
+
+[project.urls]
+Repository = "https://github.com/modern-python/compose2pod"
+Issues = "https://github.com/modern-python/compose2pod/issues"
+Changelog = "https://github.com/modern-python/compose2pod/releases"
+
+[build-system]
+requires = ["uv_build>=0.11,<1.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "compose2pod"
+module-root = ""
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+]
+lint = [
+    "ruff",
+    "ty",
+    "eof-fixer",
+    "typing-extensions",
+    "types-PyYAML",
+]
+
+[tool.ruff]
+fix = true
+unsafe-fixes = true
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D1",     # allow missing docstrings
+    "S101",   # allow asserts
+    "TCH",    # ignore flake8-type-checking
+    "FBT",    # allow boolean args
+    "D203",   # "one-blank-line-before-class" conflicting with D211
+    "D213",   # "multi-line-summary-second-line" conflicting with D212
+    "COM812", # flake8-commas "Trailing comma missing"
+    "ISC001", # flake8-implicit-str-concat
+]
+isort.lines-after-imports = 2
+isort.no-lines-before = ["standard-library", "local-folder"]
+
+[tool.pytest.ini_options]
+addopts = ""
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage]
+report.exclude_also = ["if typing.TYPE_CHECKING:"]
