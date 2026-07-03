@@ -123,6 +123,11 @@ class TestMain:
         assert rc == 0
         assert "podman pod create" in capsys.readouterr().out
 
+    def test_missing_file_returns_2(self, capsys: pytest.CaptureFixture[str]) -> None:
+        rc = main(["/no/such/compose.json", "--target", "app", "--image", "i"])
+        assert rc == EXIT_USAGE_ERROR
+        assert "compose2pod: error:" in capsys.readouterr().err
+
 
 class TestModuleEntrypoint:
     def test_python_m_runs(self, chats_compose: dict) -> None:

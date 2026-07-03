@@ -74,7 +74,14 @@ def main(argv: list[str] | None = None) -> int:
     if not POD_NAME_PATTERN.match(args.pod_name):
         sys.stderr.write(f"compose2pod: error: invalid pod name {args.pod_name!r}\n")
         return 2
-    text = Path(args.file).read_text() if args.file else sys.stdin.read()
+    if args.file:
+        try:
+            text = Path(args.file).read_text()
+        except OSError as error:
+            sys.stderr.write(f"compose2pod: error: could not read file: {error}\n")
+            return 2
+    else:
+        text = sys.stdin.read()
     try:
         compose = _read_compose(text, args.format)
     except (json.JSONDecodeError, UnsupportedComposeError) as error:
