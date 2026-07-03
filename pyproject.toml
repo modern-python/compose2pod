@@ -80,3 +80,7 @@ pythonpath = ["."]
 
 [tool.coverage]
 report.exclude_also = ["if typing.TYPE_CHECKING:"]
+# The __main__.py shim is a pure `sys.exit(main())` entrypoint exercised only via
+# subprocess (tests/test_cli.py::test_python_m_runs), which the parent coverage process
+# can't measure; omit it rather than enable subprocess/branch coverage machinery.
+run.omit = ["compose2pod/__main__.py"]
