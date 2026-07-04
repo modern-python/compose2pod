@@ -95,3 +95,15 @@ class TestValidate:
             UnsupportedComposeError, match=r"service 'app': depends_on 'db' has unsupported condition 'service_ready'"
         ):
             validate(compose)
+
+    def test_top_level_extension_key_is_accepted(self) -> None:
+        compose = {"x-application-defaults": {"build": {}}, "services": {"app": {"image": "x"}}}
+        assert validate(compose) == []
+
+    def test_service_extension_key_is_accepted_silently(self) -> None:
+        warnings = validate({"services": {"app": {"image": "x", "x-labels": {"team": "a"}}}})
+        assert warnings == []
+
+    def test_healthcheck_extension_key_is_accepted(self) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "x-note": "n"}}}}
+        assert validate(compose) == []
