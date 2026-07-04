@@ -1,7 +1,8 @@
 name: Release
 
 # Tag-driven: pushing a semver tag publishes to PyPI (Trusted Publishing) and
-# creates the matching GitHub Release with auto-generated notes.
+# creates the matching GitHub Release from the curated notes at
+# planning/releases/<tag>.md.
 on:
   push:
     tags:
@@ -18,6 +19,16 @@ jobs:
     environment: pypi
     steps:
       - uses: actions/checkout@v6
+      - name: Verify release notes exist
+        # Fail before publishing to PyPI if the curated notes are missing, so we
+        # never ship a package without its GitHub Release notes.
+        run: |
+          set -euo pipefail
+          notes="planning/releases/${GITHUB_REF_NAME}.md"
+          if [[ ! -f "$notes" ]]; then
+            echo "::error::release notes not found at ${notes} -- add them before tagging ${GITHUB_REF_NAME}"
+            exit 1
+          fi
       - uses: extractions/setup-just@v4
       - uses: astral-sh/setup-uv@v8.2.0
       - run: just publish
@@ -33,6 +44,6 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          generate_release_notes: true
+          body_path: planning/releases/${{ github.ref_name }}.md
           prerelease: ${{ steps.meta.outputs.prerelease }}
           draft: false
