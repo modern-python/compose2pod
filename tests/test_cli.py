@@ -128,6 +128,17 @@ class TestMain:
         assert rc == EXIT_USAGE_ERROR
         assert "compose2pod: error:" in capsys.readouterr().err
 
+    def test_yaml_anchor_extension_fields_convert(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        yaml_text = (
+            "x-defaults: &defaults\n  image: base:latest\nservices:\n  app:\n    <<: *defaults\n    x-meta: keep\n"
+        )
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "podman pod create" in out.out
+
 
 class TestModuleEntrypoint:
     def test_python_m_runs(self, chats_compose: dict) -> None:

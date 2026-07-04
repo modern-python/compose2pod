@@ -24,19 +24,18 @@ SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks"}
 DEPENDS_ON_CONDITIONS = {"service_started", "service_healthy", "service_completed_successfully"}
 
 
-def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
-    """Validate one service; returns warnings, raises UnsupportedComposeError."""
-    warnings: list[str] = []
-    for key in sorted(svc):
-        if key in IGNORED_SERVICE_KEYS:
-            warnings.append(f"service {name!r}: ignoring '{key}'")
-        elif key not in SUPPORTED_SERVICE_KEYS:
-            msg = f"service {name!r}: unsupported key '{key}'"
-            raise UnsupportedComposeError(msg)
+def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
+    """Check healthcheck keys against the supported subset, skipping 'x-' extension keys."""
     for key in sorted(svc.get("healthcheck") or {}):
+        if key.startswith("x-"):
+            continue
         if key not in SUPPORTED_HEALTHCHECK_KEYS:
             msg = f"service {name!r}: unsupported healthcheck key '{key}'"
             raise UnsupportedComposeError(msg)
+
+
+def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
+    """Check volumes use short bind-mount syntax only."""
     for volume in svc.get("volumes") or []:
         if not isinstance(volume, str):
             msg = f"service {name!r}: only short volume syntax is supported"
@@ -45,6 +44,21 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
         if not source.startswith((".", "/")):
             msg = f"service {name!r}: named volume '{source}' is not supported (bind mounts only)"
             raise UnsupportedComposeError(msg)
+
+
+def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
+    """Validate one service; returns warnings, raises UnsupportedComposeError."""
+    warnings: list[str] = []
+    for key in sorted(svc):
+        if key.startswith("x-"):
+            continue
+        if key in IGNORED_SERVICE_KEYS:
+            warnings.append(f"service {name!r}: ignoring '{key}'")
+        elif key not in SUPPORTED_SERVICE_KEYS:
+            msg = f"service {name!r}: unsupported key '{key}'"
+            raise UnsupportedComposeError(msg)
+    _validate_service_healthcheck(name, svc)
+    _validate_service_volumes(name, svc)
     return warnings
 
 
@@ -70,7 +84,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
         msg = f"compose document must be a mapping, got {type(compose).__name__}"
         raise UnsupportedComposeError(msg)
     warnings: list[str] = []
-    unknown_top = set(compose) - SUPPORTED_TOP_LEVEL_KEYS
+    unknown_top = {k for k in compose if k not in SUPPORTED_TOP_LEVEL_KEYS and not k.startswith("x-")}
     if unknown_top:
         msg = f"unsupported top-level keys: {sorted(unknown_top)}"
         raise UnsupportedComposeError(msg)
