@@ -29,7 +29,13 @@ sh ./run.sh
 
 ## Supported compose subset
 
-compose2pod supports an honest subset and errors clearly on anything outside it. See the design spec for the full matrix: `image`/`build`, `command`, `environment`/`env_file`, short-form bind `volumes`, `healthcheck` (CMD/CMD-SHELL), `depends_on` (all conditions), and network `aliases`.
+compose2pod supports an honest subset and errors clearly on anything outside
+it: `image`/`build`, `command`, `environment`/`env_file`, short-form bind
+`volumes`, `healthcheck` (CMD/CMD-SHELL), `depends_on` (all conditions), and
+network `aliases`. Compose extension fields (any `x-`-prefixed key) and YAML
+anchors are accepted as-is, so a top-level `x-*` anchor block for shared
+config just works. See `architecture/supported-subset.md` for the full
+accept/ignore/reject matrix.
 
 ## Status
 
