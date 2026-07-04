@@ -1,14 +1,16 @@
 name: Release
 
 # Tag-driven: pushing a semver tag publishes to PyPI (Trusted Publishing) and
-# creates the matching GitHub Release from the curated notes at
-# planning/releases/<tag>.md.
+# creates the matching GitHub Release. The tag is the sole entry point; by
+# convention a tag is only cut off a green main, so there is no in-workflow CI
+# gate.
 on:
   push:
     tags:
-      - '[0-9]+.[0-9]+.[0-9]+'
-      - '[0-9]+.[0-9]+.[0-9]+[a-z]+[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+'               # stable:      0.1.1
+      - '[0-9]+.[0-9]+.[0-9]+[a-z]+[0-9]+'   # pre-release: 0.2.0rc1, 1.0.0a2
 
+# contents: write -> create the GitHub Release; id-token: write -> OIDC for PyPI Trusted Publishing.
 permissions:
   contents: write
   id-token: write
@@ -16,34 +18,62 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: pypi  # scopes the PyPI Trusted Publisher; hook for approval rules
     steps:
       - uses: actions/checkout@v6
-      - name: Verify release notes exist
-        # Fail before publishing to PyPI if the curated notes are missing, so we
-        # never ship a package without its GitHub Release notes.
-        run: |
-          set -euo pipefail
-          notes="planning/releases/${GITHUB_REF_NAME}.md"
-          if [[ ! -f "$notes" ]]; then
-            echo "::error::release notes not found at ${notes} -- add them before tagging ${GITHUB_REF_NAME}"
-            exit 1
-          fi
       - uses: extractions/setup-just@v4
       - uses: astral-sh/setup-uv@v8.2.0
+
+      # Curated release notes are MANDATORY for a stable tag. This runs BEFORE
+      # `just publish` (which is irreversible) so a missing notes file aborts
+      # the release before anything reaches PyPI -- rather than silently shipping
+      # with GitHub's auto-generated notes. Pre-release tags (a letter in the
+      # name, e.g. 0.2.0rc1) are exempt and keep the auto-generated fallback.
+      - name: Require curated release notes (stable tags)
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" =~ [a-z] ]]; then
+            echo "Pre-release ${GITHUB_REF_NAME}: curated notes not required."
+            exit 0
+          fi
+          notes="planning/releases/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$notes" ]; then
+            echo "::error::Stable tag ${GITHUB_REF_NAME} has no curated release notes at ${notes}. Write the notes, commit to main, and re-tag." >&2
+            exit 1
+          fi
+          echo "Found curated release notes: ${notes}"
+
+      # PyPI is irreversible, so it runs FIRST: if it fails the job stops and no
+      # GitHub Release is created advertising a version that never reached PyPI.
+      # `just publish` derives the version from $GITHUB_REF_NAME (the tag name).
       - run: just publish
-      - name: Resolve prerelease flag
+
+      # Description source: planning/releases/<tag>.md if present (verbatim, no
+      # auto-changelog appended); otherwise GitHub's generated notes. The guard
+      # above makes the file mandatory for stable tags, so the generated-notes
+      # fallback only ever fires for pre-releases. A tag with a letter (0.2.0rc1)
+      # is a pre-release -> flagged so GitHub won't mark it "Latest".
+      - name: Resolve release metadata
         id: meta
         run: |
           set -euo pipefail
+          notes="planning/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            echo "body_path=$notes" >> "$GITHUB_OUTPUT"
+            echo "generate_notes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "generate_notes=true" >> "$GITHUB_OUTPUT"
+          fi
           if [[ "$GITHUB_REF_NAME" =~ [a-z] ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          body_path: planning/releases/${{ github.ref_name }}.md
+          body_path: ${{ steps.meta.outputs.body_path }}
+          generate_release_notes: ${{ steps.meta.outputs.generate_notes }}
           prerelease: ${{ steps.meta.outputs.prerelease }}
           draft: false
