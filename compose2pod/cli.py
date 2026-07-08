@@ -3,6 +3,7 @@
 import argparse
 import contextlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 
 from compose2pod.emit import EmitOptions, emit_script
 from compose2pod.exceptions import UnsupportedComposeError
+from compose2pod.interpolate import interpolate
 from compose2pod.parsing import validate
 
 
@@ -88,7 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"compose2pod: error: could not parse compose input: {error}\n")
         return 2
     try:
-        warnings = validate(compose)
+        compose, interpolation_warnings = interpolate(compose, os.environ)
+        warnings = [*interpolation_warnings, *validate(compose)]
         script = emit_script(
             compose=compose,
             options=EmitOptions(

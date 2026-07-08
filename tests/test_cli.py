@@ -21,7 +21,13 @@ def run_main(compose_text: str, argv: list[str], monkeypatch: pytest.MonkeyPatch
 
 class TestPublicApi:
     def test_exports(self) -> None:
-        assert set(compose2pod.__all__) == {"EmitOptions", "UnsupportedComposeError", "emit_script", "validate"}
+        assert set(compose2pod.__all__) == {
+            "EmitOptions",
+            "UnsupportedComposeError",
+            "emit_script",
+            "interpolate",
+            "validate",
+        }
         assert compose2pod.validate({"services": {"a": {"image": "x"}}}) == []
 
 
@@ -127,6 +133,38 @@ class TestMain:
         rc = main(["/no/such/compose.json", "--target", "app", "--image", "i"])
         assert rc == EXIT_USAGE_ERROR
         assert "compose2pod: error:" in capsys.readouterr().err
+
+    def test_environment_variable_reference_is_resolved(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLM_MODEL", "gpt-4")
+        yaml_text = "services:\n  app:\n    image: x\n    environment:\n      MODEL: ${LLM_MODEL}\n"
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "MODEL=gpt-4" in out.out
+        assert "LLM_MODEL" not in out.out
+
+    def test_unset_environment_variable_reference_warns(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("UNSET_VAR", raising=False)
+        yaml_text = "services:\n  app:\n    image: x\n    environment:\n      MODEL: ${UNSET_VAR}\n"
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "MODEL=" in out.out
+        assert "UNSET_VAR" in out.err
+        assert "not set" in out.err
+
+    def test_required_environment_variable_missing_returns_2(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("REQUIRED_VAR", raising=False)
+        yaml_text = "services:\n  app:\n    image: x\n    environment:\n      MODEL: ${REQUIRED_VAR:?must be set}\n"
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "must be set" in capsys.readouterr().err
 
     def test_yaml_anchor_extension_fields_convert(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
