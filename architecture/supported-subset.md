@@ -21,10 +21,16 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 
 - **Supported:** `image`, `build`, `command`, `environment`, `env_file`,
   `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
-  `container_name`. compose2pod never builds: a `build` section is accepted
-  but its contents (context, dockerfile, args) are not read — `image_for`
-  (`compose2pod/emit.py`) runs the CI image supplied via `--image` for any
-  service that has one.
+  `container_name`, `tmpfs`. compose2pod never builds: a `build` section is
+  accepted but its contents (context, dockerfile, args) are not read —
+  `image_for` (`compose2pod/emit.py`) runs the CI image supplied via `--image`
+  for any service that has one.
+- **`tmpfs`:** a string or list of strings, each `<path>` or
+  `<path>:<options>` (e.g. `/tmp:mode=1777`), passed through verbatim as
+  `podman run --tmpfs <value>` — Compose's short syntax maps directly onto
+  podman's own `--tmpfs CONTAINER-DIR[:OPTIONS]` flag, so no translation is
+  needed. No format validation; a malformed option string surfaces as a
+  podman error at run time.
 - **`hostname` and `container_name`:** both are made resolvable to
   `127.0.0.1` like a network alias (added to the shared `--add-host` set), so
   other services can reach the service by either name. The pod shares the UTS

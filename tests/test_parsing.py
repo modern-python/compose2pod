@@ -127,3 +127,7 @@ class TestValidate:
     def test_service_container_name_is_accepted(self) -> None:
         compose = {"services": {"application": {"image": "x", "container_name": "calutron-ronline"}}}
         assert validate(compose) == []
+
+    def test_service_tmpfs_is_accepted(self) -> None:
+        compose = {"services": {"app": {"image": "x", "tmpfs": ["/tmp:mode=1777"]}}}  # noqa: S108
+        assert validate(compose) == []

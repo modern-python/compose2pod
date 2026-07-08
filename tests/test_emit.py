@@ -45,6 +45,17 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", [], "/builds/x")
         assert flags[4:8] == ["--env-file", "/builds/x/a.env", "--env-file", "/builds/x/b.env"]
 
+    def test_tmpfs_string_form(self) -> None:
+        # S108 flags "/tmp" as an insecure hardcoded temp path; this is a
+        # pass-through string being tested, not a file write.
+        flags = run_flags("app", {"image": "x", "tmpfs": "/tmp:mode=1777"}, "p", [], "/builds/x")  # noqa: S108
+        assert flags[4:6] == ["--tmpfs", "/tmp:mode=1777"]  # noqa: S108
+
+    def test_tmpfs_list_form(self) -> None:
+        svc = {"image": "x", "tmpfs": ["/tmp:mode=1777", "/run"]}  # noqa: S108
+        flags = run_flags("app", svc, "p", [], "/builds/x")
+        assert flags[4:8] == ["--tmpfs", "/tmp:mode=1777", "--tmpfs", "/run"]  # noqa: S108
+
     def test_absolute_volume_source_is_kept_as_is(self) -> None:
         flags = run_flags("app", {"image": "x", "volumes": ["/data/app:/srv/www/"]}, "p", [], "/builds/x")
         assert flags[4:6] == ["-v", "/data/app:/srv/www/"]
