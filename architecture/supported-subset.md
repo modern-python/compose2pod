@@ -78,6 +78,21 @@ common way to shadow a subdirectory of a bind mount). No host-path translation
 is applied, since the entry names a container path, not a host source. A
 colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
 
+## Variable interpolation
+
+`interpolate()` (`compose2pod/interpolate.py`) resolves Compose Spec
+`${VAR}` references against the process environment (`os.environ` in the
+CLI) before `validate()` sees the document, in every string leaf of the
+compose document — dict keys are left untouched. Supported forms:
+`$VAR`, `${VAR}`, `${VAR:-default}`, `${VAR-default}`, `${VAR:?msg}`,
+`${VAR?msg}`, `${VAR:+alt}`, `${VAR+alt}`, and `$$` for a literal `$`. An
+unset `$VAR`/`${VAR}` with no default resolves to an empty string and
+emits a warning rather than failing; `${VAR:?msg}`/`${VAR?msg}` raises
+`UnsupportedComposeError(msg)` instead. There is no `.env` file support —
+only the environment the caller already has is consulted; export the
+values first (`set -a; . .env; set +a`) if a project relies on a `.env`
+file.
+
 ## depends_on
 
 All three conditions are honored: `service_started`, `service_healthy`,

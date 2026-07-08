@@ -46,8 +46,9 @@ it: `image`/`build`, `command`, `environment`/`env_file`, short-form bind
 `volumes`, `healthcheck` (CMD/CMD-SHELL), `depends_on` (all conditions), and
 network `aliases`. Compose extension fields (any `x-`-prefixed key) and YAML
 anchors are accepted as-is, so a top-level `x-*` anchor block for shared
-config just works. See `architecture/supported-subset.md` for the full
-accept/ignore/reject matrix.
+config just works. `${VAR}`-style variable interpolation is resolved against
+the process environment (no `.env` file support). See
+`architecture/supported-subset.md` for the full accept/ignore/reject matrix.
 
 ## Status
 

@@ -2,6 +2,7 @@
 
 from compose2pod.emit import EmitOptions, emit_script
 from compose2pod.exceptions import UnsupportedComposeError
+from compose2pod.interpolate import interpolate
 from compose2pod.parsing import validate
 
 
@@ -9,5 +10,6 @@ __all__ = [
     "EmitOptions",
     "UnsupportedComposeError",
     "emit_script",
+    "interpolate",
     "validate",
 ]
