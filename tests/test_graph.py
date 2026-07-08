@@ -33,6 +33,10 @@ class TestHostnames:
         services = {"keydb": {"image": "x", "hostname": "keydb-test-server-0"}}
         assert hostnames(services) == ["keydb", "keydb-test-server-0"]
 
+    def test_empty_hostname_is_skipped(self) -> None:
+        services = {"a": {"image": "x", "hostname": ""}}
+        assert hostnames(services) == ["a"]
+
 
 class TestStartupOrder:
     def test_chats_order(self, chats_compose: dict) -> None:

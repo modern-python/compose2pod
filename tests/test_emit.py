@@ -5,6 +5,7 @@ from compose2pod.emit import (
     image_for,
     run_flags,
 )
+from compose2pod.parsing import validate
 
 
 _EXPECTED_RUN_LINES: int = 4
@@ -156,6 +157,7 @@ class TestEmitScript:
             artifacts=[],
             allow_exit_codes=[],
         )
+        assert validate(compose) == []
         script = emit_script(compose=compose, options=options)
         assert "--add-host keydb-test-server-0:127.0.0.1" in script
 
