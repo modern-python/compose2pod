@@ -35,6 +35,9 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="short volume syntax"):
             validate(compose)
 
+    def test_anonymous_volume_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "volumes": ["/var/cache/models"]}}}) == []
+
     def test_no_services_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="no services"):
             validate({"services": {}})

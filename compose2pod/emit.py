@@ -57,6 +57,10 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     for env_file in env_files:
         flags += ["--env-file", str(Path(project_dir, env_file))]
     for volume in svc.get("volumes") or []:
+        if ":" not in volume:
+            # Anonymous volume: a bare container path, no host source to translate.
+            flags += ["-v", volume]
+            continue
         source, destination = volume.split(":", 1)
         if not source.startswith("/"):
             source = str(Path(project_dir, source))

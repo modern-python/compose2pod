@@ -47,6 +47,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 Short bind-mount syntax only (`source:target`). The source must be a host path
 (starts with `.` or `/`); named volumes and the long mapping form raise.
 
+A single absolute container path with no `source:target` (e.g.
+`- /var/cache/models`) is accepted as an **anonymous volume** and emitted
+verbatim as `-v <path>` — podman creates an anonymous volume at that path (the
+common way to shadow a subdirectory of a bind mount). No host-path translation
+is applied, since the entry names a container path, not a host source.
+
 ## depends_on
 
 All three conditions are honored: `service_started`, `service_healthy`,
