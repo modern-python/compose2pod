@@ -1,5 +1,6 @@
 from compose2pod.emit import (
     EmitOptions,
+    _Expand,
     command_tokens,
     emit_script,
     image_for,
@@ -17,8 +18,8 @@ class TestRunFlags:
         assert flags[:4] == ["--pod", "test-pod", "--name", "test-pod-db"]
         assert flags[4:6] == ["--add-host", "db:127.0.0.1"]
         assert flags[6:8] == ["--add-host", "keydb:127.0.0.1"]
-        assert flags[8:10] == ["-e", "POSTGRES_PASSWORD=password"]
-        assert flags[10:12] == ["--health-cmd", "pg_isready -U database -d database"]
+        assert flags[8:10] == ["-e", _Expand("POSTGRES_PASSWORD=password")]
+        assert flags[10:12] == ["--health-cmd", _Expand("pg_isready -U database -d database")]
         assert flags[12:14] == ["--health-timeout", "5s"]
         assert flags[14:16] == ["--health-retries", "15"]  # fix #2
 
@@ -31,14 +32,13 @@ class TestRunFlags:
     def test_env_map_form(self) -> None:
         svc = {"image": "x", "environment": {"A": "1", "B": "two words"}}
         flags = run_flags("app", svc, "p", [], "/builds/x")
-        assert flags[4:6] == ["-e", "A=1"]
-        assert flags[6:8] == ["-e", "B=two words"]
+        assert flags[4:8] == ["-e", _Expand("A=1"), "-e", _Expand("B=two words")]
 
     def test_env_file_and_volume_resolved_against_project_dir(self) -> None:
         svc = {"image": "x", "env_file": "tests.env", "volumes": [".:/srv/www/"]}
         flags = run_flags("app", svc, "p", [], "/builds/chats")
         assert flags[4:6] == ["--env-file", "/builds/chats/tests.env"]
-        assert flags[6:8] == ["-v", "/builds/chats:/srv/www/"]
+        assert flags[6:8] == ["-v", _Expand("/builds/chats:/srv/www/")]
 
     def test_env_file_list_form(self) -> None:
         svc = {"image": "x", "env_file": ["a.env", "b.env"]}
@@ -49,29 +49,29 @@ class TestRunFlags:
         # S108 flags "/tmp" as an insecure hardcoded temp path; this is a
         # pass-through string being tested, not a file write.
         flags = run_flags("app", {"image": "x", "tmpfs": "/tmp:mode=1777"}, "p", [], "/builds/x")  # noqa: S108
-        assert flags[4:6] == ["--tmpfs", "/tmp:mode=1777"]  # noqa: S108
+        assert flags[4:6] == ["--tmpfs", _Expand("/tmp:mode=1777")]  # noqa: S108
 
     def test_tmpfs_list_form(self) -> None:
         svc = {"image": "x", "tmpfs": ["/tmp:mode=1777", "/run"]}  # noqa: S108
         flags = run_flags("app", svc, "p", [], "/builds/x")
-        assert flags[4:8] == ["--tmpfs", "/tmp:mode=1777", "--tmpfs", "/run"]  # noqa: S108
+        assert flags[4:8] == ["--tmpfs", _Expand("/tmp:mode=1777"), "--tmpfs", _Expand("/run")]  # noqa: S108
 
     def test_absolute_volume_source_is_kept_as_is(self) -> None:
         flags = run_flags("app", {"image": "x", "volumes": ["/data/app:/srv/www/"]}, "p", [], "/builds/x")
-        assert flags[4:6] == ["-v", "/data/app:/srv/www/"]
+        assert flags[4:6] == ["-v", _Expand("/data/app:/srv/www/")]
 
     def test_anonymous_volume_emitted_as_single_path(self) -> None:
         flags = run_flags("app", {"image": "x", "volumes": ["/var/cache/models"]}, "p", [], "/builds/x")
-        assert flags[4:6] == ["-v", "/var/cache/models"]
+        assert flags[4:6] == ["-v", _Expand("/var/cache/models")]
 
     def test_named_volume_emitted_without_project_dir_translation(self) -> None:
         svc = {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}
         flags = run_flags("db", svc, "p", [], "/builds/x")
-        assert flags[4:6] == ["-v", "pgdata:/var/lib/postgresql/data"]
+        assert flags[4:6] == ["-v", _Expand("pgdata:/var/lib/postgresql/data")]
 
     def test_healthcheck_without_timeout_omits_health_timeout_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "healthcheck": {"test": "true"}}, "p", [], "/builds/x")
-        assert flags[4:6] == ["--health-cmd", "true"]
+        assert flags[4:6] == ["--health-cmd", _Expand("true")]
         assert "--health-timeout" not in flags
 
 
@@ -80,13 +80,17 @@ class TestImageAndCommand:
         assert image_for(chats_compose["services"]["application"], "reg/ci:abc") == "reg/ci:abc"
 
     def test_plain_service_keeps_image(self, chats_compose: dict) -> None:
-        assert image_for(chats_compose["services"]["db"], "reg/ci:abc") == "postgres:13.5-alpine"
+        assert image_for(chats_compose["services"]["db"], "reg/ci:abc") == _Expand("postgres:13.5-alpine")
 
     def test_command_list_passes_through(self, chats_compose: dict) -> None:
-        assert command_tokens(chats_compose["services"]["migrations"]) == ["alembic", "upgrade", "head"]
+        assert command_tokens(chats_compose["services"]["migrations"]) == [
+            _Expand("alembic"),
+            _Expand("upgrade"),
+            _Expand("head"),
+        ]
 
     def test_command_string_becomes_shell(self) -> None:
-        assert command_tokens({"command": "echo hi"}) == ["/bin/sh", "-c", "echo hi"]
+        assert command_tokens({"command": "echo hi"}) == ["/bin/sh", "-c", _Expand("echo hi")]
 
     def test_missing_command_is_empty(self) -> None:
         assert command_tokens({"image": "x"}) == []
@@ -129,7 +133,7 @@ class TestEmitScript:
                 assert line.startswith("podman run -d ")
             if "--name test-pod-migrations" in line:
                 assert line.startswith("podman run --rm ")
-                assert line.rstrip().endswith("alembic upgrade head")
+                assert line.rstrip().endswith('"alembic" "upgrade" "head"')
 
     def test_target_command_is_overridden_and_rc_gated(self, chats_compose: dict) -> None:
         script = self.make_script(chats_compose)
@@ -216,7 +220,7 @@ class TestEmitScript:
         )
         assert validate(compose) == ["ignoring top-level 'volumes' (podman creates named volumes on first reference)"]
         script = emit_script(compose=compose, options=options)
-        assert "-v calutrondb:/var/lib/postgresql/data" in script
+        assert '-v "calutrondb:/var/lib/postgresql/data"' in script
 
     def test_target_without_command_uses_service_command(self, chats_compose: dict) -> None:
         options = EmitOptions(
@@ -230,4 +234,4 @@ class TestEmitScript:
         )
         script = emit_script(compose=chats_compose, options=options)
         target_line = next(line for line in script.splitlines() if "--name test-pod-application" in line)
-        assert target_line.rstrip().endswith("python -m chats.api || rc=$?")
+        assert target_line.rstrip().endswith('"python" "-m" "chats.api" || rc=$?')
