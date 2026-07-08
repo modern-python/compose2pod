@@ -53,6 +53,11 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "volumes": ["/var/cache/models"]}, "p", [], "/builds/x")
         assert flags[4:6] == ["-v", "/var/cache/models"]
 
+    def test_named_volume_emitted_without_project_dir_translation(self) -> None:
+        svc = {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}
+        flags = run_flags("db", svc, "p", [], "/builds/x")
+        assert flags[4:6] == ["-v", "pgdata:/var/lib/postgresql/data"]
+
     def test_healthcheck_without_timeout_omits_health_timeout_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "healthcheck": {"test": "true"}}, "p", [], "/builds/x")
         assert flags[4:6] == ["--health-cmd", "true"]
@@ -183,6 +188,24 @@ class TestEmitScript:
         assert validate(compose) == []
         script = emit_script(compose=compose, options=options)
         assert "--add-host calutron-ronline:127.0.0.1" in script
+
+    def test_named_volume_round_trips_through_validate_and_emit(self) -> None:
+        compose = {
+            "services": {"db": {"image": "postgres:16", "volumes": ["calutrondb:/var/lib/postgresql/data"]}},
+            "volumes": {"calutrondb": {"driver": "local"}},
+        }
+        options = EmitOptions(
+            target="db",
+            ci_image="ci",
+            command="",
+            pod="testpod",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        assert validate(compose) == ["ignoring top-level 'volumes' (podman creates named volumes on first reference)"]
+        script = emit_script(compose=compose, options=options)
+        assert "-v calutrondb:/var/lib/postgresql/data" in script
 
     def test_target_without_command_uses_service_command(self, chats_compose: dict) -> None:
         options = EmitOptions(

@@ -22,7 +22,7 @@ SUPPORTED_SERVICE_KEYS = {
 }
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
-SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks"}
+SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks", "volumes"}
 DEPENDS_ON_CONDITIONS = {"service_started", "service_healthy", "service_completed_successfully"}
 
 
@@ -48,10 +48,9 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
                 msg = f"service {name!r}: anonymous volume '{volume}' must be an absolute path"
                 raise UnsupportedComposeError(msg)
             continue
-        source = volume.split(":", 1)[0]
-        if not source.startswith((".", "/")):
-            msg = f"service {name!r}: named volume '{source}' is not supported (bind mounts only)"
-            raise UnsupportedComposeError(msg)
+        # Colon-containing volume: bind mount (host path source) or named volume
+        # (bare identifier source) — both are accepted; podman creates a named
+        # volume implicitly on first reference.
 
 
 def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
@@ -98,6 +97,8 @@ def validate(compose: dict[str, Any]) -> list[str]:
         raise UnsupportedComposeError(msg)
     if "networks" in compose:
         warnings.append("ignoring top-level 'networks' (all services share the pod namespace)")
+    if "volumes" in compose:
+        warnings.append("ignoring top-level 'volumes' (podman creates named volumes on first reference)")
     services = compose.get("services") or {}
     if not services:
         msg = "no services defined"

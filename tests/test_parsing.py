@@ -26,9 +26,9 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="start_interval"):
             validate(compose)
 
-    def test_named_volume_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="pgdata"):
-            validate({"services": {"db": {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}}})
+    def test_named_volume_is_accepted(self) -> None:
+        compose = {"services": {"db": {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}}}
+        assert validate(compose) == []
 
     def test_long_volume_syntax_raises(self) -> None:
         compose = {"services": {"app": {"image": "x", "volumes": [{"type": "bind", "source": ".", "target": "/s"}]}}}
@@ -53,6 +53,11 @@ class TestValidate:
     def test_top_level_networks_is_ignored_with_warning(self) -> None:
         warnings = validate({"services": {"app": {"image": "x"}}, "networks": {"default": None}})
         assert any("networks" in w for w in warnings)
+
+    def test_top_level_volumes_is_ignored_with_warning(self) -> None:
+        compose = {"services": {"app": {"image": "x"}}, "volumes": {"pgdata": {"driver": "local"}}}
+        warnings = validate(compose)
+        assert any("volumes" in w for w in warnings)
 
     def test_service_healthy_dependency_without_healthcheck_raises(self) -> None:
         compose = {

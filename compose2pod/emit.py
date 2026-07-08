@@ -62,8 +62,11 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
             flags += ["-v", volume]
             continue
         source, destination = volume.split(":", 1)
-        if not source.startswith("/"):
+        if source.startswith("."):
+            # Relative bind mount: resolve against project_dir.
             source = str(Path(project_dir, source))
+        # Absolute bind mount (starts with "/") and named volume (bare
+        # identifier) are both kept as-is — neither is a path to translate.
         flags += ["-v", f"{source}:{destination}"]
     healthcheck = svc.get("healthcheck") or {}
     _add_health_flags(flags, healthcheck)
