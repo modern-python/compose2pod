@@ -68,6 +68,11 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
         # Absolute bind mount (starts with "/") and named volume (bare
         # identifier) are both kept as-is — neither is a path to translate.
         flags += ["-v", f"{source}:{destination}"]
+    tmpfs = svc.get("tmpfs") or []
+    if isinstance(tmpfs, str):
+        tmpfs = [tmpfs]
+    for mount in tmpfs:
+        flags += ["--tmpfs", mount]
     healthcheck = svc.get("healthcheck") or {}
     _add_health_flags(flags, healthcheck)
     return flags
