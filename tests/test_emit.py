@@ -49,6 +49,10 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "volumes": ["/data/app:/srv/www/"]}, "p", [], "/builds/x")
         assert flags[4:6] == ["-v", "/data/app:/srv/www/"]
 
+    def test_anonymous_volume_emitted_as_single_path(self) -> None:
+        flags = run_flags("app", {"image": "x", "volumes": ["/var/cache/models"]}, "p", [], "/builds/x")
+        assert flags[4:6] == ["-v", "/var/cache/models"]
+
     def test_healthcheck_without_timeout_omits_health_timeout_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "healthcheck": {"test": "true"}}, "p", [], "/builds/x")
         assert flags[4:6] == ["--health-cmd", "true"]

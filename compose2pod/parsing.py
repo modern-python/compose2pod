@@ -41,6 +41,12 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         if not isinstance(volume, str):
             msg = f"service {name!r}: only short volume syntax is supported"
             raise UnsupportedComposeError(msg)
+        if ":" not in volume:
+            # Anonymous volume: must be an absolute container path.
+            if not volume.startswith("/"):
+                msg = f"service {name!r}: anonymous volume '{volume}' must be an absolute path"
+                raise UnsupportedComposeError(msg)
+            continue
         source = volume.split(":", 1)[0]
         if not source.startswith((".", "/")):
             msg = f"service {name!r}: named volume '{source}' is not supported (bind mounts only)"
