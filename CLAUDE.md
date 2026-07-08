@@ -16,7 +16,7 @@ This repo follows Artur Shiriev's canonical planning convention
 `planning/.convention-version`). Before starting any non-trivial change, read
 [`planning/README.md`](planning/README.md)'s **Quick path** section — it is
 the authoritative process for choosing a lane (Full / Lightweight / Tiny) and
-shaping the change bundle. Run `just check-planning` before pushing.
+shaping the change file. Run `just check-planning` before pushing.
 
 ## Architecture
 

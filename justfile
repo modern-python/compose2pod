@@ -24,7 +24,7 @@ lint-ci:
 index:
     uv run python planning/index.py
 
-# Validate planning bundles/decisions; prints "planning: OK" or violations.
+# Validate planning changes/decisions; prints "planning: OK" or violations.
 check-planning:
     uv run python planning/index.py --check
 

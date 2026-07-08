@@ -14,4 +14,4 @@ unsafe trap command.
 **Revisit trigger:** a library-API test is added that exercises `emit_script`
 with adversarial `pod` values (quotes, spaces, shell metacharacters), or a bug
 report surfaces from a caller using the library path without CLI validation.
-Needs its own change bundle.
+Needs its own change file.
