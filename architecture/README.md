@@ -9,7 +9,7 @@ Files here carry no frontmatter; they are living prose, dated by git.
 A change **promotes** its conclusions into the affected
 `architecture/<capability>.md` by hand, in the same PR as the code — the edit
 rides in the same diff and is reviewed with it, never applied as a separate
-post-merge step. The bundle in `planning/changes/` stays as the *why*;
+post-merge step. The change file in `planning/changes/` stays as the *why*;
 `architecture/` stays as the *what, now*.
 
 Capability files and `architecture/glossary.md` are authored lazily — created
