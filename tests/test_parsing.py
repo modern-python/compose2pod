@@ -107,3 +107,7 @@ class TestValidate:
     def test_healthcheck_extension_key_is_accepted(self) -> None:
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "x-note": "n"}}}}
         assert validate(compose) == []
+
+    def test_service_hostname_is_accepted(self) -> None:
+        compose = {"services": {"keydb": {"image": "x", "hostname": "keydb-test-server-0"}}}
+        assert validate(compose) == []

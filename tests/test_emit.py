@@ -5,6 +5,7 @@ from compose2pod.emit import (
     image_for,
     run_flags,
 )
+from compose2pod.parsing import validate
 
 
 _EXPECTED_RUN_LINES: int = 4
@@ -139,6 +140,26 @@ class TestEmitScript:
         script = self.make_script(chats_compose)
         assert "podman healthcheck run" in script
         assert "wait_healthy()" in script
+
+    def test_hostname_becomes_add_host_entry(self) -> None:
+        compose = {
+            "services": {
+                "application": {"image": "app", "depends_on": ["keydb"]},
+                "keydb": {"image": "keydb", "hostname": "keydb-test-server-0"},
+            }
+        }
+        options = EmitOptions(
+            target="application",
+            ci_image="ci",
+            command="",
+            pod="testpod",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        assert validate(compose) == []
+        script = emit_script(compose=compose, options=options)
+        assert "--add-host keydb-test-server-0:127.0.0.1" in script
 
     def test_target_without_command_uses_service_command(self, chats_compose: dict) -> None:
         options = EmitOptions(
