@@ -38,6 +38,10 @@ class TestValidate:
     def test_anonymous_volume_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "volumes": ["/var/cache/models"]}}}) == []
 
+    def test_relative_anonymous_volume_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="absolute"):
+            validate({"services": {"app": {"image": "x", "volumes": ["./cache"]}}})
+
     def test_no_services_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="no services"):
             validate({"services": {}})

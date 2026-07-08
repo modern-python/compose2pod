@@ -51,7 +51,8 @@ A single absolute container path with no `source:target` (e.g.
 `- /var/cache/models`) is accepted as an **anonymous volume** and emitted
 verbatim as `-v <path>` — podman creates an anonymous volume at that path (the
 common way to shadow a subdirectory of a bind mount). No host-path translation
-is applied, since the entry names a container path, not a host source.
+is applied, since the entry names a container path, not a host source. A
+colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
 
 ## depends_on
 
