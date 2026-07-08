@@ -14,9 +14,12 @@ def depends_on(svc: dict[str, Any]) -> dict[str, str]:
 
 
 def hostnames(services: dict[str, Any]) -> list[str]:
-    """All names other services may use to reach a service: names, then aliases."""
+    """All names other services may use to reach a service: names, hostnames, then aliases."""
     names = list(services)
     for svc in services.values():
+        hostname = svc.get("hostname")
+        if hostname:
+            names.append(hostname)
         networks = svc.get("networks")
         if isinstance(networks, dict):
             for network in networks.values():

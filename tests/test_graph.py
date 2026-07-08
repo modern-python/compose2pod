@@ -29,6 +29,10 @@ class TestHostnames:
         services = {"app": {"image": "x", "networks": {"default": None, "other": {"aliases": ["app-alias"]}}}}
         assert hostnames(services) == ["app", "app-alias"]
 
+    def test_collects_service_hostname(self) -> None:
+        services = {"keydb": {"image": "x", "hostname": "keydb-test-server-0"}}
+        assert hostnames(services) == ["keydb", "keydb-test-server-0"]
+
 
 class TestStartupOrder:
     def test_chats_order(self, chats_compose: dict) -> None:
