@@ -20,10 +20,15 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 ## Service keys
 
 - **Supported:** `image`, `build`, `command`, `environment`, `env_file`,
-  `volumes`, `healthcheck`, `depends_on`, `networks`. compose2pod never builds:
-  a `build` section is accepted but its contents (context, dockerfile, args) are
-  not read — `image_for` (`compose2pod/emit.py`) runs the CI image supplied via
-  `--image` for any service that has one.
+  `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`. compose2pod
+  never builds: a `build` section is accepted but its contents (context,
+  dockerfile, args) are not read — `image_for` (`compose2pod/emit.py`) runs
+  the CI image supplied via `--image` for any service that has one.
+- **`hostname`:** the service's hostname is made resolvable to `127.0.0.1`
+  like a network alias (added to the shared `--add-host` set), so other
+  services can reach it by that name. The pod shares the UTS namespace, so a
+  service's own hostname is the pod's; only name resolution is meaningful,
+  and no per-container `--hostname` is emitted.
 - **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty` — meaningless
   or irrelevant inside a single shared-namespace pod.
 - **Extension fields:** any `x-`-prefixed service key is accepted and ignored
