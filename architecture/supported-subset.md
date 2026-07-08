@@ -48,8 +48,22 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 
 ## Volumes
 
-Short bind-mount syntax only (`source:target`). The source must be a host path
-(starts with `.` or `/`); named volumes and the long mapping form raise.
+Short syntax only; the long mapping form raises. A `source:target` entry is
+one of two kinds, told apart by whether `source` starts with `.` or `/`:
+
+- **Bind mount** (`source` starts with `.` or `/`): the host path, resolved
+  against `--project-dir` when relative.
+- **Named volume** (`source` is a bare identifier, e.g. `pgdata:/var/lib/...`):
+  passed through verbatim as `-v <name>:<target>` — no format validation, no
+  path translation. Podman creates the named volume implicitly on first
+  reference (same as plain `podman run -v`), so no explicit `podman volume
+  create` step is needed. The volume persists on the host after the pod is
+  removed, identical to `docker compose down` without `-v`. The top-level
+  `volumes:` block (declaring drivers/options) is accepted but ignored — its
+  contents are never read. This assumes a default-driver, non-`external`
+  volume; a non-default `driver`/`driver_opts` or `external: true` (which
+  Compose treats as "must already exist") has no effect, since podman always
+  creates the volume implicitly with default options on first reference.
 
 A single absolute container path with no `source:target` (e.g.
 `- /var/cache/models`) is accepted as an **anonymous volume** and emitted
