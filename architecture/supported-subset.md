@@ -60,8 +60,10 @@ one of two kinds, told apart by whether `source` starts with `.` or `/`:
   create` step is needed. The volume persists on the host after the pod is
   removed, identical to `docker compose down` without `-v`. The top-level
   `volumes:` block (declaring drivers/options) is accepted but ignored — its
-  contents are never read, since implicit creation with default options is
-  sufficient.
+  contents are never read. This assumes a default-driver, non-`external`
+  volume; a non-default `driver`/`driver_opts` or `external: true` (which
+  Compose treats as "must already exist") has no effect, since podman always
+  creates the volume implicitly with default options on first reference.
 
 A single absolute container path with no `source:target` (e.g.
 `- /var/cache/models`) is accepted as an **anonymous volume** and emitted
