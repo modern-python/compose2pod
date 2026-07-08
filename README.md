@@ -1,5 +1,17 @@
 # compose2pod
 
+[![PyPI version](https://img.shields.io/pypi/v/compose2pod.svg)](https://pypi.org/project/compose2pod/)
+[![Supported Python versions](https://img.shields.io/pypi/pyversions/compose2pod.svg)](https://pypi.org/project/compose2pod/)
+[![Downloads](https://static.pepy.tech/badge/compose2pod/month)](https://pepy.tech/projects/compose2pod)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/modern-python/compose2pod/actions/workflows/ci.yml)
+[![CI](https://github.com/modern-python/compose2pod/actions/workflows/ci.yml/badge.svg)](https://github.com/modern-python/compose2pod/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/modern-python/compose2pod.svg)](https://github.com/modern-python/compose2pod/blob/main/LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/modern-python/compose2pod)](https://github.com/modern-python/compose2pod/stargazers)
+[![Context7](https://img.shields.io/badge/Context7-docs-blue)](https://context7.com/modern-python/compose2pod)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
+
 Convert a Docker Compose file into a POSIX `sh` script that runs its services as a **single Podman pod**.
 
 Built for CI and test environments where you can't use `docker compose` or `podman kube play`:
