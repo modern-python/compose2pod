@@ -118,3 +118,7 @@ class TestValidate:
     def test_service_hostname_is_accepted(self) -> None:
         compose = {"services": {"keydb": {"image": "x", "hostname": "keydb-test-server-0"}}}
         assert validate(compose) == []
+
+    def test_service_container_name_is_accepted(self) -> None:
+        compose = {"services": {"application": {"image": "x", "container_name": "calutron-ronline"}}}
+        assert validate(compose) == []

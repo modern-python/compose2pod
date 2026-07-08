@@ -18,6 +18,7 @@ SUPPORTED_SERVICE_KEYS = {
     "depends_on",
     "networks",
     "hostname",
+    "container_name",
 }
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}

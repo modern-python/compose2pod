@@ -33,6 +33,10 @@ class TestHostnames:
         services = {"keydb": {"image": "x", "hostname": "keydb-test-server-0"}}
         assert hostnames(services) == ["keydb", "keydb-test-server-0"]
 
+    def test_collects_service_container_name(self) -> None:
+        services = {"application": {"image": "x", "container_name": "calutron-ronline"}}
+        assert hostnames(services) == ["application", "calutron-ronline"]
+
     def test_empty_hostname_is_skipped(self) -> None:
         services = {"a": {"image": "x", "hostname": ""}}
         assert hostnames(services) == ["a"]
