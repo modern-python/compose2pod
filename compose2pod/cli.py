@@ -3,7 +3,6 @@
 import argparse
 import contextlib
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -12,8 +11,8 @@ from typing import Any
 
 from compose2pod.emit import EmitOptions, emit_script
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.interpolate import interpolate
 from compose2pod.parsing import validate
+from compose2pod.shell import referenced_variables
 
 
 _yaml: ModuleType | None = None
@@ -90,8 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"compose2pod: error: could not parse compose input: {error}\n")
         return 2
     try:
-        compose, interpolation_warnings = interpolate(compose, os.environ)
-        warnings = [*interpolation_warnings, *validate(compose)]
+        warnings = validate(compose)
         script = emit_script(
             compose=compose,
             options=EmitOptions(
@@ -107,6 +105,9 @@ def main(argv: list[str] | None = None) -> int:
     except UnsupportedComposeError as error:
         sys.stderr.write(f"compose2pod: error: {error}\n")
         return 2
+    referenced = referenced_variables(compose)
+    if referenced:
+        sys.stderr.write("compose2pod: note: script references variables at run time: " + ", ".join(referenced) + "\n")
     for warning in warnings:
         sys.stderr.write(f"compose2pod: {warning}\n")
     sys.stdout.write(script)
