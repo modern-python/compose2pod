@@ -5,7 +5,7 @@ from typing import Any
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on
 from compose2pod.healthcheck import has_healthcheck
-from compose2pod.keys import PULL_POLICY_MAP
+from compose2pod.keys import PULL_POLICY_MAP, SERVICE_KEYS
 
 
 SUPPORTED_SERVICE_KEYS = {
@@ -72,27 +72,18 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         # volume implicitly on first reference.
 
 
-def _validate_service_forms(name: str, svc: dict[str, Any]) -> None:
-    """Check the process/identity keys use their allowed Compose forms."""
-    for key in ("user", "working_dir", "platform"):
-        if key in svc and not isinstance(svc[key], str):
-            msg = f"service {name!r}: '{key}' must be a string"
-            raise UnsupportedComposeError(msg)
-    for key in ("group_add", "cap_add", "cap_drop", "security_opt", "devices"):
-        if key in svc and not isinstance(svc[key], list):
-            msg = f"service {name!r}: '{key}' must be a list"
-            raise UnsupportedComposeError(msg)
-    for key in ("labels", "annotations", "extra_hosts"):
-        if key in svc and not isinstance(svc[key], list | dict):
-            msg = f"service {name!r}: '{key}' must be a list or mapping"
-            raise UnsupportedComposeError(msg)
+def _validate_entrypoint(name: str, svc: dict[str, Any]) -> None:
+    """Check the structural entrypoint key's form (it is not a registry key)."""
     if "entrypoint" in svc and not isinstance(svc["entrypoint"], str | list):
         msg = f"service {name!r}: 'entrypoint' must be a string or list"
         raise UnsupportedComposeError(msg)
-    for key in ("read_only", "init", "privileged"):
-        if key in svc and not isinstance(svc[key], bool):
-            msg = f"service {name!r}: '{key}' must be a boolean"
-            raise UnsupportedComposeError(msg)
+
+
+def _validate_extra_hosts_form(name: str, svc: dict[str, Any]) -> None:
+    """Transient: extra_hosts list-or-map check until it becomes a registry key (Task 3)."""
+    if "extra_hosts" in svc and not isinstance(svc["extra_hosts"], list | dict):
+        msg = f"service {name!r}: 'extra_hosts' must be a list or mapping"
+        raise UnsupportedComposeError(msg)
 
 
 def _validate_pull_policy(name: str, svc: dict[str, Any]) -> None:
@@ -140,7 +131,11 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
         warnings.append(f"service {name!r}: string entrypoint runs via shell; 'command' is ignored")
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
-    _validate_service_forms(name, svc)
+    _validate_entrypoint(name, svc)
+    for key, spec in SERVICE_KEYS.items():
+        if key in svc:
+            spec.validate(name, key, svc[key])
+    _validate_extra_hosts_form(name, svc)  # transient — folded into the registry in Task 3
     _validate_pull_policy(name, svc)
     _validate_ulimits(name, svc)
     return warnings

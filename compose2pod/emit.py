@@ -7,25 +7,11 @@ from typing import Any
 
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
-from compose2pod.keys import PULL_POLICY_MAP, Token, _Expand, _key_value_pairs
+from compose2pod.keys import PULL_POLICY_MAP, SERVICE_KEYS, Token, _Expand, _key_value_pairs
 from compose2pod.shell import to_shell, variable_names
 
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
-
-_SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir", "platform": "--platform"}
-
-_BOOL_FLAGS: dict[str, str] = {"init": "--init", "read_only": "--read-only", "privileged": "--privileged"}
-
-_LIST_FLAGS: dict[str, str] = {
-    "group_add": "--group-add",
-    "cap_add": "--cap-add",
-    "cap_drop": "--cap-drop",
-    "security_opt": "--security-opt",
-    "devices": "--device",
-}
-
-_MAP_FLAGS: dict[str, str] = {"labels": "--label", "annotations": "--annotation"}
 
 
 def image_for(svc: dict[str, Any], ci_image: str) -> Token:
@@ -135,22 +121,6 @@ def _add_ulimit_flags(flags: list[Token], svc: dict[str, Any]) -> None:
         flags += ["--ulimit", _Expand(arg)]
 
 
-def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add the scalar-, boolean-, list-, and label-driven flags to the flags list."""
-    for key, flag in _SCALAR_FLAGS.items():
-        if key in svc:
-            flags += [flag, _Expand(str(svc[key]))]
-    for key, flag in _BOOL_FLAGS.items():
-        if svc.get(key):
-            flags.append(flag)
-    for key, flag in _LIST_FLAGS.items():
-        for item in svc.get(key) or []:
-            flags += [flag, _Expand(str(item))]
-    for key, flag in _MAP_FLAGS.items():
-        for pair in _key_value_pairs(svc.get(key) or {}):
-            flags += [flag, _Expand(str(pair))]
-
-
 def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:
     """Flag tokens (unquoted) for `podman run` of one service."""
     flags: list[Token] = ["--pod", pod, "--name", f"{pod}-{name}"]
@@ -159,7 +129,9 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     _add_env_flags(flags, svc, project_dir)
     _add_volume_flags(flags, svc, project_dir)
     _add_health_flags(flags, svc.get("healthcheck") or {})
-    _add_declarative_flags(flags, svc)
+    for key, spec in SERVICE_KEYS.items():
+        if key in svc:
+            flags += spec.emit(svc[key])
     _add_extra_host_flags(flags, svc)
     _add_pull_policy_flag(flags, svc)
     _add_ulimit_flags(flags, svc)
