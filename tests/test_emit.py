@@ -120,6 +120,20 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "labels": {"empty": None}}, "p", [], "/b")
         assert flags[4:6] == ["--label", _Expand("empty")]
 
+    def test_read_only_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "read_only": True}, "p", [], "/b")
+        assert flags[4:5] == ["--read-only"]
+
+    def test_all_boolean_flags_emit_when_true(self) -> None:
+        svc = {"image": "x", "init": True, "read_only": True, "privileged": True}
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:7] == ["--init", "--read-only", "--privileged"]
+
+    def test_boolean_flag_false_or_absent_is_omitted(self) -> None:
+        flags = run_flags("app", {"image": "x", "read_only": False}, "p", [], "/b")
+        assert "--read-only" not in flags
+        assert flags == ["--pod", "p", "--name", "p-app"]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:

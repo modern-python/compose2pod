@@ -18,8 +18,8 @@ class TestValidate:
                 validate(bad)  # ty: ignore[invalid-argument-type]
 
     def test_unsupported_service_key_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="privileged"):
-            validate({"services": {"app": {"image": "x", "privileged": True}}})
+        with pytest.raises(UnsupportedComposeError, match="network_mode"):
+            validate({"services": {"app": {"image": "x", "network_mode": "host"}}})
 
     def test_unsupported_healthcheck_key_raises(self) -> None:
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "start_interval": "1s"}}}}
@@ -167,3 +167,11 @@ class TestValidate:
     def test_string_entrypoint_with_command_warns(self) -> None:
         warnings = validate({"services": {"app": {"image": "x", "entrypoint": "serve", "command": ["x"]}}})
         assert any("command' is ignored" in w for w in warnings)
+
+    def test_boolean_confinement_keys_accepted(self) -> None:
+        svc = {"image": "x", "read_only": True, "init": True, "privileged": False}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_read_only_non_bool_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'read_only' must be a boolean"):
+            validate({"services": {"app": {"image": "x", "read_only": "yes"}}})

@@ -25,6 +25,9 @@ SUPPORTED_SERVICE_KEYS = {
     "working_dir",
     "group_add",
     "labels",
+    "read_only",
+    "init",
+    "privileged",
 }
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
@@ -74,6 +77,10 @@ def _validate_service_forms(name: str, svc: dict[str, Any]) -> None:
     if "entrypoint" in svc and not isinstance(svc["entrypoint"], str | list):
         msg = f"service {name!r}: 'entrypoint' must be a string or list"
         raise UnsupportedComposeError(msg)
+    for key in ("read_only", "init", "privileged"):
+        if key in svc and not isinstance(svc[key], bool):
+            msg = f"service {name!r}: '{key}' must be a boolean"
+            raise UnsupportedComposeError(msg)
 
 
 def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:

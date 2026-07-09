@@ -103,12 +103,12 @@ class TestMain:
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         rc = run_main(
-            json.dumps({"services": {"app": {"image": "x", "privileged": True}}}),
+            json.dumps({"services": {"app": {"image": "x", "network_mode": "host"}}}),
             ["--target", "app", "--image", "i"],
             monkeypatch,
         )
         assert rc == EXIT_USAGE_ERROR
-        assert "privileged" in capsys.readouterr().err
+        assert "network_mode" in capsys.readouterr().err
 
     def test_invalid_pod_name_returns_2(
         self, chats_compose: dict, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch

@@ -14,6 +14,8 @@ HEALTHY_WAIT_BUDGET_SECONDS = 120
 
 _SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir"}
 
+_BOOL_FLAGS: dict[str, str] = {"init": "--init", "read_only": "--read-only", "privileged": "--privileged"}
+
 _LIST_FLAGS: dict[str, str] = {"group_add": "--group-add"}
 
 
@@ -116,6 +118,9 @@ def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
     for key, flag in _SCALAR_FLAGS.items():
         if key in svc:
             flags += [flag, _Expand(str(svc[key]))]
+    for key, flag in _BOOL_FLAGS.items():
+        if svc.get(key):
+            flags.append(flag)
     for key, flag in _LIST_FLAGS.items():
         for item in svc.get(key) or []:
             flags += [flag, _Expand(str(item))]
