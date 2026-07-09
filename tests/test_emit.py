@@ -163,6 +163,18 @@ class TestRunFlags:
         assert "--read-only" not in flags
         assert flags == ["--pod", "p", "--name", "p-app"]
 
+    def test_extra_hosts_list_form(self) -> None:
+        flags = run_flags("app", {"image": "x", "extra_hosts": ["db.local:10.0.0.5"]}, "p", [], "/b")
+        assert flags[4:6] == ["--add-host", _Expand("db.local:10.0.0.5")]
+
+    def test_extra_hosts_map_form(self) -> None:
+        flags = run_flags("app", {"image": "x", "extra_hosts": {"db.local": "10.0.0.5"}}, "p", [], "/b")
+        assert flags[4:6] == ["--add-host", _Expand("db.local:10.0.0.5")]
+
+    def test_extra_hosts_ipv6_value_keeps_colons(self) -> None:
+        flags = run_flags("app", {"image": "x", "extra_hosts": {"myhost": "2001:db8::1"}}, "p", [], "/b")
+        assert flags[4:6] == ["--add-host", _Expand("myhost:2001:db8::1")]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:
@@ -475,3 +487,7 @@ class TestReferencedVariables:
     def test_collects_from_capability_and_security_lists(self) -> None:
         compose = {"services": {"app": {"image": "x", "cap_add": ["${CAP}"], "security_opt": ["${OPT}"]}}}
         assert referenced_variables(compose, self._options()) == ["CAP", "OPT"]
+
+    def test_collects_from_extra_hosts(self) -> None:
+        compose = {"services": {"app": {"image": "x", "extra_hosts": ["h:${HOST_IP}"]}}}
+        assert referenced_variables(compose, self._options()) == ["HOST_IP"]

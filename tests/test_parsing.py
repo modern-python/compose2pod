@@ -188,6 +188,13 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"'annotations' must be a list or mapping"):
             validate({"services": {"app": {"image": "x", "annotations": "k=v"}}})
 
+    def test_extra_hosts_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "extra_hosts": {"db.local": "10.0.0.5"}}}}) == []
+
+    def test_extra_hosts_non_list_or_map_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'extra_hosts' must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "extra_hosts": "db.local:10.0.0.5"}}})
+
     def test_entrypoint_list_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "entrypoint": ["run"]}}}) == []
 
