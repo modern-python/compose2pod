@@ -57,20 +57,24 @@ def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
             flags += ["--health-retries", str(healthcheck["retries"])]
 
 
+def _key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
+    """Compose list/map key-value section as 'KEY=value' / 'KEY' entries.
+
+    A null map value yields a bare 'KEY'. Meaning is caller-defined: '-e KEY'
+    passes the host value through; '--label KEY' sets an empty label.
+    """
+    if isinstance(value, list):
+        return value
+    return [key if val is None else f"{key}={val}" for key, val in value.items()]
+
+
 def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:
     """Flag tokens (unquoted) for `podman run` of one service."""
     flags: list[Token] = ["--pod", pod, "--name", f"{pod}-{name}"]
     for host in hosts:
         flags += ["--add-host", f"{host}:127.0.0.1"]
-    environment = svc.get("environment") or {}
-    # A null mapping value means "pass KEY through from the host" (bare `-e KEY`),
-    # matching Compose and the list form `- KEY`.
-    pairs = (
-        environment
-        if isinstance(environment, list)
-        else [k if v is None else f"{k}={v}" for k, v in environment.items()]
-    )
-    for pair in pairs:
+    # A null environment value means "pass KEY through from the host" (bare `-e KEY`).
+    for pair in _key_value_pairs(svc.get("environment") or {}):
         flags += ["-e", _Expand(str(pair))]
     env_files = svc.get("env_file") or []
     if isinstance(env_files, str):
@@ -102,6 +106,8 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     for key, flag in _LIST_FLAGS.items():
         for item in svc.get(key) or []:
             flags += [flag, _Expand(str(item))]
+    for pair in _key_value_pairs(svc.get("labels") or {}):
+        flags += ["--label", _Expand(str(pair))]
     return flags
 
 

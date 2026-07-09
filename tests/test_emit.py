@@ -103,6 +103,22 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "group_add": ["docker", 1000]}, "p", [], "/b")
         assert flags[4:8] == ["--group-add", _Expand("docker"), "--group-add", _Expand("1000")]
 
+    def test_labels_map_form(self) -> None:
+        svc = {"image": "x", "labels": {"team": "api", "tier": "backend"}}
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:8] == ["--label", _Expand("team=api"), "--label", _Expand("tier=backend")]
+
+    def test_labels_list_form(self) -> None:
+        svc = {"image": "x", "labels": ["team=api", "standalone"]}
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:8] == ["--label", _Expand("team=api"), "--label", _Expand("standalone")]
+
+    def test_labels_null_value_is_empty_label(self) -> None:
+        # A null map value is an empty label here, NOT the host-passthrough that
+        # `environment`'s null means -- same emitted shape, distinct meaning.
+        flags = run_flags("app", {"image": "x", "labels": {"empty": None}}, "p", [], "/b")
+        assert flags[4:6] == ["--label", _Expand("empty")]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:

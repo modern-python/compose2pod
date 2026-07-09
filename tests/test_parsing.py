@@ -149,3 +149,10 @@ class TestValidate:
     def test_group_add_non_list_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'group_add' must be a list"):
             validate({"services": {"app": {"image": "x", "group_add": "docker"}}})
+
+    def test_labels_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "labels": {"team": "api"}}}}) == []
+
+    def test_labels_non_list_or_map_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'labels' must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "labels": "team=api"}}})
