@@ -39,6 +39,7 @@ SUPPORTED_SERVICE_KEYS = {
     "annotations",
     "extra_hosts",
     "pull_policy",
+    "ulimits",
 }
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty", "stop_signal", "stop_grace_period"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
@@ -105,6 +106,27 @@ def _validate_pull_policy(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
+def _validate_ulimits(name: str, svc: dict[str, Any]) -> None:
+    """Check ulimits maps each name to an int/str scalar or a {soft, hard} mapping."""
+    ulimits = svc.get("ulimits")
+    if ulimits is None:
+        return
+    if not isinstance(ulimits, dict):
+        msg = f"service {name!r}: 'ulimits' must be a mapping"
+        raise UnsupportedComposeError(msg)
+    for limit, spec in ulimits.items():
+        if isinstance(spec, dict):
+            if set(spec) != {"soft", "hard"}:
+                msg = f"service {name!r}: ulimit {limit!r} mapping must have exactly 'soft' and 'hard'"
+                raise UnsupportedComposeError(msg)
+            if not isinstance(spec["soft"], int | str) or not isinstance(spec["hard"], int | str):
+                msg = f"service {name!r}: ulimit {limit!r} 'soft' and 'hard' must be int or str"
+                raise UnsupportedComposeError(msg)
+        elif not isinstance(spec, int | str):
+            msg = f"service {name!r}: ulimit {limit!r} must be an int or a soft/hard mapping"
+            raise UnsupportedComposeError(msg)
+
+
 def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
     """Validate one service; returns warnings, raises UnsupportedComposeError."""
     warnings: list[str] = []
@@ -122,6 +144,7 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
     _validate_service_volumes(name, svc)
     _validate_service_forms(name, svc)
     _validate_pull_policy(name, svc)
+    _validate_ulimits(name, svc)
     return warnings
 
 

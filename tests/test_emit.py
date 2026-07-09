@@ -184,6 +184,20 @@ class TestRunFlags:
             flags = run_flags("app", {"image": "x", "pull_policy": value}, "p", [], "/b")
             assert flags[4:6] == ["--pull", value]
 
+    def test_ulimits_mapping_form(self) -> None:
+        svc = {"image": "x", "ulimits": {"nofile": {"soft": 20000, "hard": 40000}}}
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:6] == ["--ulimit", _Expand("nofile=20000:40000")]
+
+    def test_ulimits_scalar_form(self) -> None:
+        flags = run_flags("app", {"image": "x", "ulimits": {"nproc": 65535}}, "p", [], "/b")
+        assert flags[4:6] == ["--ulimit", _Expand("nproc=65535")]
+
+    def test_ulimits_mixed_forms(self) -> None:
+        svc = {"image": "x", "ulimits": {"nproc": 65535, "nofile": {"soft": 1024, "hard": 2048}}}
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:8] == ["--ulimit", _Expand("nproc=65535"), "--ulimit", _Expand("nofile=1024:2048")]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:
@@ -459,6 +473,12 @@ class TestEmitScript:
         ):
             assert fragment in script
 
+    def test_ulimits_compose_through_emit_script(self) -> None:
+        svc = {"image": "x", "ulimits": {"nproc": 65535, "nofile": {"soft": 20000, "hard": 40000}}}
+        script = self._single(svc)
+        assert '--ulimit "nproc=65535"' in script
+        assert '--ulimit "nofile=20000:40000"' in script
+
 
 class TestReferencedVariables:
     def _options(self, command: str = "") -> EmitOptions:
@@ -519,3 +539,7 @@ class TestReferencedVariables:
     def test_collects_from_extra_hosts(self) -> None:
         compose = {"services": {"app": {"image": "x", "extra_hosts": ["h:${HOST_IP}"]}}}
         assert referenced_variables(compose, self._options()) == ["HOST_IP"]
+
+    def test_collects_from_ulimits(self) -> None:
+        compose = {"services": {"app": {"image": "x", "ulimits": {"nofile": "${MAX}"}}}}
+        assert referenced_variables(compose, self._options()) == ["MAX"]

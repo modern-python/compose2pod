@@ -52,16 +52,22 @@ network namespace, so none conflicts with the pod.
 | `platform` | `--platform` | Direct |
 | `ulimits` | `--ulimit` | soft/hard map form |
 | `annotations` | `--annotation` | Direct |
-| `sysctls` | `--sysctl` | net-namespace sysctls are pod-level; non-net ones are per-container |
 
-**Shipped:** `entrypoint`, `user`, `working_dir`, `labels`, `group_add`
-(`changes/2026-07-09.03`); `read_only`, `init`, `privileged`, `cap_add`,
-`cap_drop`, `security_opt` (`changes/2026-07-09.04`).
+**Shipped (all of the above):** `entrypoint`, `user`, `working_dir`, `labels`,
+`group_add` (`changes/2026-07-09.03`); `read_only`, `init`, `privileged`,
+`cap_add`, `cap_drop`, `security_opt` (`changes/2026-07-09.04`); `platform`,
+`devices`, `annotations`, `extra_hosts`, `pull_policy` (`changes/2026-07-09.06`);
+`ulimits` (`changes/2026-07-09.07`). Per-container Bucket A is complete.
 
-**Moved out:** `stop_signal`/`stop_grace_period` were listed here but are inert
-under the `podman pod rm -f` force teardown (no graceful `podman stop` is ever
-emitted), so they are reclassified accepted-but-inert — see
-`decisions/2026-07-09-stop-lifecycle-keys-inert.md`.
+**Moved out:**
+- `stop_signal`/`stop_grace_period` — inert under the `podman pod rm -f` force
+  teardown (no graceful `podman stop` is ever emitted), reclassified
+  accepted-but-inert (warn + ignore). See
+  `decisions/2026-07-09-stop-lifecycle-keys-inert.md`.
+- `sysctls` — pod-level, not per-container: only namespaced sysctls (`net.*`,
+  the IPC `kernel.*`/`fs.mqueue.*` set) are settable, and the pod owns net + ipc,
+  so they belong on `podman pod create --sysctl`. Deferred with `dns`; keeps
+  raising. See `decisions/2026-07-09-sysctls-pod-level.md` and `deferred.md`.
 
 ## Bucket B — meaningful, needs translation or pod-wide reconciliation
 
