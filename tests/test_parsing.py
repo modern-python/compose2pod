@@ -12,6 +12,13 @@ class TestValidate:
         assert "'stdin_open'" in joined
         assert "'tty'" in joined
 
+    def test_stop_lifecycle_keys_are_ignored_with_warning(self) -> None:
+        # Inert under the pod force teardown -> accepted with a warning, not rejected.
+        svc = {"image": "x", "stop_signal": "SIGINT", "stop_grace_period": "30s"}
+        warnings = validate({"services": {"app": svc}})
+        assert any("stop_signal" in w for w in warnings)
+        assert any("stop_grace_period" in w for w in warnings)
+
     def test_non_dict_document_raises(self) -> None:
         for bad in (None, [], "compose", 42):
             with pytest.raises(UnsupportedComposeError, match="must be a mapping"):

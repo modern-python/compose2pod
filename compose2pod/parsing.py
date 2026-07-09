@@ -32,7 +32,7 @@ SUPPORTED_SERVICE_KEYS = {
     "cap_drop",
     "security_opt",
 }
-IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty"}
+IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty", "stop_signal", "stop_grace_period"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
 SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks", "volumes"}
 DEPENDS_ON_CONDITIONS = {"service_started", "service_healthy", "service_completed_successfully"}

@@ -68,8 +68,11 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   (used internally for `podman cp`, healthcheck polling, and target-container
   diagnostics) — only name *resolution* is meaningful to other services, and
   no per-container `--hostname` or renamed `--name` is emitted.
-- **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty` — meaningless
-  or irrelevant inside a single shared-namespace pod.
+- **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty`, `stop_signal`,
+  `stop_grace_period` — meaningless or irrelevant inside a single
+  shared-namespace pod. `stop_signal`/`stop_grace_period` are inert because the
+  script force-removes the pod (`podman pod rm -f`) and never gracefully stops a
+  container.
 - **Extension fields:** any `x-`-prefixed service key is accepted and ignored
   silently.
 - Everything else raises.

@@ -37,8 +37,9 @@ the script's lifecycle ever consults.
   deliver.
 - They join the "accepted-but-inert" category alongside `ports`, `restart`,
   `stdin_open`, `tty` -- valid Compose that is meaningless in this pod's run +
-  force-teardown model. (They are not yet wired into the `IGNORED_SERVICE_KEYS`
-  warn list; that is a follow-up if a user supplies them.)
+  force-teardown model. They are in `IGNORED_SERVICE_KEYS`, so a document that
+  uses them is accepted with a warning rather than rejected
+  (`changes/2026-07-09.05-ignore-stop-lifecycle-keys.md`).
 - This is the same reasoning shape as the `dns` reclassification
   (`deferred.md`): a key looked like a clean flag until the pod/runtime model
   was examined.
