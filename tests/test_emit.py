@@ -380,6 +380,25 @@ class TestEmitScript:
         assert '--label "team=api"' in script
         assert '--entrypoint "serve"' in script
 
+    def test_confinement_keys_compose_on_one_service(self) -> None:
+        svc = {
+            "image": "x",
+            "read_only": True,
+            "init": True,
+            "cap_add": ["NET_ADMIN"],
+            "cap_drop": ["ALL"],
+            "security_opt": ["label=disable"],
+        }
+        script = self._single(svc)
+        for fragment in (
+            "--read-only",
+            "--init",
+            '--cap-add "NET_ADMIN"',
+            '--cap-drop "ALL"',
+            '--security-opt "label=disable"',
+        ):
+            assert fragment in script
+
 
 class TestReferencedVariables:
     def _options(self, command: str = "") -> EmitOptions:
