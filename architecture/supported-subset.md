@@ -19,16 +19,29 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 
 ## Service keys
 
-- **Supported:** `image`, `build`, `command`, `environment`, `env_file`,
-  `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
-  `container_name`, `tmpfs`. compose2pod never builds: a `build` section is
-  accepted but its contents (context, dockerfile, args) are not read —
-  `image_for` (`compose2pod/emit.py`) runs the CI image supplied via `--image`
-  for any service that has one.
+- **Supported:** `image`, `build`, `command`, `entrypoint`, `environment`,
+  `env_file`, `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
+  `container_name`, `tmpfs`, `user`, `working_dir`, `group_add`, `labels`.
+  compose2pod never builds: a `build` section is accepted but its contents
+  (context, dockerfile, args) are not read — `image_for` (`compose2pod/emit.py`)
+  runs the CI image supplied via `--image` for any service that has one.
 - **`environment`:** list form (`- KEY=value`, `- KEY`) or mapping form
   (`KEY: value`, `KEY:`). A null mapping value (`KEY:`) means "pass `KEY`
   through from the host", emitted as a bare `-e KEY` exactly like the list
   form `- KEY`.
+- **`entrypoint`:** string or list. List form is exec form; string form is
+  shell form (`/bin/sh -c <string>`), mirroring `command`. Emitted as
+  `--entrypoint <first-token>` with the remaining tokens placed ahead of the
+  command after the image, so `podman run --entrypoint a IMAGE b <command>`
+  runs `a b <command>` -- no JSON needed. A string (shell-form) entrypoint
+  ignores the service `command`, matching Docker; `validate()` warns when both
+  are set. The target's `--command` override still applies as explicit intent.
+- **`user` / `working_dir`:** strings, emitted verbatim as `--user` / `--workdir`.
+- **`group_add`:** a list, emitted as repeated `--group-add`.
+- **`labels`:** list (`- KEY=value` / `- KEY`) or mapping (`KEY: value` / `KEY:`),
+  emitted as repeated `--label`. A null value means an empty label
+  (`--label KEY`) -- the same emitted shape as `environment`'s null but a
+  distinct meaning (labels have no host-passthrough).
 - **`tmpfs`:** a string or list of strings, each `<path>` or
   `<path>:<options>` (e.g. `/tmp:mode=1777`), passed through verbatim as
   `podman run --tmpfs <value>` — Compose's short syntax maps directly onto

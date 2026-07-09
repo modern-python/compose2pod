@@ -355,3 +355,21 @@ class TestReferencedVariables:
         compose = {"services": {"app": {"image": "x", "command": "run ${CMDVAR}"}}}
         options = self._options(command="override ${SHELLVAR}")
         assert referenced_variables(compose, options) == []
+
+    def test_collects_from_new_process_identity_fields(self) -> None:
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "user": "${U}",
+                    "working_dir": "${WD}",
+                    "group_add": ["${G}"],
+                    "labels": {"team": "${T}"},
+                }
+            }
+        }
+        assert referenced_variables(compose, self._options()) == ["G", "T", "U", "WD"]
+
+    def test_collects_from_entrypoint(self) -> None:
+        compose = {"services": {"app": {"image": "x", "entrypoint": ["${EP}", "run"]}}}
+        assert referenced_variables(compose, self._options()) == ["EP"]
