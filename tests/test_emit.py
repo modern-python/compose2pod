@@ -129,6 +129,26 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "labels": {"empty": None}}, "p", [], "/b")
         assert flags[4:6] == ["--label", _Expand("empty")]
 
+    def test_platform_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "platform": "linux/amd64"}, "p", [], "/b")
+        assert flags[4:6] == ["--platform", _Expand("linux/amd64")]
+
+    def test_devices_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "devices": ["/dev/fuse", "/dev/net/tun"]}, "p", [], "/b")
+        assert flags[4:8] == ["--device", _Expand("/dev/fuse"), "--device", _Expand("/dev/net/tun")]
+
+    def test_annotations_map_form(self) -> None:
+        flags = run_flags("app", {"image": "x", "annotations": {"com.example/team": "api"}}, "p", [], "/b")
+        assert flags[4:6] == ["--annotation", _Expand("com.example/team=api")]
+
+    def test_annotations_null_value_is_bare_key(self) -> None:
+        flags = run_flags("app", {"image": "x", "annotations": {"marker": None}}, "p", [], "/b")
+        assert flags[4:6] == ["--annotation", _Expand("marker")]
+
+    def test_labels_still_emit_after_map_flags_refactor(self) -> None:
+        flags = run_flags("app", {"image": "x", "labels": {"team": "api"}}, "p", [], "/b")
+        assert flags[4:6] == ["--label", _Expand("team=api")]
+
     def test_read_only_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "read_only": True}, "p", [], "/b")
         assert flags[4:5] == ["--read-only"]
@@ -142,6 +162,27 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "read_only": False}, "p", [], "/b")
         assert "--read-only" not in flags
         assert flags == ["--pod", "p", "--name", "p-app"]
+
+    def test_extra_hosts_list_form(self) -> None:
+        flags = run_flags("app", {"image": "x", "extra_hosts": ["db.local:10.0.0.5"]}, "p", [], "/b")
+        assert flags[4:6] == ["--add-host", _Expand("db.local:10.0.0.5")]
+
+    def test_extra_hosts_map_form(self) -> None:
+        flags = run_flags("app", {"image": "x", "extra_hosts": {"db.local": "10.0.0.5"}}, "p", [], "/b")
+        assert flags[4:6] == ["--add-host", _Expand("db.local:10.0.0.5")]
+
+    def test_extra_hosts_ipv6_value_keeps_colons(self) -> None:
+        flags = run_flags("app", {"image": "x", "extra_hosts": {"myhost": "2001:db8::1"}}, "p", [], "/b")
+        assert flags[4:6] == ["--add-host", _Expand("myhost:2001:db8::1")]
+
+    def test_pull_policy_maps_if_not_present_to_missing(self) -> None:
+        flags = run_flags("app", {"image": "x", "pull_policy": "if_not_present"}, "p", [], "/b")
+        assert flags[4:6] == ["--pull", "missing"]
+
+    def test_pull_policy_passthrough_values(self) -> None:
+        for value in ("always", "never", "missing"):
+            flags = run_flags("app", {"image": "x", "pull_policy": value}, "p", [], "/b")
+            assert flags[4:6] == ["--pull", value]
 
 
 class TestImageAndCommand:
@@ -399,6 +440,25 @@ class TestEmitScript:
         ):
             assert fragment in script
 
+    def test_image_host_metadata_keys_compose_on_one_service(self) -> None:
+        svc = {
+            "image": "x",
+            "platform": "linux/amd64",
+            "devices": ["/dev/fuse"],
+            "annotations": {"team": "api"},
+            "extra_hosts": {"db.local": "10.0.0.5"},
+            "pull_policy": "if_not_present",
+        }
+        script = self._single(svc)
+        for fragment in (
+            '--platform "linux/amd64"',
+            '--device "/dev/fuse"',
+            '--annotation "team=api"',
+            '--add-host "db.local:10.0.0.5"',
+            "--pull missing",
+        ):
+            assert fragment in script
+
 
 class TestReferencedVariables:
     def _options(self, command: str = "") -> EmitOptions:
@@ -455,3 +515,7 @@ class TestReferencedVariables:
     def test_collects_from_capability_and_security_lists(self) -> None:
         compose = {"services": {"app": {"image": "x", "cap_add": ["${CAP}"], "security_opt": ["${OPT}"]}}}
         assert referenced_variables(compose, self._options()) == ["CAP", "OPT"]
+
+    def test_collects_from_extra_hosts(self) -> None:
+        compose = {"services": {"app": {"image": "x", "extra_hosts": ["h:${HOST_IP}"]}}}
+        assert referenced_variables(compose, self._options()) == ["HOST_IP"]

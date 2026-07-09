@@ -172,6 +172,29 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"'labels' must be a list or mapping"):
             validate({"services": {"app": {"image": "x", "labels": "team=api"}}})
 
+    def test_platform_devices_annotations_accepted(self) -> None:
+        svc = {"image": "x", "platform": "linux/arm64", "devices": ["/dev/fuse"], "annotations": {"k": "v"}}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_platform_non_string_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'platform' must be a string"):
+            validate({"services": {"app": {"image": "x", "platform": ["linux/amd64"]}}})
+
+    def test_devices_non_list_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'devices' must be a list"):
+            validate({"services": {"app": {"image": "x", "devices": "/dev/fuse"}}})
+
+    def test_annotations_non_list_or_map_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'annotations' must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "annotations": "k=v"}}})
+
+    def test_extra_hosts_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "extra_hosts": {"db.local": "10.0.0.5"}}}}) == []
+
+    def test_extra_hosts_non_list_or_map_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'extra_hosts' must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "extra_hosts": "db.local:10.0.0.5"}}})
+
     def test_entrypoint_list_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "entrypoint": ["run"]}}}) == []
 
@@ -190,3 +213,14 @@ class TestValidate:
     def test_read_only_non_bool_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'read_only' must be a boolean"):
             validate({"services": {"app": {"image": "x", "read_only": "yes"}}})
+
+    def test_pull_policy_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "pull_policy": "always"}}}) == []
+
+    def test_pull_policy_build_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="pull_policy 'build'"):
+            validate({"services": {"app": {"image": "x", "pull_policy": "build"}}})
+
+    def test_pull_policy_unknown_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="pull_policy 'sometimes'"):
+            validate({"services": {"app": {"image": "x", "pull_policy": "sometimes"}}})

@@ -12,7 +12,7 @@ from compose2pod.shell import to_shell, variable_names
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
 
-_SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir"}
+_SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir", "platform": "--platform"}
 
 _BOOL_FLAGS: dict[str, str] = {"init": "--init", "read_only": "--read-only", "privileged": "--privileged"}
 
@@ -21,6 +21,16 @@ _LIST_FLAGS: dict[str, str] = {
     "cap_add": "--cap-add",
     "cap_drop": "--cap-drop",
     "security_opt": "--security-opt",
+    "devices": "--device",
+}
+
+_MAP_FLAGS: dict[str, str] = {"labels": "--label", "annotations": "--annotation"}
+
+PULL_POLICY_MAP: dict[str, str] = {
+    "always": "always",
+    "never": "never",
+    "missing": "missing",
+    "if_not_present": "missing",
 }
 
 
@@ -85,6 +95,13 @@ def _key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     return [key if val is None else f"{key}={val}" for key, val in value.items()]
 
 
+def _extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
+    """Compose extra_hosts as 'host:ip' entries; map values keep their colons (IPv6-safe)."""
+    if isinstance(value, list):
+        return value
+    return [f"{host}:{ip}" for host, ip in value.items()]
+
+
 def _add_env_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
     """Add -e and --env-file flags to the flags list."""
     # A null environment value means "pass KEY through from the host" (bare `-e KEY`).
@@ -118,6 +135,19 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
         flags += ["--tmpfs", _Expand(mount)]
 
 
+def _add_extra_host_flags(flags: list[Token], svc: dict[str, Any]) -> None:
+    """Add per-service --add-host flags from extra_hosts (explicit host:ip)."""
+    for entry in _extra_host_pairs(svc.get("extra_hosts") or []):
+        flags += ["--add-host", _Expand(str(entry))]
+
+
+def _add_pull_policy_flag(flags: list[Token], svc: dict[str, Any]) -> None:
+    """Add --pull from pull_policy (a validated enum, mapped to podman's vocabulary)."""
+    policy = svc.get("pull_policy")
+    if policy is not None:
+        flags += ["--pull", PULL_POLICY_MAP[policy]]
+
+
 def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
     """Add the scalar-, boolean-, list-, and label-driven flags to the flags list."""
     for key, flag in _SCALAR_FLAGS.items():
@@ -129,8 +159,9 @@ def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
     for key, flag in _LIST_FLAGS.items():
         for item in svc.get(key) or []:
             flags += [flag, _Expand(str(item))]
-    for pair in _key_value_pairs(svc.get("labels") or {}):
-        flags += ["--label", _Expand(str(pair))]
+    for key, flag in _MAP_FLAGS.items():
+        for pair in _key_value_pairs(svc.get(key) or {}):
+            flags += [flag, _Expand(str(pair))]
 
 
 def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:
@@ -142,6 +173,8 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     _add_volume_flags(flags, svc, project_dir)
     _add_health_flags(flags, svc.get("healthcheck") or {})
     _add_declarative_flags(flags, svc)
+    _add_extra_host_flags(flags, svc)
+    _add_pull_policy_flag(flags, svc)
     return flags
 
 

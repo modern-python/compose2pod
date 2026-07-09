@@ -22,7 +22,8 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 - **Supported:** `image`, `build`, `command`, `entrypoint`, `environment`,
   `env_file`, `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
   `container_name`, `tmpfs`, `user`, `working_dir`, `group_add`, `labels`,
-  `read_only`, `init`, `privileged`, `cap_add`, `cap_drop`, `security_opt`.
+  `read_only`, `init`, `privileged`, `cap_add`, `cap_drop`, `security_opt`,
+  `platform`, `devices`, `annotations`, `extra_hosts`, `pull_policy`.
   compose2pod never builds: a `build` section is accepted but its contents
   (context, dockerfile, args) are not read — `image_for` (`compose2pod/emit.py`)
   runs the CI image supplied via `--image` for any service that has one.
@@ -50,6 +51,18 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 - **`cap_add` / `cap_drop` / `security_opt`:** lists, emitted as repeated
   `--cap-add` / `--cap-drop` / `--security-opt`. Item contents pass through
   verbatim (no content validation), like `tmpfs` and named volumes.
+- **`platform`:** a string, emitted verbatim as `--platform`.
+- **`devices`:** a list, emitted as repeated `--device` (contents verbatim).
+- **`annotations`:** list or mapping, emitted as repeated `--annotation`
+  (`KEY=value`, or bare `KEY` for a null value), sharing the `_MAP_FLAGS`
+  machinery with `labels`.
+- **`extra_hosts`:** list (`- host:ip`) or mapping (`host: ip`), emitted as
+  per-service `--add-host host:ip`. Distinct from the alias/hostname entries
+  (which resolve to `127.0.0.1`); IPv6 values keep their colons.
+- **`pull_policy`:** a validated enum mapped to podman's `--pull`
+  (`if_not_present` → `missing`; `always`/`never`/`missing` pass through),
+  emitted literally. `build` and unknown values are rejected — compose2pod
+  never builds, so a `build` pull policy cannot be honored.
 - **`labels`:** list (`- KEY=value` / `- KEY`) or mapping (`KEY: value` / `KEY:`),
   emitted as repeated `--label`. A null value means an empty label
   (`--label KEY`) -- the same emitted shape as `environment`'s null but a

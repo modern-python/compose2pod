@@ -2,6 +2,9 @@
 
 from typing import Any
 
+# PULL_POLICY_MAP is shared vocabulary: validation checks membership, emission maps values.
+# Deliberate one-way import (emit.py never imports parsing.py), so no cycle.
+from compose2pod.emit import PULL_POLICY_MAP
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on
 from compose2pod.healthcheck import has_healthcheck
@@ -31,6 +34,11 @@ SUPPORTED_SERVICE_KEYS = {
     "cap_add",
     "cap_drop",
     "security_opt",
+    "platform",
+    "devices",
+    "annotations",
+    "extra_hosts",
+    "pull_policy",
 }
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty", "stop_signal", "stop_grace_period"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
@@ -67,17 +75,18 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
 
 def _validate_service_forms(name: str, svc: dict[str, Any]) -> None:
     """Check the process/identity keys use their allowed Compose forms."""
-    for key in ("user", "working_dir"):
+    for key in ("user", "working_dir", "platform"):
         if key in svc and not isinstance(svc[key], str):
             msg = f"service {name!r}: '{key}' must be a string"
             raise UnsupportedComposeError(msg)
-    for key in ("group_add", "cap_add", "cap_drop", "security_opt"):
+    for key in ("group_add", "cap_add", "cap_drop", "security_opt", "devices"):
         if key in svc and not isinstance(svc[key], list):
             msg = f"service {name!r}: '{key}' must be a list"
             raise UnsupportedComposeError(msg)
-    if "labels" in svc and not isinstance(svc["labels"], list | dict):
-        msg = f"service {name!r}: 'labels' must be a list or mapping"
-        raise UnsupportedComposeError(msg)
+    for key in ("labels", "annotations", "extra_hosts"):
+        if key in svc and not isinstance(svc[key], list | dict):
+            msg = f"service {name!r}: '{key}' must be a list or mapping"
+            raise UnsupportedComposeError(msg)
     if "entrypoint" in svc and not isinstance(svc["entrypoint"], str | list):
         msg = f"service {name!r}: 'entrypoint' must be a string or list"
         raise UnsupportedComposeError(msg)
@@ -85,6 +94,15 @@ def _validate_service_forms(name: str, svc: dict[str, Any]) -> None:
         if key in svc and not isinstance(svc[key], bool):
             msg = f"service {name!r}: '{key}' must be a boolean"
             raise UnsupportedComposeError(msg)
+
+
+def _validate_pull_policy(name: str, svc: dict[str, Any]) -> None:
+    """Check pull_policy is a supported enum value (mapped to podman's --pull)."""
+    policy = svc.get("pull_policy")
+    if policy is not None and (not isinstance(policy, str) or policy not in PULL_POLICY_MAP):
+        allowed = "/".join(PULL_POLICY_MAP)
+        msg = f"service {name!r}: unsupported pull_policy {policy!r} (use {allowed})"
+        raise UnsupportedComposeError(msg)
 
 
 def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
@@ -103,6 +121,7 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
     _validate_service_forms(name, svc)
+    _validate_pull_policy(name, svc)
     return warnings
 
 
