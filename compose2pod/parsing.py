@@ -87,6 +87,8 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
         elif key not in SUPPORTED_SERVICE_KEYS:
             msg = f"service {name!r}: unsupported key '{key}'"
             raise UnsupportedComposeError(msg)
+    if isinstance(svc.get("entrypoint"), str) and svc.get("command") is not None:
+        warnings.append(f"service {name!r}: string entrypoint runs via shell; 'command' is ignored")
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
     _validate_service_forms(name, svc)

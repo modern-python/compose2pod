@@ -156,3 +156,14 @@ class TestValidate:
     def test_labels_non_list_or_map_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'labels' must be a list or mapping"):
             validate({"services": {"app": {"image": "x", "labels": "team=api"}}})
+
+    def test_entrypoint_list_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "entrypoint": ["run"]}}}) == []
+
+    def test_entrypoint_non_string_or_list_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'entrypoint' must be a string or list"):
+            validate({"services": {"app": {"image": "x", "entrypoint": {"a": "b"}}}})
+
+    def test_string_entrypoint_with_command_warns(self) -> None:
+        warnings = validate({"services": {"app": {"image": "x", "entrypoint": "serve", "command": ["x"]}}})
+        assert any("command' is ignored" in w for w in warnings)

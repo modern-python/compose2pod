@@ -44,6 +44,16 @@ def command_tokens(svc: dict[str, Any]) -> list[Token]:
     return [_Expand(str(token)) for token in command]
 
 
+def entrypoint_tokens(svc: dict[str, Any]) -> list[Token]:
+    """Service entrypoint as argv tokens; compose string form means shell form."""
+    entrypoint = svc.get("entrypoint")
+    if entrypoint is None:
+        return []
+    if isinstance(entrypoint, str):
+        return ["/bin/sh", "-c", _Expand(entrypoint)]
+    return [_Expand(str(token)) for token in entrypoint]
+
+
 def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
     """Add healthcheck flags to the flags list."""
     cmd = health_cmd(healthcheck.get("test"))
@@ -155,10 +165,16 @@ def _render(tokens: list[Token]) -> str:
 def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions, hosts: list[str]) -> list[Token]:
     svc = services[name]
     tokens = run_flags(name, svc, options.pod, hosts, options.project_dir)
+    entrypoint = entrypoint_tokens(svc)
+    if entrypoint:
+        tokens += ["--entrypoint", entrypoint[0]]
     tokens.append(image_for(svc, options.ci_image))
+    tokens += entrypoint[1:]
     if name == options.target and options.command:
         tokens.extend(shlex.split(options.command))
-    else:
+    elif not isinstance(svc.get("entrypoint"), str):
+        # A string (shell-form) entrypoint runs via `sh -c`; the service command
+        # is ignored, matching Docker. List/exec form appends the command.
         tokens.extend(command_tokens(svc))
     return tokens
 

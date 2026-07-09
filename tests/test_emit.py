@@ -3,6 +3,7 @@ from compose2pod.emit import (
     _Expand,
     command_tokens,
     emit_script,
+    entrypoint_tokens,
     image_for,
     referenced_variables,
     run_flags,
@@ -139,6 +140,17 @@ class TestImageAndCommand:
 
     def test_missing_command_is_empty(self) -> None:
         assert command_tokens({"image": "x"}) == []
+
+
+class TestEntrypoint:
+    def test_list_form_passes_through(self) -> None:
+        assert entrypoint_tokens({"entrypoint": ["sleep", "600"]}) == [_Expand("sleep"), _Expand("600")]
+
+    def test_string_form_becomes_shell(self) -> None:
+        assert entrypoint_tokens({"entrypoint": "serve now"}) == ["/bin/sh", "-c", _Expand("serve now")]
+
+    def test_missing_entrypoint_is_empty(self) -> None:
+        assert entrypoint_tokens({"image": "x"}) == []
 
 
 class TestEmitScript:
@@ -280,6 +292,34 @@ class TestEmitScript:
         script = emit_script(compose=chats_compose, options=options)
         target_line = next(line for line in script.splitlines() if "--name test-pod-application" in line)
         assert target_line.rstrip().endswith('"python" "-m" "chats.api" || rc=$?')
+
+    def _single(self, svc: dict, command: str = "") -> str:
+        options = EmitOptions(
+            target="app",
+            ci_image="ci",
+            command=command,
+            pod="p",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        return emit_script(compose={"services": {"app": svc}}, options=options)
+
+    def test_list_entrypoint_prepends_to_command(self) -> None:
+        script = self._single({"image": "x", "entrypoint": ["prog", "--flag"], "command": ["run"]})
+        assert '--entrypoint "prog"' in script
+        assert '"x" "--flag" "run"' in script
+
+    def test_string_entrypoint_ignores_service_command(self) -> None:
+        script = self._single({"image": "x", "entrypoint": "serve now", "command": ["dropped"]})
+        assert "--entrypoint /bin/sh" in script
+        assert '-c "serve now"' in script
+        assert "dropped" not in script
+
+    def test_command_override_still_applies_with_entrypoint(self) -> None:
+        script = self._single({"image": "x", "entrypoint": "serve"}, command="pytest tests")
+        assert "--entrypoint /bin/sh" in script
+        assert "pytest tests" in script.replace("'", "")
 
 
 class TestReferencedVariables:
