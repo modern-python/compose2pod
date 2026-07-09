@@ -23,7 +23,7 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   `env_file`, `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
   `container_name`, `tmpfs`, `user`, `working_dir`, `group_add`, `labels`,
   `read_only`, `init`, `privileged`, `cap_add`, `cap_drop`, `security_opt`,
-  `platform`, `devices`, `annotations`, `extra_hosts`, `pull_policy`.
+  `platform`, `devices`, `annotations`, `extra_hosts`, `pull_policy`, `ulimits`.
   compose2pod never builds: a `build` section is accepted but its contents
   (context, dockerfile, args) are not read — `image_for` (`compose2pod/emit.py`)
   runs the CI image supplied via `--image` for any service that has one.
@@ -63,6 +63,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   (`if_not_present` → `missing`; `always`/`never`/`missing` pass through),
   emitted literally. `build` and unknown values are rejected — compose2pod
   never builds, so a `build` pull policy cannot be honored.
+- **`ulimits`:** a mapping of limit name to either a scalar (`nproc: 65535` →
+  `--ulimit nproc=65535`, podman sets soft = hard) or a `{soft, hard}` mapping
+  (`nofile: {soft, hard}` → `--ulimit nofile=soft:hard`). A mapping value must
+  have exactly `soft` and `hard`; other shapes are rejected. (`sysctls`, by
+  contrast, is refused — it is pod-level, not per-container; see
+  `planning/decisions/2026-07-09-sysctls-pod-level.md`.)
 - **`labels`:** list (`- KEY=value` / `- KEY`) or mapping (`KEY: value` / `KEY:`),
   emitted as repeated `--label`. A null value means an empty label
   (`--label KEY`) -- the same emitted shape as `environment`'s null but a

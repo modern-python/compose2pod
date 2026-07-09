@@ -473,6 +473,12 @@ class TestEmitScript:
         ):
             assert fragment in script
 
+    def test_ulimits_compose_through_emit_script(self) -> None:
+        svc = {"image": "x", "ulimits": {"nproc": 65535, "nofile": {"soft": 20000, "hard": 40000}}}
+        script = self._single(svc)
+        assert '--ulimit "nproc=65535"' in script
+        assert '--ulimit "nofile=20000:40000"' in script
+
 
 class TestReferencedVariables:
     def _options(self, command: str = "") -> EmitOptions:
