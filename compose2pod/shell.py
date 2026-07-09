@@ -2,6 +2,8 @@
 
 import re
 
+from compose2pod.exceptions import UnsupportedComposeError
+
 
 _PATTERN = re.compile(
     r"""
@@ -29,9 +31,14 @@ def _encode_match(match: re.Match[str]) -> str:
         return "${" + match.group("named") + "-}"  # unset -> empty, survives `set -u`
     name = match.group("braced")
     op = match.group("op")
+    arg = match.group("arg")
     if op is None:
+        if arg:
+            # `${NAME<garbage>}` -- text after the name is not a valid operator.
+            msg = f"malformed variable reference: ${{{name}{arg}}}"
+            raise UnsupportedComposeError(msg)
         return "${" + name + "-}"
-    return "${" + name + op + _escape_literal(match.group("arg")) + "}"
+    return "${" + name + op + _escape_literal(arg) + "}"
 
 
 def to_shell(value: str) -> str:

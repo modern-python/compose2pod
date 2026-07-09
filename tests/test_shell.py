@@ -1,6 +1,9 @@
 import os
 import subprocess
 
+import pytest
+
+from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.shell import to_shell, variable_names
 
 
@@ -45,6 +48,18 @@ class TestToShell:
 
     def test_default_text_is_escaped(self) -> None:
         assert to_shell("${FOO:-a`b}") == '"${FOO:-a\\`b}"'
+
+    def test_all_operator_forms_escape_arg_text(self) -> None:
+        assert to_shell("${A:-x`y}") == '"${A:-x\\`y}"'
+        assert to_shell("${A-x`y}") == '"${A-x\\`y}"'
+        assert to_shell("${A:?x`y}") == '"${A:?x\\`y}"'
+        assert to_shell("${A?x`y}") == '"${A?x\\`y}"'
+        assert to_shell("${A:+x`y}") == '"${A:+x\\`y}"'
+        assert to_shell("${A+x`y}") == '"${A+x\\`y}"'
+
+    def test_malformed_braced_reference_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"malformed variable reference: \$\{FOO!bar\}"):
+            to_shell("${FOO!bar}")
 
     def test_multiple_refs_and_literals(self) -> None:
         assert to_shell("$A-${B}") == '"${A-}-${B-}"'

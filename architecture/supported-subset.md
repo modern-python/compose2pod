@@ -25,6 +25,10 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   accepted but its contents (context, dockerfile, args) are not read —
   `image_for` (`compose2pod/emit.py`) runs the CI image supplied via `--image`
   for any service that has one.
+- **`environment`:** list form (`- KEY=value`, `- KEY`) or mapping form
+  (`KEY: value`, `KEY:`). A null mapping value (`KEY:`) means "pass `KEY`
+  through from the host", emitted as a bare `-e KEY` exactly like the list
+  form `- KEY`.
 - **`tmpfs`:** a string or list of strings, each `<path>` or
   `<path>:<options>` (e.g. `/tmp:mode=1777`), passed through verbatim as
   `podman run --tmpfs <value>` — Compose's short syntax maps directly onto
@@ -96,7 +100,10 @@ emitted as `${VAR-}` so an unset variable expands to empty under the
 script's `set -eu` (matching Compose semantics) instead of aborting on
 `nounset`. `${VAR:?msg}`/`${VAR?msg}` fails the script at run time — with
 `msg` — if the variable is unset or empty; there is no generation-time
-check. Tool/CLI-supplied values (`--project-dir`, `--image`, the pod name,
+check. A braced reference whose text after the name is not one of these
+operators (e.g. `${FOO!bar}`) is malformed and raises
+`UnsupportedComposeError` rather than silently dropping the trailing text.
+Tool/CLI-supplied values (`--project-dir`, `--image`, the pod name,
 the `--command` override) are literal and never interpolated. The CLI
 prints one informational stderr note listing the variable names the
 generated script actually expands at run time — `referenced_variables()`
