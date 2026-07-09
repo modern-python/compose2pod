@@ -129,6 +129,26 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "labels": {"empty": None}}, "p", [], "/b")
         assert flags[4:6] == ["--label", _Expand("empty")]
 
+    def test_platform_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "platform": "linux/amd64"}, "p", [], "/b")
+        assert flags[4:6] == ["--platform", _Expand("linux/amd64")]
+
+    def test_devices_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "devices": ["/dev/fuse", "/dev/net/tun"]}, "p", [], "/b")
+        assert flags[4:8] == ["--device", _Expand("/dev/fuse"), "--device", _Expand("/dev/net/tun")]
+
+    def test_annotations_map_form(self) -> None:
+        flags = run_flags("app", {"image": "x", "annotations": {"com.example/team": "api"}}, "p", [], "/b")
+        assert flags[4:6] == ["--annotation", _Expand("com.example/team=api")]
+
+    def test_annotations_null_value_is_bare_key(self) -> None:
+        flags = run_flags("app", {"image": "x", "annotations": {"marker": None}}, "p", [], "/b")
+        assert flags[4:6] == ["--annotation", _Expand("marker")]
+
+    def test_labels_still_emit_after_map_flags_refactor(self) -> None:
+        flags = run_flags("app", {"image": "x", "labels": {"team": "api"}}, "p", [], "/b")
+        assert flags[4:6] == ["--label", _Expand("team=api")]
+
     def test_read_only_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "read_only": True}, "p", [], "/b")
         assert flags[4:5] == ["--read-only"]

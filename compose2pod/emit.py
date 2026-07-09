@@ -12,7 +12,7 @@ from compose2pod.shell import to_shell, variable_names
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
 
-_SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir"}
+_SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir", "platform": "--platform"}
 
 _BOOL_FLAGS: dict[str, str] = {"init": "--init", "read_only": "--read-only", "privileged": "--privileged"}
 
@@ -21,7 +21,10 @@ _LIST_FLAGS: dict[str, str] = {
     "cap_add": "--cap-add",
     "cap_drop": "--cap-drop",
     "security_opt": "--security-opt",
+    "devices": "--device",
 }
+
+_MAP_FLAGS: dict[str, str] = {"labels": "--label", "annotations": "--annotation"}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,8 +132,9 @@ def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
     for key, flag in _LIST_FLAGS.items():
         for item in svc.get(key) or []:
             flags += [flag, _Expand(str(item))]
-    for pair in _key_value_pairs(svc.get("labels") or {}):
-        flags += ["--label", _Expand(str(pair))]
+    for key, flag in _MAP_FLAGS.items():
+        for pair in _key_value_pairs(svc.get(key) or {}):
+            flags += [flag, _Expand(str(pair))]
 
 
 def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:

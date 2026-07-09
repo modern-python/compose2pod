@@ -172,6 +172,22 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"'labels' must be a list or mapping"):
             validate({"services": {"app": {"image": "x", "labels": "team=api"}}})
 
+    def test_platform_devices_annotations_accepted(self) -> None:
+        svc = {"image": "x", "platform": "linux/arm64", "devices": ["/dev/fuse"], "annotations": {"k": "v"}}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_platform_non_string_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'platform' must be a string"):
+            validate({"services": {"app": {"image": "x", "platform": ["linux/amd64"]}}})
+
+    def test_devices_non_list_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'devices' must be a list"):
+            validate({"services": {"app": {"image": "x", "devices": "/dev/fuse"}}})
+
+    def test_annotations_non_list_or_map_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'annotations' must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "annotations": "k=v"}}})
+
     def test_entrypoint_list_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "entrypoint": ["run"]}}}) == []
 
