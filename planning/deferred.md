@@ -19,6 +19,21 @@ resolver or search domain inside the pod, or a live podman run contradicts the
 documented "`--dns` invalid on a pod-joined container" behavior this deferral
 assumes. Needs its own change file; validate the podman behavior first.
 
+## Support `sysctls` as a pod-wide option
+
+Same shape as `dns` above. Podman only permits namespaced sysctls (`net.*` for
+the network namespace; a fixed `kernel.*`/`fs.mqueue.*` set for IPC) and only
+when the container owns that namespace — which it never does inside a
+shared-namespace pod. So `sysctls` cannot be a per-container `--sysctl` flag; it
+must be hoisted to `podman pod create --sysctl` and reconciled across services.
+It stays refused (raises) until then, not ignored — a `sysctls` request is not
+behavior-neutral. See `decisions/2026-07-09-sysctls-pod-level.md`.
+
+**Revisit trigger:** the pod-level-aggregation pattern is built (most likely for
+`dns`, above), giving `sysctls` a natural `podman pod create --sysctl` home; or a
+live podman run contradicts the documented behavior. Shares the aggregation
+design with `dns` — do both together. Validate the podman behavior first.
+
 ## Add the compose2pod brand lockup to the README header
 
 Sibling org repos (`db-retry`, `eof-fixer`, `semvertag`, …) open their README
