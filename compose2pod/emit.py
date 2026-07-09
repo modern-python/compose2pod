@@ -7,33 +7,44 @@ from typing import Any
 
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
+from compose2pod.shell import to_shell, variable_names
 
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
 
 
-def image_for(svc: dict[str, Any], ci_image: str) -> str:
+@dataclasses.dataclass(frozen=True)
+class _Expand:
+    """A token whose Compose variable references expand at script-run time."""
+
+    value: str
+
+
+Token = str | _Expand
+
+
+def image_for(svc: dict[str, Any], ci_image: str) -> Token:
     """Services with a build section run the freshly built CI image."""
     if "build" in svc:
         return ci_image
-    return svc["image"]
+    return _Expand(svc["image"])
 
 
-def command_tokens(svc: dict[str, Any]) -> list[str]:
+def command_tokens(svc: dict[str, Any]) -> list[Token]:
     """Service command as argv tokens; compose string form means shell form."""
     command = svc.get("command")
     if command is None:
         return []
     if isinstance(command, str):
-        return ["/bin/sh", "-c", command]
-    return list(command)
+        return ["/bin/sh", "-c", _Expand(command)]
+    return [_Expand(str(token)) for token in command]
 
 
-def _add_health_flags(flags: list[str], healthcheck: dict[str, Any]) -> None:
+def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
     """Add healthcheck flags to the flags list."""
     cmd = health_cmd(healthcheck.get("test"))
     if cmd is not None:
-        flags += ["--health-cmd", cmd]
+        flags += ["--health-cmd", _Expand(cmd)]
         if "timeout" in healthcheck:
             flags += ["--health-timeout", str(healthcheck["timeout"])]
         if "start_period" in healthcheck:
@@ -42,24 +53,24 @@ def _add_health_flags(flags: list[str], healthcheck: dict[str, Any]) -> None:
             flags += ["--health-retries", str(healthcheck["retries"])]
 
 
-def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[str]:
+def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:
     """Flag tokens (unquoted) for `podman run` of one service."""
-    flags = ["--pod", pod, "--name", f"{pod}-{name}"]
+    flags: list[Token] = ["--pod", pod, "--name", f"{pod}-{name}"]
     for host in hosts:
         flags += ["--add-host", f"{host}:127.0.0.1"]
     environment = svc.get("environment") or {}
     pairs = environment if isinstance(environment, list) else [f"{k}={v}" for k, v in environment.items()]
     for pair in pairs:
-        flags += ["-e", pair]
+        flags += ["-e", _Expand(str(pair))]
     env_files = svc.get("env_file") or []
     if isinstance(env_files, str):
         env_files = [env_files]
     for env_file in env_files:
-        flags += ["--env-file", str(Path(project_dir, env_file))]
+        flags += ["--env-file", _Expand(str(Path(project_dir, env_file)))]
     for volume in svc.get("volumes") or []:
         if ":" not in volume:
             # Anonymous volume: a bare container path, no host source to translate.
-            flags += ["-v", volume]
+            flags += ["-v", _Expand(volume)]
             continue
         source, destination = volume.split(":", 1)
         if source.startswith("."):
@@ -67,12 +78,12 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
             source = str(Path(project_dir, source))
         # Absolute bind mount (starts with "/") and named volume (bare
         # identifier) are both kept as-is — neither is a path to translate.
-        flags += ["-v", f"{source}:{destination}"]
+        flags += ["-v", _Expand(f"{source}:{destination}")]
     tmpfs = svc.get("tmpfs") or []
     if isinstance(tmpfs, str):
         tmpfs = [tmpfs]
     for mount in tmpfs:
-        flags += ["--tmpfs", mount]
+        flags += ["--tmpfs", _Expand(mount)]
     healthcheck = svc.get("healthcheck") or {}
     _add_health_flags(flags, healthcheck)
     return flags
@@ -115,11 +126,11 @@ class EmitOptions:
     allow_exit_codes: list[int]
 
 
-def _render(tokens: list[str]) -> str:
-    return " ".join(shlex.quote(token) for token in tokens)
+def _render(tokens: list[Token]) -> str:
+    return " ".join(to_shell(token.value) if isinstance(token, _Expand) else shlex.quote(token) for token in tokens)
 
 
-def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions, hosts: list[str]) -> list[str]:
+def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions, hosts: list[str]) -> list[Token]:
     svc = services[name]
     tokens = run_flags(name, svc, options.pod, hosts, options.project_dir)
     tokens.append(image_for(svc, options.ci_image))
@@ -130,7 +141,7 @@ def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions, hosts
     return tokens
 
 
-def _emit_target(lines: list[str], run_tokens: list[str], options: EmitOptions) -> None:
+def _emit_target(lines: list[str], run_tokens: list[Token], options: EmitOptions) -> None:
     target_ctr = shlex.quote(f"{options.pod}-{options.target}")
     lines.append("rc=0")
     lines.append(f"podman run {_render(run_tokens)} || rc=$?")
@@ -181,3 +192,21 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
         else:
             lines.append(f"podman run -d {_render(run_tokens)}")
     return "\n".join(lines) + "\n"
+
+
+def referenced_variables(compose: dict[str, Any], options: EmitOptions) -> list[str]:
+    """Variable names the emitted script expands at run time (sorted, unique).
+
+    Reuses the same token construction as `emit_script`, so it counts exactly
+    the values that pass through `to_shell` -- never a `${VAR}` in a field that
+    is emitted literally, and never the `--command` override (a literal CLI value).
+    """
+    services = compose["services"]
+    hosts = hostnames(services)
+    order = startup_order(services, options.target)
+    names: set[str] = set()
+    for name in order:
+        for token in _run_tokens(name, services, options, hosts):
+            if isinstance(token, _Expand):
+                names.update(variable_names(token.value))
+    return sorted(names)

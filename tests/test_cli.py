@@ -25,10 +25,11 @@ class TestPublicApi:
             "EmitOptions",
             "UnsupportedComposeError",
             "emit_script",
-            "interpolate",
+            "to_shell",
             "validate",
         }
         assert compose2pod.validate({"services": {"a": {"image": "x"}}}) == []
+        assert compose2pod.to_shell("$FOO") == '"${FOO-}"'
 
 
 class TestMain:
@@ -134,37 +135,49 @@ class TestMain:
         assert rc == EXIT_USAGE_ERROR
         assert "compose2pod: error:" in capsys.readouterr().err
 
-    def test_environment_variable_reference_is_resolved(
+    def test_environment_reference_is_emitted_live_not_resolved(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("LLM_MODEL", "gpt-4")
+        monkeypatch.setenv("LLM_MODEL", "gpt-4")  # set at generation time -> must be ignored
         yaml_text = "services:\n  app:\n    image: x\n    environment:\n      MODEL: ${LLM_MODEL}\n"
         rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
         out = capsys.readouterr()
         assert rc == 0
-        assert "MODEL=gpt-4" in out.out
-        assert "LLM_MODEL" not in out.out
+        assert "MODEL=gpt-4" not in out.out  # NOT baked in at generation
+        assert "${LLM_MODEL-}" in out.out  # left live for the runtime shell
+        assert "note: script references variables at run time: LLM_MODEL" in out.err
 
-    def test_unset_environment_variable_reference_warns(
-        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv("UNSET_VAR", raising=False)
-        yaml_text = "services:\n  app:\n    image: x\n    environment:\n      MODEL: ${UNSET_VAR}\n"
-        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
-        out = capsys.readouterr()
-        assert rc == 0
-        assert "MODEL=" in out.out
-        assert "UNSET_VAR" in out.err
-        assert "not set" in out.err
-
-    def test_required_environment_variable_missing_returns_2(
+    def test_required_reference_survives_generation(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("REQUIRED_VAR", raising=False)
         yaml_text = "services:\n  app:\n    image: x\n    environment:\n      MODEL: ${REQUIRED_VAR:?must be set}\n"
         rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
-        assert rc == EXIT_USAGE_ERROR
-        assert "must be set" in capsys.readouterr().err
+        out = capsys.readouterr()
+        assert rc == 0  # no longer fails at generation
+        assert "${REQUIRED_VAR:?must be set}" in out.out  # shell enforces it at run time
+
+    def test_note_lists_multiple_referenced_variables_sorted(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        yaml_text = "services:\n  app:\n    image: x\n    environment:\n      A: ${ZED}\n      B: ${ALPHA}\n"
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "note: script references variables at run time: ALPHA, ZED" in out.err
+
+    def test_env_file_path_variable_is_live_and_noted(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        yaml_text = "services:\n  app:\n    image: x\n    env_file: ${ENV_DIR}/app.env\n"
+        rc = run_main(
+            yaml_text, ["--target", "app", "--image", "i", "--project-dir", "/p", "--format", "yaml"], monkeypatch
+        )
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "--env-file" in out.out
+        assert "${ENV_DIR-}" in out.out
+        assert "ENV_DIR" in out.err
 
     def test_yaml_anchor_extension_fields_convert(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
