@@ -35,6 +35,12 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", [], "/builds/x")
         assert flags[4:8] == ["-e", _Expand("A=1"), "-e", _Expand("B=two words")]
 
+    def test_env_map_null_value_is_host_passthrough(self) -> None:
+        # A null mapping value means "pass KEY through from the host", like `- KEY`.
+        svc = {"image": "x", "environment": {"PASSTHRU": None, "SET": "v"}}
+        flags = run_flags("app", svc, "p", [], "/builds/x")
+        assert flags[4:8] == ["-e", _Expand("PASSTHRU"), "-e", _Expand("SET=v")]
+
     def test_env_file_and_volume_resolved_against_project_dir(self) -> None:
         svc = {"image": "x", "env_file": "tests.env", "volumes": [".:/srv/www/"]}
         flags = run_flags("app", svc, "p", [], "/builds/chats")

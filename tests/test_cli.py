@@ -147,6 +147,14 @@ class TestMain:
         assert "${LLM_MODEL-}" in out.out  # left live for the runtime shell
         assert "note: script references variables at run time: LLM_MODEL" in out.err
 
+    def test_malformed_variable_reference_returns_2(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        yaml_text = "services:\n  app:\n    image: x\n    environment:\n      K: ${FOO!bad}\n"
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "malformed variable reference" in capsys.readouterr().err
+
     def test_required_reference_survives_generation(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:

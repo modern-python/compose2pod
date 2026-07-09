@@ -59,7 +59,13 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     for host in hosts:
         flags += ["--add-host", f"{host}:127.0.0.1"]
     environment = svc.get("environment") or {}
-    pairs = environment if isinstance(environment, list) else [f"{k}={v}" for k, v in environment.items()]
+    # A null mapping value means "pass KEY through from the host" (bare `-e KEY`),
+    # matching Compose and the list form `- KEY`.
+    pairs = (
+        environment
+        if isinstance(environment, list)
+        else [k if v is None else f"{k}={v}" for k, v in environment.items()]
+    )
     for pair in pairs:
         flags += ["-e", _Expand(str(pair))]
     env_files = svc.get("env_file") or []
