@@ -102,6 +102,63 @@ def _map(flag: str) -> KeySpec:
     return KeySpec(_validate_map, emit)
 
 
+def _extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
+    """Compose extra_hosts as 'host:ip' entries; map values keep their colons (IPv6-safe)."""
+    if isinstance(value, list):
+        return value
+    return [f"{host}:{ip}" for host, ip in value.items()]
+
+
+def _emit_extra_hosts(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    tokens: list[Token] = []
+    for entry in _extra_host_pairs(value):
+        tokens += ["--add-host", _Expand(str(entry))]
+    return tokens
+
+
+def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401, ARG001 - uniform validate signature
+    if not isinstance(value, str) or value not in PULL_POLICY_MAP:
+        allowed = "/".join(PULL_POLICY_MAP)
+        msg = f"service {name!r}: unsupported pull_policy {value!r} (use {allowed})"
+        raise UnsupportedComposeError(msg)
+
+
+def _emit_pull_policy(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    return ["--pull", PULL_POLICY_MAP[value]]
+
+
+def _validate_ulimits(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    if not isinstance(value, dict):
+        msg = f"service {name!r}: '{key}' must be a mapping"
+        raise UnsupportedComposeError(msg)
+    for limit, spec in value.items():
+        if isinstance(spec, dict):
+            if set(spec) != {"soft", "hard"}:
+                msg = f"service {name!r}: ulimit {limit!r} mapping must have exactly 'soft' and 'hard'"
+                raise UnsupportedComposeError(msg)
+            if not isinstance(spec["soft"], int | str) or not isinstance(spec["hard"], int | str):
+                msg = f"service {name!r}: ulimit {limit!r} 'soft' and 'hard' must be int or str"
+                raise UnsupportedComposeError(msg)
+        elif not isinstance(spec, int | str):
+            msg = f"service {name!r}: ulimit {limit!r} must be an int or a soft/hard mapping"
+            raise UnsupportedComposeError(msg)
+
+
+def _ulimit_args(ulimits: dict[str, Any]) -> list[str]:
+    """Compose ulimits as podman `name=soft:hard` / `name=value` args."""
+    args: list[str] = []
+    for limit, spec in ulimits.items():
+        args.append(f"{limit}={spec['soft']}:{spec['hard']}" if isinstance(spec, dict) else f"{limit}={spec}")
+    return args
+
+
+def _emit_ulimits(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    tokens: list[Token] = []
+    for arg in _ulimit_args(value):
+        tokens += ["--ulimit", _Expand(arg)]
+    return tokens
+
+
 SERVICE_KEYS: dict[str, KeySpec] = {
     "user": _scalar("--user"),
     "working_dir": _scalar("--workdir"),
@@ -116,4 +173,23 @@ SERVICE_KEYS: dict[str, KeySpec] = {
     "devices": _list("--device"),
     "labels": _map("--label"),
     "annotations": _map("--annotation"),
+    "extra_hosts": KeySpec(_validate_map, _emit_extra_hosts),
+    "pull_policy": KeySpec(_validate_pull_policy, _emit_pull_policy),
+    "ulimits": KeySpec(_validate_ulimits, _emit_ulimits),
+}
+
+STRUCTURAL_KEYS: set[str] = {
+    "image",
+    "build",
+    "command",
+    "entrypoint",
+    "environment",
+    "env_file",
+    "volumes",
+    "tmpfs",
+    "healthcheck",
+    "depends_on",
+    "networks",
+    "hostname",
+    "container_name",
 }

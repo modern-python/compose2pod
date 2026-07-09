@@ -7,7 +7,7 @@ from typing import Any
 
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
-from compose2pod.keys import PULL_POLICY_MAP, SERVICE_KEYS, Token, _Expand, _key_value_pairs
+from compose2pod.keys import SERVICE_KEYS, Token, _Expand, _key_value_pairs
 from compose2pod.shell import to_shell, variable_names
 
 
@@ -54,13 +54,6 @@ def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
             flags += ["--health-retries", str(healthcheck["retries"])]
 
 
-def _extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
-    """Compose extra_hosts as 'host:ip' entries; map values keep their colons (IPv6-safe)."""
-    if isinstance(value, list):
-        return value
-    return [f"{host}:{ip}" for host, ip in value.items()]
-
-
 def _add_env_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
     """Add -e and --env-file flags to the flags list."""
     # A null environment value means "pass KEY through from the host" (bare `-e KEY`).
@@ -94,33 +87,6 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
         flags += ["--tmpfs", _Expand(mount)]
 
 
-def _add_extra_host_flags(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add per-service --add-host flags from extra_hosts (explicit host:ip)."""
-    for entry in _extra_host_pairs(svc.get("extra_hosts") or []):
-        flags += ["--add-host", _Expand(str(entry))]
-
-
-def _add_pull_policy_flag(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add --pull from pull_policy (a validated enum, mapped to podman's vocabulary)."""
-    policy = svc.get("pull_policy")
-    if policy is not None:
-        flags += ["--pull", PULL_POLICY_MAP[policy]]
-
-
-def _ulimit_args(ulimits: dict[str, Any]) -> list[str]:
-    """Compose ulimits as podman `name=soft:hard` / `name=value` args."""
-    args: list[str] = []
-    for limit, spec in ulimits.items():
-        args.append(f"{limit}={spec['soft']}:{spec['hard']}" if isinstance(spec, dict) else f"{limit}={spec}")
-    return args
-
-
-def _add_ulimit_flags(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add --ulimit flags from ulimits (a soft/hard mapping or a scalar)."""
-    for arg in _ulimit_args(svc.get("ulimits") or {}):
-        flags += ["--ulimit", _Expand(arg)]
-
-
 def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:
     """Flag tokens (unquoted) for `podman run` of one service."""
     flags: list[Token] = ["--pod", pod, "--name", f"{pod}-{name}"]
@@ -132,9 +98,6 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     for key, spec in SERVICE_KEYS.items():
         if key in svc:
             flags += spec.emit(svc[key])
-    _add_extra_host_flags(flags, svc)
-    _add_pull_policy_flag(flags, svc)
-    _add_ulimit_flags(flags, svc)
     return flags
 
 

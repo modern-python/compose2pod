@@ -5,40 +5,10 @@ from typing import Any
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on
 from compose2pod.healthcheck import has_healthcheck
-from compose2pod.keys import PULL_POLICY_MAP, SERVICE_KEYS
+from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS
 
 
-SUPPORTED_SERVICE_KEYS = {
-    "image",
-    "build",
-    "command",
-    "entrypoint",
-    "environment",
-    "env_file",
-    "volumes",
-    "healthcheck",
-    "depends_on",
-    "networks",
-    "hostname",
-    "container_name",
-    "tmpfs",
-    "user",
-    "working_dir",
-    "group_add",
-    "labels",
-    "read_only",
-    "init",
-    "privileged",
-    "cap_add",
-    "cap_drop",
-    "security_opt",
-    "platform",
-    "devices",
-    "annotations",
-    "extra_hosts",
-    "pull_policy",
-    "ulimits",
-}
+SUPPORTED_SERVICE_KEYS = set(SERVICE_KEYS) | STRUCTURAL_KEYS
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty", "stop_signal", "stop_grace_period"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
 SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks", "volumes"}
@@ -79,43 +49,6 @@ def _validate_entrypoint(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
-def _validate_extra_hosts_form(name: str, svc: dict[str, Any]) -> None:
-    """Transient: extra_hosts list-or-map check until it becomes a registry key (Task 3)."""
-    if "extra_hosts" in svc and not isinstance(svc["extra_hosts"], list | dict):
-        msg = f"service {name!r}: 'extra_hosts' must be a list or mapping"
-        raise UnsupportedComposeError(msg)
-
-
-def _validate_pull_policy(name: str, svc: dict[str, Any]) -> None:
-    """Check pull_policy is a supported enum value (mapped to podman's --pull)."""
-    policy = svc.get("pull_policy")
-    if policy is not None and (not isinstance(policy, str) or policy not in PULL_POLICY_MAP):
-        allowed = "/".join(PULL_POLICY_MAP)
-        msg = f"service {name!r}: unsupported pull_policy {policy!r} (use {allowed})"
-        raise UnsupportedComposeError(msg)
-
-
-def _validate_ulimits(name: str, svc: dict[str, Any]) -> None:
-    """Check ulimits maps each name to an int/str scalar or a {soft, hard} mapping."""
-    ulimits = svc.get("ulimits")
-    if ulimits is None:
-        return
-    if not isinstance(ulimits, dict):
-        msg = f"service {name!r}: 'ulimits' must be a mapping"
-        raise UnsupportedComposeError(msg)
-    for limit, spec in ulimits.items():
-        if isinstance(spec, dict):
-            if set(spec) != {"soft", "hard"}:
-                msg = f"service {name!r}: ulimit {limit!r} mapping must have exactly 'soft' and 'hard'"
-                raise UnsupportedComposeError(msg)
-            if not isinstance(spec["soft"], int | str) or not isinstance(spec["hard"], int | str):
-                msg = f"service {name!r}: ulimit {limit!r} 'soft' and 'hard' must be int or str"
-                raise UnsupportedComposeError(msg)
-        elif not isinstance(spec, int | str):
-            msg = f"service {name!r}: ulimit {limit!r} must be an int or a soft/hard mapping"
-            raise UnsupportedComposeError(msg)
-
-
 def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
     """Validate one service; returns warnings, raises UnsupportedComposeError."""
     warnings: list[str] = []
@@ -135,9 +68,6 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
     for key, spec in SERVICE_KEYS.items():
         if key in svc:
             spec.validate(name, key, svc[key])
-    _validate_extra_hosts_form(name, svc)  # transient — folded into the registry in Task 3
-    _validate_pull_policy(name, svc)
-    _validate_ulimits(name, svc)
     return warnings
 
 
