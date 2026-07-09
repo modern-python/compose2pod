@@ -86,6 +86,19 @@ class TestRunFlags:
         assert flags[4:6] == ["--health-cmd", _Expand("true")]
         assert "--health-timeout" not in flags
 
+    def test_user_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "user": "1000:1000"}, "p", [], "/b")
+        assert flags[4:6] == ["--user", _Expand("1000:1000")]
+
+    def test_working_dir_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "working_dir": "/srv/app"}, "p", [], "/b")
+        assert flags[4:6] == ["--workdir", _Expand("/srv/app")]
+
+    def test_user_and_working_dir_order(self) -> None:
+        svc = {"image": "x", "user": "root", "working_dir": "/app"}
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:8] == ["--user", _Expand("root"), "--workdir", _Expand("/app")]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:

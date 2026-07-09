@@ -11,6 +11,7 @@ SUPPORTED_SERVICE_KEYS = {
     "image",
     "build",
     "command",
+    "entrypoint",
     "environment",
     "env_file",
     "volumes",
@@ -20,6 +21,10 @@ SUPPORTED_SERVICE_KEYS = {
     "hostname",
     "container_name",
     "tmpfs",
+    "user",
+    "working_dir",
+    "group_add",
+    "labels",
 }
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
@@ -54,6 +59,23 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         # volume implicitly on first reference.
 
 
+def _validate_service_forms(name: str, svc: dict[str, Any]) -> None:
+    """Check the process/identity keys use their allowed Compose forms."""
+    for key in ("user", "working_dir"):
+        if key in svc and not isinstance(svc[key], str):
+            msg = f"service {name!r}: '{key}' must be a string"
+            raise UnsupportedComposeError(msg)
+    if "group_add" in svc and not isinstance(svc["group_add"], list):
+        msg = f"service {name!r}: 'group_add' must be a list"
+        raise UnsupportedComposeError(msg)
+    if "labels" in svc and not isinstance(svc["labels"], list | dict):
+        msg = f"service {name!r}: 'labels' must be a list or mapping"
+        raise UnsupportedComposeError(msg)
+    if "entrypoint" in svc and not isinstance(svc["entrypoint"], str | list):
+        msg = f"service {name!r}: 'entrypoint' must be a string or list"
+        raise UnsupportedComposeError(msg)
+
+
 def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
     """Validate one service; returns warnings, raises UnsupportedComposeError."""
     warnings: list[str] = []
@@ -67,6 +89,7 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
             raise UnsupportedComposeError(msg)
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
+    _validate_service_forms(name, svc)
     return warnings
 
 

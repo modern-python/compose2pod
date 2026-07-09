@@ -131,3 +131,14 @@ class TestValidate:
     def test_service_tmpfs_is_accepted(self) -> None:
         compose = {"services": {"app": {"image": "x", "tmpfs": ["/tmp:mode=1777"]}}}  # noqa: S108
         assert validate(compose) == []
+
+    def test_user_and_working_dir_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "user": "root", "working_dir": "/app"}}}) == []
+
+    def test_user_non_string_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'user' must be a string"):
+            validate({"services": {"app": {"image": "x", "user": 1000}}})
+
+    def test_working_dir_non_string_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'working_dir' must be a string"):
+            validate({"services": {"app": {"image": "x", "working_dir": ["/app"]}}})

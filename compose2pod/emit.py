@@ -12,6 +12,8 @@ from compose2pod.shell import to_shell, variable_names
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
 
+_SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir"}
+
 
 @dataclasses.dataclass(frozen=True)
 class _Expand:
@@ -92,6 +94,9 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
         flags += ["--tmpfs", _Expand(mount)]
     healthcheck = svc.get("healthcheck") or {}
     _add_health_flags(flags, healthcheck)
+    for key, flag in _SCALAR_FLAGS.items():
+        if key in svc:
+            flags += [flag, _Expand(str(svc[key]))]
     return flags
 
 
