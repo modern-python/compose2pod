@@ -249,3 +249,9 @@ class TestValidate:
         # Deliberate: sysctls is pod-level (decisions/2026-07-09-sysctls-pod-level.md), keeps raising.
         with pytest.raises(UnsupportedComposeError, match="unsupported key 'sysctls'"):
             validate({"services": {"app": {"image": "x", "sysctls": {"net.core.somaxconn": 1024}}}})
+
+    def test_pull_policy_null_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "pull_policy": None}}}) == []
+
+    def test_ulimits_null_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "ulimits": None}}}) == []

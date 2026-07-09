@@ -116,18 +116,20 @@ def _emit_extra_hosts(value: Any) -> list[Token]:  # noqa: ANN401 - Compose valu
     return tokens
 
 
-def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401, ARG001 - uniform validate signature
-    if not isinstance(value, str) or value not in PULL_POLICY_MAP:
+def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    if value is not None and (not isinstance(value, str) or value not in PULL_POLICY_MAP):
         allowed = "/".join(PULL_POLICY_MAP)
-        msg = f"service {name!r}: unsupported pull_policy {value!r} (use {allowed})"
+        msg = f"service {name!r}: unsupported {key} {value!r} (use {allowed})"
         raise UnsupportedComposeError(msg)
 
 
-def _emit_pull_policy(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    return ["--pull", PULL_POLICY_MAP[value]]
+def _emit_pull_policy(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped
+    return ["--pull", PULL_POLICY_MAP[value]] if value is not None else []
 
 
 def _validate_ulimits(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    if value is None:
+        return
     if not isinstance(value, dict):
         msg = f"service {name!r}: '{key}' must be a mapping"
         raise UnsupportedComposeError(msg)
@@ -153,6 +155,8 @@ def _ulimit_args(ulimits: dict[str, Any]) -> list[str]:
 
 
 def _emit_ulimits(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    if value is None:
+        return []
     tokens: list[Token] = []
     for arg in _ulimit_args(value):
         tokens += ["--ulimit", _Expand(arg)]

@@ -198,6 +198,10 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", [], "/b")
         assert flags[4:8] == ["--ulimit", _Expand("nproc=65535"), "--ulimit", _Expand("nofile=1024:2048")]
 
+    def test_null_pull_policy_and_ulimits_emit_nothing(self) -> None:
+        flags = run_flags("app", {"image": "x", "pull_policy": None, "ulimits": None}, "p", [], "/b")
+        assert flags == ["--pod", "p", "--name", "p-app"]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:
