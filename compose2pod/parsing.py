@@ -2,12 +2,10 @@
 
 from typing import Any
 
-# PULL_POLICY_MAP is shared vocabulary: validation checks membership, emission maps values.
-# Deliberate one-way import (emit.py never imports parsing.py), so no cycle.
-from compose2pod.emit import PULL_POLICY_MAP
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on
 from compose2pod.healthcheck import has_healthcheck
+from compose2pod.keys import PULL_POLICY_MAP
 
 
 SUPPORTED_SERVICE_KEYS = {
