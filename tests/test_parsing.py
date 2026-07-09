@@ -142,3 +142,10 @@ class TestValidate:
     def test_working_dir_non_string_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'working_dir' must be a string"):
             validate({"services": {"app": {"image": "x", "working_dir": ["/app"]}}})
+
+    def test_group_add_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "group_add": ["docker"]}}}) == []
+
+    def test_group_add_non_list_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'group_add' must be a list"):
+            validate({"services": {"app": {"image": "x", "group_add": "docker"}}})

@@ -99,6 +99,10 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", [], "/b")
         assert flags[4:8] == ["--user", _Expand("root"), "--workdir", _Expand("/app")]
 
+    def test_group_add_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "group_add": ["docker", 1000]}, "p", [], "/b")
+        assert flags[4:8] == ["--group-add", _Expand("docker"), "--group-add", _Expand("1000")]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:

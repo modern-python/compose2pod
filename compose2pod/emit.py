@@ -14,6 +14,8 @@ HEALTHY_WAIT_BUDGET_SECONDS = 120
 
 _SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir"}
 
+_LIST_FLAGS: dict[str, str] = {"group_add": "--group-add"}
+
 
 @dataclasses.dataclass(frozen=True)
 class _Expand:
@@ -97,6 +99,9 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     for key, flag in _SCALAR_FLAGS.items():
         if key in svc:
             flags += [flag, _Expand(str(svc[key]))]
+    for key, flag in _LIST_FLAGS.items():
+        for item in svc.get(key) or []:
+            flags += [flag, _Expand(str(item))]
     return flags
 
 
