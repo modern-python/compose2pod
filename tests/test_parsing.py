@@ -224,3 +224,24 @@ class TestValidate:
     def test_pull_policy_unknown_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="pull_policy 'sometimes'"):
             validate({"services": {"app": {"image": "x", "pull_policy": "sometimes"}}})
+
+    def test_ulimits_accepted(self) -> None:
+        svc = {"image": "x", "ulimits": {"nproc": 65535, "nofile": {"soft": 1024, "hard": 2048}}}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_ulimits_non_mapping_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'ulimits' must be a mapping"):
+            validate({"services": {"app": {"image": "x", "ulimits": ["nofile=1024"]}}})
+
+    def test_ulimits_mapping_missing_hard_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must have exactly 'soft' and 'hard'"):
+            validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": 1024}}}}})
+
+    def test_ulimits_list_valued_limit_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must be an int or a soft/hard mapping"):
+            validate({"services": {"app": {"image": "x", "ulimits": {"nofile": [1, 2]}}}})
+
+    def test_sysctls_stays_unsupported(self) -> None:
+        # Deliberate: sysctls is pod-level (decisions/2026-07-09-sysctls-pod-level.md), keeps raising.
+        with pytest.raises(UnsupportedComposeError, match="unsupported key 'sysctls'"):
+            validate({"services": {"app": {"image": "x", "sysctls": {"net.core.somaxconn": 1024}}}})

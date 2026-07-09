@@ -148,6 +148,20 @@ def _add_pull_policy_flag(flags: list[Token], svc: dict[str, Any]) -> None:
         flags += ["--pull", PULL_POLICY_MAP[policy]]
 
 
+def _ulimit_args(ulimits: dict[str, Any]) -> list[str]:
+    """Compose ulimits as podman `name=soft:hard` / `name=value` args."""
+    args: list[str] = []
+    for limit, spec in ulimits.items():
+        args.append(f"{limit}={spec['soft']}:{spec['hard']}" if isinstance(spec, dict) else f"{limit}={spec}")
+    return args
+
+
+def _add_ulimit_flags(flags: list[Token], svc: dict[str, Any]) -> None:
+    """Add --ulimit flags from ulimits (a soft/hard mapping or a scalar)."""
+    for arg in _ulimit_args(svc.get("ulimits") or {}):
+        flags += ["--ulimit", _Expand(arg)]
+
+
 def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
     """Add the scalar-, boolean-, list-, and label-driven flags to the flags list."""
     for key, flag in _SCALAR_FLAGS.items():
@@ -175,6 +189,7 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     _add_declarative_flags(flags, svc)
     _add_extra_host_flags(flags, svc)
     _add_pull_policy_flag(flags, svc)
+    _add_ulimit_flags(flags, svc)
     return flags
 
 
