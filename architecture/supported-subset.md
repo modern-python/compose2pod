@@ -21,7 +21,8 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 
 - **Supported:** `image`, `build`, `command`, `entrypoint`, `environment`,
   `env_file`, `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
-  `container_name`, `tmpfs`, `user`, `working_dir`, `group_add`, `labels`.
+  `container_name`, `tmpfs`, `user`, `working_dir`, `group_add`, `labels`,
+  `read_only`, `init`, `privileged`, `cap_add`, `cap_drop`, `security_opt`.
   compose2pod never builds: a `build` section is accepted but its contents
   (context, dockerfile, args) are not read — `image_for` (`compose2pod/emit.py`)
   runs the CI image supplied via `--image` for any service that has one.
@@ -43,6 +44,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   if the override needs to actually run.
 - **`user` / `working_dir`:** strings, emitted verbatim as `--user` / `--workdir`.
 - **`group_add`:** a list, emitted as repeated `--group-add`.
+- **`read_only` / `init` / `privileged`:** booleans, emitted as the bare
+  `--read-only` / `--init` / `--privileged` flag only when true (nothing when
+  false or absent).
+- **`cap_add` / `cap_drop` / `security_opt`:** lists, emitted as repeated
+  `--cap-add` / `--cap-drop` / `--security-opt`. Item contents pass through
+  verbatim (no content validation), like `tmpfs` and named volumes.
 - **`labels`:** list (`- KEY=value` / `- KEY`) or mapping (`KEY: value` / `KEY:`),
   emitted as repeated `--label`. A null value means an empty label
   (`--label KEY`) -- the same emitted shape as `environment`'s null but a
@@ -61,8 +68,11 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   (used internally for `podman cp`, healthcheck polling, and target-container
   diagnostics) — only name *resolution* is meaningful to other services, and
   no per-container `--hostname` or renamed `--name` is emitted.
-- **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty` — meaningless
-  or irrelevant inside a single shared-namespace pod.
+- **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty`, `stop_signal`,
+  `stop_grace_period` — meaningless or irrelevant inside a single
+  shared-namespace pod. `stop_signal`/`stop_grace_period` are inert because the
+  script force-removes the pod (`podman pod rm -f`) and never gracefully stops a
+  container.
 - **Extension fields:** any `x-`-prefixed service key is accepted and ignored
   silently.
 - Everything else raises.

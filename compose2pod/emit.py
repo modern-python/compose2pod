@@ -14,7 +14,14 @@ HEALTHY_WAIT_BUDGET_SECONDS = 120
 
 _SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir"}
 
-_LIST_FLAGS: dict[str, str] = {"group_add": "--group-add"}
+_BOOL_FLAGS: dict[str, str] = {"init": "--init", "read_only": "--read-only", "privileged": "--privileged"}
+
+_LIST_FLAGS: dict[str, str] = {
+    "group_add": "--group-add",
+    "cap_add": "--cap-add",
+    "cap_drop": "--cap-drop",
+    "security_opt": "--security-opt",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -112,10 +119,13 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
 
 
 def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add the scalar-, list-, and label-driven flags to the flags list."""
+    """Add the scalar-, boolean-, list-, and label-driven flags to the flags list."""
     for key, flag in _SCALAR_FLAGS.items():
         if key in svc:
             flags += [flag, _Expand(str(svc[key]))]
+    for key, flag in _BOOL_FLAGS.items():
+        if svc.get(key):
+            flags.append(flag)
     for key, flag in _LIST_FLAGS.items():
         for item in svc.get(key) or []:
             flags += [flag, _Expand(str(item))]

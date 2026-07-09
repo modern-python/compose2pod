@@ -12,14 +12,21 @@ class TestValidate:
         assert "'stdin_open'" in joined
         assert "'tty'" in joined
 
+    def test_stop_lifecycle_keys_are_ignored_with_warning(self) -> None:
+        # Inert under the pod force teardown -> accepted with a warning, not rejected.
+        svc = {"image": "x", "stop_signal": "SIGINT", "stop_grace_period": "30s"}
+        warnings = validate({"services": {"app": svc}})
+        assert any("stop_signal" in w for w in warnings)
+        assert any("stop_grace_period" in w for w in warnings)
+
     def test_non_dict_document_raises(self) -> None:
         for bad in (None, [], "compose", 42):
             with pytest.raises(UnsupportedComposeError, match="must be a mapping"):
                 validate(bad)  # ty: ignore[invalid-argument-type]
 
     def test_unsupported_service_key_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="privileged"):
-            validate({"services": {"app": {"image": "x", "privileged": True}}})
+        with pytest.raises(UnsupportedComposeError, match="network_mode"):
+            validate({"services": {"app": {"image": "x", "network_mode": "host"}}})
 
     def test_unsupported_healthcheck_key_raises(self) -> None:
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "start_interval": "1s"}}}}
@@ -150,6 +157,14 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"'group_add' must be a list"):
             validate({"services": {"app": {"image": "x", "group_add": "docker"}}})
 
+    def test_capability_list_keys_accepted(self) -> None:
+        svc = {"image": "x", "cap_add": ["NET_ADMIN"], "cap_drop": ["ALL"], "security_opt": ["label=disable"]}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_security_opt_non_list_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'security_opt' must be a list"):
+            validate({"services": {"app": {"image": "x", "security_opt": "label=disable"}}})
+
     def test_labels_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "labels": {"team": "api"}}}}) == []
 
@@ -167,3 +182,11 @@ class TestValidate:
     def test_string_entrypoint_with_command_warns(self) -> None:
         warnings = validate({"services": {"app": {"image": "x", "entrypoint": "serve", "command": ["x"]}}})
         assert any("command' is ignored" in w for w in warnings)
+
+    def test_boolean_confinement_keys_accepted(self) -> None:
+        svc = {"image": "x", "read_only": True, "init": True, "privileged": False}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_read_only_non_bool_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'read_only' must be a boolean"):
+            validate({"services": {"app": {"image": "x", "read_only": "yes"}}})
