@@ -12,6 +12,10 @@ from compose2pod.shell import to_shell, variable_names
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
 
+_SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir"}
+
+_LIST_FLAGS: dict[str, str] = {"group_add": "--group-add"}
+
 
 @dataclasses.dataclass(frozen=True)
 class _Expand:
@@ -40,6 +44,16 @@ def command_tokens(svc: dict[str, Any]) -> list[Token]:
     return [_Expand(str(token)) for token in command]
 
 
+def entrypoint_tokens(svc: dict[str, Any]) -> list[Token]:
+    """Service entrypoint as argv tokens; compose string form means shell form."""
+    entrypoint = svc.get("entrypoint")
+    if entrypoint is None:
+        return []
+    if isinstance(entrypoint, str):
+        return ["/bin/sh", "-c", _Expand(entrypoint)]
+    return [_Expand(str(token)) for token in entrypoint]
+
+
 def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
     """Add healthcheck flags to the flags list."""
     cmd = health_cmd(healthcheck.get("test"))
@@ -53,26 +67,31 @@ def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
             flags += ["--health-retries", str(healthcheck["retries"])]
 
 
-def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:
-    """Flag tokens (unquoted) for `podman run` of one service."""
-    flags: list[Token] = ["--pod", pod, "--name", f"{pod}-{name}"]
-    for host in hosts:
-        flags += ["--add-host", f"{host}:127.0.0.1"]
-    environment = svc.get("environment") or {}
-    # A null mapping value means "pass KEY through from the host" (bare `-e KEY`),
-    # matching Compose and the list form `- KEY`.
-    pairs = (
-        environment
-        if isinstance(environment, list)
-        else [k if v is None else f"{k}={v}" for k, v in environment.items()]
-    )
-    for pair in pairs:
+def _key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
+    """Compose list/map key-value section as 'KEY=value' / 'KEY' entries.
+
+    A null map value yields a bare 'KEY'. Meaning is caller-defined: '-e KEY'
+    passes the host value through; '--label KEY' sets an empty label.
+    """
+    if isinstance(value, list):
+        return value
+    return [key if val is None else f"{key}={val}" for key, val in value.items()]
+
+
+def _add_env_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
+    """Add -e and --env-file flags to the flags list."""
+    # A null environment value means "pass KEY through from the host" (bare `-e KEY`).
+    for pair in _key_value_pairs(svc.get("environment") or {}):
         flags += ["-e", _Expand(str(pair))]
     env_files = svc.get("env_file") or []
     if isinstance(env_files, str):
         env_files = [env_files]
     for env_file in env_files:
         flags += ["--env-file", _Expand(str(Path(project_dir, env_file)))]
+
+
+def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
+    """Add -v and --tmpfs flags to the flags list."""
     for volume in svc.get("volumes") or []:
         if ":" not in volume:
             # Anonymous volume: a bare container path, no host source to translate.
@@ -90,8 +109,29 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
         tmpfs = [tmpfs]
     for mount in tmpfs:
         flags += ["--tmpfs", _Expand(mount)]
-    healthcheck = svc.get("healthcheck") or {}
-    _add_health_flags(flags, healthcheck)
+
+
+def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
+    """Add the scalar-, list-, and label-driven flags to the flags list."""
+    for key, flag in _SCALAR_FLAGS.items():
+        if key in svc:
+            flags += [flag, _Expand(str(svc[key]))]
+    for key, flag in _LIST_FLAGS.items():
+        for item in svc.get(key) or []:
+            flags += [flag, _Expand(str(item))]
+    for pair in _key_value_pairs(svc.get("labels") or {}):
+        flags += ["--label", _Expand(str(pair))]
+
+
+def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:
+    """Flag tokens (unquoted) for `podman run` of one service."""
+    flags: list[Token] = ["--pod", pod, "--name", f"{pod}-{name}"]
+    for host in hosts:
+        flags += ["--add-host", f"{host}:127.0.0.1"]
+    _add_env_flags(flags, svc, project_dir)
+    _add_volume_flags(flags, svc, project_dir)
+    _add_health_flags(flags, svc.get("healthcheck") or {})
+    _add_declarative_flags(flags, svc)
     return flags
 
 
@@ -139,10 +179,16 @@ def _render(tokens: list[Token]) -> str:
 def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions, hosts: list[str]) -> list[Token]:
     svc = services[name]
     tokens = run_flags(name, svc, options.pod, hosts, options.project_dir)
+    entrypoint = entrypoint_tokens(svc)
+    if entrypoint:
+        tokens += ["--entrypoint", entrypoint[0]]
     tokens.append(image_for(svc, options.ci_image))
+    tokens += entrypoint[1:]
     if name == options.target and options.command:
         tokens.extend(shlex.split(options.command))
-    else:
+    elif not isinstance(svc.get("entrypoint"), str):
+        # A string (shell-form) entrypoint runs via `sh -c`; the service command
+        # is ignored, matching Docker. List/exec form appends the command.
         tokens.extend(command_tokens(svc))
     return tokens
 

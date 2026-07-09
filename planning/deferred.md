@@ -2,6 +2,23 @@
 
 Real-but-unscheduled items, each with a revisit trigger.
 
+## Support `dns` / `dns_search` / `dns_opt` as pod-wide options
+
+Unlike `--add-host` (a per-container `/etc/hosts` edit the tool already emits),
+`--dns` is coupled to the network namespace, and podman rejects it on a
+container that has joined a pod's netns. So `dns` cannot be a per-container
+`podman run` flag — it must be hoisted to `podman pod create --dns` and applied
+pod-wide, which means reconciling the values across services (union, or error on
+disagreement). This is the tool's first pod-level aggregated option; it is
+feasible and invariant-preserving but has no demonstrated CI demand yet. See
+`decisions/2026-07-09-reject-namespace-network-keys.md` and
+`audits/2026-07-09-compose-spec-coverage.md`.
+
+**Revisit trigger:** a user needs a service to resolve names through a specific
+resolver or search domain inside the pod, or a live podman run contradicts the
+documented "`--dns` invalid on a pod-joined container" behavior this deferral
+assumes. Needs its own change file; validate the podman behavior first.
+
 ## Add the compose2pod brand lockup to the README header
 
 Sibling org repos (`db-retry`, `eof-fixer`, `semvertag`, …) open their README

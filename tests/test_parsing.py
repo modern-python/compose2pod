@@ -131,3 +131,39 @@ class TestValidate:
     def test_service_tmpfs_is_accepted(self) -> None:
         compose = {"services": {"app": {"image": "x", "tmpfs": ["/tmp:mode=1777"]}}}  # noqa: S108
         assert validate(compose) == []
+
+    def test_user_and_working_dir_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "user": "root", "working_dir": "/app"}}}) == []
+
+    def test_user_non_string_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'user' must be a string"):
+            validate({"services": {"app": {"image": "x", "user": 1000}}})
+
+    def test_working_dir_non_string_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'working_dir' must be a string"):
+            validate({"services": {"app": {"image": "x", "working_dir": ["/app"]}}})
+
+    def test_group_add_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "group_add": ["docker"]}}}) == []
+
+    def test_group_add_non_list_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'group_add' must be a list"):
+            validate({"services": {"app": {"image": "x", "group_add": "docker"}}})
+
+    def test_labels_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "labels": {"team": "api"}}}}) == []
+
+    def test_labels_non_list_or_map_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'labels' must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "labels": "team=api"}}})
+
+    def test_entrypoint_list_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "entrypoint": ["run"]}}}) == []
+
+    def test_entrypoint_non_string_or_list_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'entrypoint' must be a string or list"):
+            validate({"services": {"app": {"image": "x", "entrypoint": {"a": "b"}}}})
+
+    def test_string_entrypoint_with_command_warns(self) -> None:
+        warnings = validate({"services": {"app": {"image": "x", "entrypoint": "serve", "command": ["x"]}}})
+        assert any("command' is ignored" in w for w in warnings)
