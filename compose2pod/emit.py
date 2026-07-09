@@ -16,7 +16,12 @@ _SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir"}
 
 _BOOL_FLAGS: dict[str, str] = {"init": "--init", "read_only": "--read-only", "privileged": "--privileged"}
 
-_LIST_FLAGS: dict[str, str] = {"group_add": "--group-add"}
+_LIST_FLAGS: dict[str, str] = {
+    "group_add": "--group-add",
+    "cap_add": "--cap-add",
+    "cap_drop": "--cap-drop",
+    "security_opt": "--security-opt",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -114,7 +119,7 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
 
 
 def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add the scalar-, list-, and label-driven flags to the flags list."""
+    """Add the scalar-, boolean-, list-, and label-driven flags to the flags list."""
     for key, flag in _SCALAR_FLAGS.items():
         if key in svc:
             flags += [flag, _Expand(str(svc[key]))]

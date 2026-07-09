@@ -150,6 +150,14 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"'group_add' must be a list"):
             validate({"services": {"app": {"image": "x", "group_add": "docker"}}})
 
+    def test_capability_list_keys_accepted(self) -> None:
+        svc = {"image": "x", "cap_add": ["NET_ADMIN"], "cap_drop": ["ALL"], "security_opt": ["label=disable"]}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_security_opt_non_list_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'security_opt' must be a list"):
+            validate({"services": {"app": {"image": "x", "security_opt": "label=disable"}}})
+
     def test_labels_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "labels": {"team": "api"}}}}) == []
 

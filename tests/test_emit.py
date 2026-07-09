@@ -104,6 +104,15 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "group_add": ["docker", 1000]}, "p", [], "/b")
         assert flags[4:8] == ["--group-add", _Expand("docker"), "--group-add", _Expand("1000")]
 
+    def test_cap_add_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "cap_add": ["NET_ADMIN", "SYS_TIME"]}, "p", [], "/b")
+        assert flags[4:8] == ["--cap-add", _Expand("NET_ADMIN"), "--cap-add", _Expand("SYS_TIME")]
+
+    def test_cap_drop_and_security_opt_flags(self) -> None:
+        svc = {"image": "x", "cap_drop": ["ALL"], "security_opt": ["label=disable"]}
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:8] == ["--cap-drop", _Expand("ALL"), "--security-opt", _Expand("label=disable")]
+
     def test_labels_map_form(self) -> None:
         svc = {"image": "x", "labels": {"team": "api", "tier": "backend"}}
         flags = run_flags("app", svc, "p", [], "/b")
@@ -423,3 +432,7 @@ class TestReferencedVariables:
     def test_collects_from_entrypoint(self) -> None:
         compose = {"services": {"app": {"image": "x", "entrypoint": ["${EP}", "run"]}}}
         assert referenced_variables(compose, self._options()) == ["EP"]
+
+    def test_collects_from_capability_and_security_lists(self) -> None:
+        compose = {"services": {"app": {"image": "x", "cap_add": ["${CAP}"], "security_opt": ["${OPT}"]}}}
+        assert referenced_variables(compose, self._options()) == ["CAP", "OPT"]
