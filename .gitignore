@@ -1,3 +1,6 @@
+# Ephemeral planning scratch (executable plans are not version-controlled)
+.superpowers/
+
 # Generic things
 *.pyc
 *~
