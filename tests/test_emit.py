@@ -440,6 +440,25 @@ class TestEmitScript:
         ):
             assert fragment in script
 
+    def test_image_host_metadata_keys_compose_on_one_service(self) -> None:
+        svc = {
+            "image": "x",
+            "platform": "linux/amd64",
+            "devices": ["/dev/fuse"],
+            "annotations": {"team": "api"},
+            "extra_hosts": {"db.local": "10.0.0.5"},
+            "pull_policy": "if_not_present",
+        }
+        script = self._single(svc)
+        for fragment in (
+            '--platform "linux/amd64"',
+            '--device "/dev/fuse"',
+            '--annotation "team=api"',
+            '--add-host "db.local:10.0.0.5"',
+            "--pull missing",
+        ):
+            assert fragment in script
+
 
 class TestReferencedVariables:
     def _options(self, command: str = "") -> EmitOptions:
