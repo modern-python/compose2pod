@@ -1,8 +1,6 @@
 """Encode Compose string values as POSIX-shell fragments the runtime shell expands."""
 
 import re
-from collections.abc import Iterator
-from typing import Any
 
 
 _PATTERN = re.compile(
@@ -54,23 +52,11 @@ def to_shell(value: str) -> str:
     return '"' + "".join(out) + '"'
 
 
-def _string_leaves(node: Any) -> Iterator[str]:  # noqa: ANN401 - arbitrary compose value
-    if isinstance(node, str):
-        yield node
-    elif isinstance(node, dict):
-        for value in node.values():
-            yield from _string_leaves(value)
-    elif isinstance(node, list):
-        for item in node:
-            yield from _string_leaves(item)
-
-
-def referenced_variables(document: Any) -> list[str]:  # noqa: ANN401 - arbitrary compose value
-    """Sorted unique variable names the document references (excluding `$$`)."""
+def variable_names(value: str) -> set[str]:
+    """Variable names `value` references (excluding `$$`)."""
     names: set[str] = set()
-    for text in _string_leaves(document):
-        for match in _PATTERN.finditer(text):
-            if match.group("escaped"):
-                continue
-            names.add(match.group("named") or match.group("braced"))
-    return sorted(names)
+    for match in _PATTERN.finditer(value):
+        if match.group("escaped"):
+            continue
+        names.add(match.group("named") or match.group("braced"))
+    return names

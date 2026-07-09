@@ -83,12 +83,12 @@ colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
 compose2pod does not resolve Compose Spec `${VAR}` references at generation
 time. `to_shell()` (`compose2pod/shell.py`) instead re-encodes every
 compose-derived string leaf (`environment`, `image`, `command`, `volumes`,
-`tmpfs`, healthcheck `test`) into a double-quoted POSIX-shell fragment with
-the variable references left live, so the generated script's own shell
-expands them against its runtime environment when the script runs. Only
-those field values pass through `to_shell()`; other document fields (service
-and network names, ports, and the like) are never interpolated. Supported
-forms: `$VAR`, `${VAR}`,
+`tmpfs`, `env_file`, healthcheck `test`) into a double-quoted POSIX-shell
+fragment with the variable references left live, so the generated script's
+own shell expands them against its runtime environment when the script
+runs. Only those field values pass through `to_shell()`; other document
+fields (service and network names, ports, and the like) are never
+interpolated. Supported forms: `$VAR`, `${VAR}`,
 `${VAR:-default}`, `${VAR-default}`, `${VAR:?msg}`, `${VAR?msg}`,
 `${VAR:+alt}`, `${VAR+alt}`, and `$$` for a literal `$`. The operator forms
 map onto identical POSIX `sh` parameter expansion; bare `$VAR`/`${VAR}` is
@@ -98,10 +98,14 @@ script's `set -eu` (matching Compose semantics) instead of aborting on
 `msg` — if the variable is unset or empty; there is no generation-time
 check. Tool/CLI-supplied values (`--project-dir`, `--image`, the pod name,
 the `--command` override) are literal and never interpolated. The CLI
-prints one informational stderr note listing the variable names the script
-references. There is no `.env` file support — only the environment present
-when the generated script runs is consulted; export the values first
-(`set -a; . .env; set +a`) if a project relies on a `.env` file.
+prints one informational stderr note listing the variable names the
+generated script actually expands at run time — `referenced_variables()`
+(`compose2pod/emit.py`) collects these from the same tokens `to_shell()`
+renders, so a `${VAR}` sitting in a literally-emitted field (or in the
+`--command` override) never appears in the note. There is no `.env` file
+support — only the environment present when the generated script runs is
+consulted; export the values first (`set -a; . .env; set +a`) if a project
+relies on a `.env` file.
 
 ## depends_on
 

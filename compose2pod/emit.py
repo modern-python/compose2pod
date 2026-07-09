@@ -7,7 +7,7 @@ from typing import Any
 
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
-from compose2pod.shell import to_shell
+from compose2pod.shell import to_shell, variable_names
 
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
@@ -66,7 +66,7 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     if isinstance(env_files, str):
         env_files = [env_files]
     for env_file in env_files:
-        flags += ["--env-file", str(Path(project_dir, env_file))]
+        flags += ["--env-file", _Expand(str(Path(project_dir, env_file)))]
     for volume in svc.get("volumes") or []:
         if ":" not in volume:
             # Anonymous volume: a bare container path, no host source to translate.
@@ -192,3 +192,21 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
         else:
             lines.append(f"podman run -d {_render(run_tokens)}")
     return "\n".join(lines) + "\n"
+
+
+def referenced_variables(compose: dict[str, Any], options: EmitOptions) -> list[str]:
+    """Variable names the emitted script expands at run time (sorted, unique).
+
+    Reuses the same token construction as `emit_script`, so it counts exactly
+    the values that pass through `to_shell` -- never a `${VAR}` in a field that
+    is emitted literally, and never the `--command` override (a literal CLI value).
+    """
+    services = compose["services"]
+    hosts = hostnames(services)
+    order = startup_order(services, options.target)
+    names: set[str] = set()
+    for name in order:
+        for token in _run_tokens(name, services, options, hosts):
+            if isinstance(token, _Expand):
+                names.update(variable_names(token.value))
+    return sorted(names)

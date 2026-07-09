@@ -4,6 +4,7 @@ from compose2pod.emit import (
     command_tokens,
     emit_script,
     image_for,
+    referenced_variables,
     run_flags,
 )
 from compose2pod.parsing import validate
@@ -37,13 +38,18 @@ class TestRunFlags:
     def test_env_file_and_volume_resolved_against_project_dir(self) -> None:
         svc = {"image": "x", "env_file": "tests.env", "volumes": [".:/srv/www/"]}
         flags = run_flags("app", svc, "p", [], "/builds/chats")
-        assert flags[4:6] == ["--env-file", "/builds/chats/tests.env"]
+        assert flags[4:6] == ["--env-file", _Expand("/builds/chats/tests.env")]
         assert flags[6:8] == ["-v", _Expand("/builds/chats:/srv/www/")]
 
     def test_env_file_list_form(self) -> None:
         svc = {"image": "x", "env_file": ["a.env", "b.env"]}
         flags = run_flags("app", svc, "p", [], "/builds/x")
-        assert flags[4:8] == ["--env-file", "/builds/x/a.env", "--env-file", "/builds/x/b.env"]
+        assert flags[4:8] == [
+            "--env-file",
+            _Expand("/builds/x/a.env"),
+            "--env-file",
+            _Expand("/builds/x/b.env"),
+        ]
 
     def test_tmpfs_string_form(self) -> None:
         # S108 flags "/tmp" as an insecure hardcoded temp path; this is a
@@ -235,3 +241,38 @@ class TestEmitScript:
         script = emit_script(compose=chats_compose, options=options)
         target_line = next(line for line in script.splitlines() if "--name test-pod-application" in line)
         assert target_line.rstrip().endswith('"python" "-m" "chats.api" || rc=$?')
+
+
+class TestReferencedVariables:
+    def _options(self, command: str = "") -> EmitOptions:
+        return EmitOptions(
+            target="app",
+            ci_image="i",
+            command=command,
+            pod="p",
+            project_dir="/p",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+
+    def test_collects_from_interpolated_fields_sorted(self) -> None:
+        compose = {"services": {"app": {"image": "${IMG}", "environment": {"A": "${AVAR}", "B": "${BVAR}"}}}}
+        assert referenced_variables(compose, self._options()) == ["AVAR", "BVAR", "IMG"]
+
+    def test_includes_env_file_excludes_non_interpolated_fields(self) -> None:
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "environment": {"K": "${LIVE}"},
+                    "env_file": "${EDIR}/a.env",
+                    "x-note": "${XVAR}",
+                }
+            }
+        }
+        assert referenced_variables(compose, self._options()) == ["EDIR", "LIVE"]
+
+    def test_command_override_vars_are_excluded(self) -> None:
+        compose = {"services": {"app": {"image": "x", "command": "run ${CMDVAR}"}}}
+        options = self._options(command="override ${SHELLVAR}")
+        assert referenced_variables(compose, options) == []

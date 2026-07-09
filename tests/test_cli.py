@@ -157,6 +157,28 @@ class TestMain:
         assert rc == 0  # no longer fails at generation
         assert "${REQUIRED_VAR:?must be set}" in out.out  # shell enforces it at run time
 
+    def test_note_lists_multiple_referenced_variables_sorted(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        yaml_text = "services:\n  app:\n    image: x\n    environment:\n      A: ${ZED}\n      B: ${ALPHA}\n"
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "note: script references variables at run time: ALPHA, ZED" in out.err
+
+    def test_env_file_path_variable_is_live_and_noted(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        yaml_text = "services:\n  app:\n    image: x\n    env_file: ${ENV_DIR}/app.env\n"
+        rc = run_main(
+            yaml_text, ["--target", "app", "--image", "i", "--project-dir", "/p", "--format", "yaml"], monkeypatch
+        )
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "--env-file" in out.out
+        assert "${ENV_DIR-}" in out.out
+        assert "ENV_DIR" in out.err
+
     def test_yaml_anchor_extension_fields_convert(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:

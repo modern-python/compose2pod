@@ -9,10 +9,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from compose2pod.emit import EmitOptions, emit_script
+from compose2pod.emit import EmitOptions, emit_script, referenced_variables
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.parsing import validate
-from compose2pod.shell import referenced_variables
 
 
 _yaml: ModuleType | None = None
@@ -88,24 +87,22 @@ def main(argv: list[str] | None = None) -> int:
     except (json.JSONDecodeError, UnsupportedComposeError) as error:
         sys.stderr.write(f"compose2pod: error: could not parse compose input: {error}\n")
         return 2
+    options = EmitOptions(
+        target=args.target,
+        ci_image=args.image,
+        command=args.command,
+        pod=args.pod_name,
+        project_dir=args.project_dir,
+        artifacts=args.artifact,
+        allow_exit_codes=args.allow_exit_code,
+    )
     try:
         warnings = validate(compose)
-        script = emit_script(
-            compose=compose,
-            options=EmitOptions(
-                target=args.target,
-                ci_image=args.image,
-                command=args.command,
-                pod=args.pod_name,
-                project_dir=args.project_dir,
-                artifacts=args.artifact,
-                allow_exit_codes=args.allow_exit_code,
-            ),
-        )
+        script = emit_script(compose=compose, options=options)
     except UnsupportedComposeError as error:
         sys.stderr.write(f"compose2pod: error: {error}\n")
         return 2
-    referenced = referenced_variables(compose)
+    referenced = referenced_variables(compose, options)
     if referenced:
         sys.stderr.write("compose2pod: note: script references variables at run time: " + ", ".join(referenced) + "\n")
     for warning in warnings:

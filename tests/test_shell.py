@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from compose2pod.shell import referenced_variables, to_shell
+from compose2pod.shell import to_shell, variable_names
 
 
 def _run_fragment(fragment: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -65,14 +65,9 @@ class TestToShell:
         assert result.stdout == "a$(echo pwned)b"
 
 
-class TestReferencedVariables:
-    def test_collects_sorted_unique_names(self) -> None:
-        document = {"services": {"app": {"environment": ["A=$FOO", "B=${BAR}", "C=$FOO"]}}}
-        assert referenced_variables(document) == ["BAR", "FOO"]
-
-    def test_excludes_escaped_and_non_string_leaves(self) -> None:
-        document = {"k": "$$literal", "n": 1, "b": True, "x": "${GO}"}
-        assert referenced_variables(document) == ["GO"]
+class TestVariableNames:
+    def test_collects_names_excluding_escaped(self) -> None:
+        assert variable_names("A=$FOO ${BAR} $$X ${BAZ:-d}") == {"FOO", "BAR", "BAZ"}
 
     def test_empty_when_no_refs(self) -> None:
-        assert referenced_variables({"services": {"app": {"image": "x"}}}) == []
+        assert variable_names("plain") == set()
