@@ -241,6 +241,10 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="must be an int or a soft/hard mapping"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": [1, 2]}}}})
 
+    def test_ulimits_non_scalar_soft_hard_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
+            validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": [1, 2], "hard": 3}}}}})
+
     def test_sysctls_stays_unsupported(self) -> None:
         # Deliberate: sysctls is pod-level (decisions/2026-07-09-sysctls-pod-level.md), keeps raising.
         with pytest.raises(UnsupportedComposeError, match="unsupported key 'sysctls'"):

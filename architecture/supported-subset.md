@@ -66,7 +66,8 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 - **`ulimits`:** a mapping of limit name to either a scalar (`nproc: 65535` →
   `--ulimit nproc=65535`, podman sets soft = hard) or a `{soft, hard}` mapping
   (`nofile: {soft, hard}` → `--ulimit nofile=soft:hard`). A mapping value must
-  have exactly `soft` and `hard`; other shapes are rejected. (`sysctls`, by
+  have exactly `soft` and `hard`, each an int or string; other shapes are
+  rejected. (`sysctls`, by
   contrast, is refused — it is pod-level, not per-container; see
   `planning/decisions/2026-07-09-sysctls-pod-level.md`.)
 - **`labels`:** list (`- KEY=value` / `- KEY`) or mapping (`KEY: value` / `KEY:`),

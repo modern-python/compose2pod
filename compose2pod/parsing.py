@@ -119,6 +119,9 @@ def _validate_ulimits(name: str, svc: dict[str, Any]) -> None:
             if set(spec) != {"soft", "hard"}:
                 msg = f"service {name!r}: ulimit {limit!r} mapping must have exactly 'soft' and 'hard'"
                 raise UnsupportedComposeError(msg)
+            if not isinstance(spec["soft"], int | str) or not isinstance(spec["hard"], int | str):
+                msg = f"service {name!r}: ulimit {limit!r} 'soft' and 'hard' must be int or str"
+                raise UnsupportedComposeError(msg)
         elif not isinstance(spec, int | str):
             msg = f"service {name!r}: ulimit {limit!r} must be an int or a soft/hard mapping"
             raise UnsupportedComposeError(msg)
