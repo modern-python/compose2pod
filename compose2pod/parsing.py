@@ -92,6 +92,10 @@ def _validate_service_forms(name: str, svc: dict[str, Any]) -> None:
         if key in svc and not isinstance(svc[key], bool):
             msg = f"service {name!r}: '{key}' must be a boolean"
             raise UnsupportedComposeError(msg)
+
+
+def _validate_pull_policy(name: str, svc: dict[str, Any]) -> None:
+    """Check pull_policy is a supported enum value (mapped to podman's --pull)."""
     policy = svc.get("pull_policy")
     if policy is not None and (not isinstance(policy, str) or policy not in PULL_POLICY_MAP):
         allowed = "/".join(PULL_POLICY_MAP)
@@ -115,6 +119,7 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
     _validate_service_forms(name, svc)
+    _validate_pull_policy(name, svc)
     return warnings
 
 
