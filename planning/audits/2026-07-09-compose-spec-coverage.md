@@ -43,8 +43,6 @@ network namespace, so none conflicts with the pod.
 | `extra_hosts` | `--add-host` | Merges into the existing add-host set |
 | `init` | `--init` | boolean |
 | `read_only` | `--read-only` | boolean |
-| `stop_signal` | `--stop-signal` | Direct |
-| `stop_grace_period` | `--stop-timeout` | duration parse |
 | `cap_add` / `cap_drop` | `--cap-add` / `--cap-drop` | lists |
 | `privileged` | `--privileged` | boolean |
 | `security_opt` | `--security-opt` | list |
@@ -55,6 +53,15 @@ network namespace, so none conflicts with the pod.
 | `ulimits` | `--ulimit` | soft/hard map form |
 | `annotations` | `--annotation` | Direct |
 | `sysctls` | `--sysctl` | net-namespace sysctls are pod-level; non-net ones are per-container |
+
+**Shipped:** `entrypoint`, `user`, `working_dir`, `labels`, `group_add`
+(`changes/2026-07-09.03`); `read_only`, `init`, `privileged`, `cap_add`,
+`cap_drop`, `security_opt` (`changes/2026-07-09.04`).
+
+**Moved out:** `stop_signal`/`stop_grace_period` were listed here but are inert
+under the `podman pod rm -f` force teardown (no graceful `podman stop` is ever
+emitted), so they are reclassified accepted-but-inert — see
+`decisions/2026-07-09-stop-lifecycle-keys-inert.md`.
 
 ## Bucket B — meaningful, needs translation or pod-wide reconciliation
 
