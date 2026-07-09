@@ -213,3 +213,14 @@ class TestValidate:
     def test_read_only_non_bool_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'read_only' must be a boolean"):
             validate({"services": {"app": {"image": "x", "read_only": "yes"}}})
+
+    def test_pull_policy_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "pull_policy": "always"}}}) == []
+
+    def test_pull_policy_build_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="pull_policy 'build'"):
+            validate({"services": {"app": {"image": "x", "pull_policy": "build"}}})
+
+    def test_pull_policy_unknown_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="pull_policy 'sometimes'"):
+            validate({"services": {"app": {"image": "x", "pull_policy": "sometimes"}}})

@@ -26,6 +26,13 @@ _LIST_FLAGS: dict[str, str] = {
 
 _MAP_FLAGS: dict[str, str] = {"labels": "--label", "annotations": "--annotation"}
 
+PULL_POLICY_MAP: dict[str, str] = {
+    "always": "always",
+    "never": "never",
+    "missing": "missing",
+    "if_not_present": "missing",
+}
+
 
 @dataclasses.dataclass(frozen=True)
 class _Expand:
@@ -134,6 +141,13 @@ def _add_extra_host_flags(flags: list[Token], svc: dict[str, Any]) -> None:
         flags += ["--add-host", _Expand(str(entry))]
 
 
+def _add_pull_policy_flag(flags: list[Token], svc: dict[str, Any]) -> None:
+    """Add --pull from pull_policy (a validated enum, mapped to podman's vocabulary)."""
+    policy = svc.get("pull_policy")
+    if policy is not None:
+        flags += ["--pull", PULL_POLICY_MAP[policy]]
+
+
 def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
     """Add the scalar-, boolean-, list-, and label-driven flags to the flags list."""
     for key, flag in _SCALAR_FLAGS.items():
@@ -160,6 +174,7 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     _add_health_flags(flags, svc.get("healthcheck") or {})
     _add_declarative_flags(flags, svc)
     _add_extra_host_flags(flags, svc)
+    _add_pull_policy_flag(flags, svc)
     return flags
 
 

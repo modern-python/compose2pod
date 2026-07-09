@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from compose2pod.emit import PULL_POLICY_MAP
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on
 from compose2pod.healthcheck import has_healthcheck
@@ -35,6 +36,7 @@ SUPPORTED_SERVICE_KEYS = {
     "devices",
     "annotations",
     "extra_hosts",
+    "pull_policy",
 }
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty", "stop_signal", "stop_grace_period"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
@@ -90,6 +92,11 @@ def _validate_service_forms(name: str, svc: dict[str, Any]) -> None:
         if key in svc and not isinstance(svc[key], bool):
             msg = f"service {name!r}: '{key}' must be a boolean"
             raise UnsupportedComposeError(msg)
+    policy = svc.get("pull_policy")
+    if policy is not None and (not isinstance(policy, str) or policy not in PULL_POLICY_MAP):
+        allowed = "/".join(PULL_POLICY_MAP)
+        msg = f"service {name!r}: unsupported pull_policy {policy!r} (use {allowed})"
+        raise UnsupportedComposeError(msg)
 
 
 def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:

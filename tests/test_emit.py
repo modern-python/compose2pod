@@ -175,6 +175,15 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "extra_hosts": {"myhost": "2001:db8::1"}}, "p", [], "/b")
         assert flags[4:6] == ["--add-host", _Expand("myhost:2001:db8::1")]
 
+    def test_pull_policy_maps_if_not_present_to_missing(self) -> None:
+        flags = run_flags("app", {"image": "x", "pull_policy": "if_not_present"}, "p", [], "/b")
+        assert flags[4:6] == ["--pull", "missing"]
+
+    def test_pull_policy_passthrough_values(self) -> None:
+        for value in ("always", "never", "missing"):
+            flags = run_flags("app", {"image": "x", "pull_policy": value}, "p", [], "/b")
+            assert flags[4:6] == ["--pull", value]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:
