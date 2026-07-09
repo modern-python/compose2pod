@@ -35,7 +35,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   command after the image, so `podman run --entrypoint a IMAGE b <command>`
   runs `a b <command>` -- no JSON needed. A string (shell-form) entrypoint
   ignores the service `command`, matching Docker; `validate()` warns when both
-  are set. The target's `--command` override still applies as explicit intent.
+  are set. The target's `--command` override still applies as explicit intent,
+  but when the target has a string entrypoint, the override tokens land after
+  `-c <entrypoint-string>` and are passed positionally to `sh` as `$0`/`$1`...
+  rather than executed -- the same Docker shell-form `ENTRYPOINT` semantic, not
+  a compose2pod-specific limitation. Use a list (exec-form) entrypoint, or none,
+  if the override needs to actually run.
 - **`user` / `working_dir`:** strings, emitted verbatim as `--user` / `--workdir`.
 - **`group_add`:** a list, emitted as repeated `--group-add`.
 - **`labels`:** list (`- KEY=value` / `- KEY`) or mapping (`KEY: value` / `KEY:`),
