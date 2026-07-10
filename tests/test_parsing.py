@@ -293,3 +293,20 @@ class TestValidate:
         doc = {"services": {"app": {"image": "x", "secrets": ["ghost"]}}}
         with pytest.raises(UnsupportedComposeError, match="unknown secret 'ghost'"):
             validate(doc)
+
+    def test_config_short_form_accepted(self) -> None:
+        doc = {"services": {"app": {"image": "x", "configs": ["c"]}}, "configs": {"c": {"content": "hi"}}}
+        assert validate(doc) == []
+
+    def test_unknown_config_reference_rejected(self) -> None:
+        doc = {"services": {"app": {"image": "x", "configs": ["ghost"]}}, "configs": {"c": {"file": "./c"}}}
+        with pytest.raises(UnsupportedComposeError, match="unknown config"):
+            validate(doc)
+
+    def test_relative_config_target_rejected_at_gate(self) -> None:
+        doc = {
+            "services": {"app": {"image": "x", "configs": [{"source": "c", "target": "c.conf"}]}},
+            "configs": {"c": {"file": "./c"}},
+        }
+        with pytest.raises(UnsupportedComposeError, match="must be an absolute path"):
+            validate(doc)

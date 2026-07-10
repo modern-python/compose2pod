@@ -302,6 +302,27 @@ class TestSecretsLifecycle:
         )
         assert "API_KEY" in referenced_variables(doc, options)
 
+    def test_config_create_trap_and_mount(self) -> None:
+        doc = {
+            "services": {"app": {"image": "x", "configs": [{"source": "nginx", "target": "/etc/nginx.conf"}]}},
+            "configs": {"nginx": {"file": "./nginx.conf"}},
+        }
+        script = self._script(doc)
+        assert 'podman secret create test-pod-config-nginx "/proj/nginx.conf"' in script
+        assert "podman secret rm test-pod-config-nginx" in script
+        assert "--secret source=test-pod-config-nginx,target=/etc/nginx.conf" in script
+
+    def test_secret_and_same_named_config_are_distinct_stores(self) -> None:
+        doc = {
+            "services": {"app": {"image": "x", "secrets": ["app"], "configs": ["app"]}},
+            "secrets": {"app": {"file": "./s"}},
+            "configs": {"app": {"file": "./c"}},
+        }
+        script = self._script(doc)
+        assert "podman secret rm test-pod-app test-pod-config-app" in script
+        assert "--secret source=test-pod-app,target=app" in script
+        assert "--secret source=test-pod-config-app,target=/app" in script
+
 
 class TestEmitScript:
     def make_script(self, chats_compose: dict) -> str:

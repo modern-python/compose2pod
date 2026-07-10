@@ -6,13 +6,14 @@ from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS
-from compose2pod.secrets import validate_secrets
+from compose2pod.store import validate_all
+from compose2pod.stores import STORE_KINDS
 
 
 SUPPORTED_SERVICE_KEYS = set(SERVICE_KEYS) | STRUCTURAL_KEYS
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty", "stop_signal", "stop_grace_period"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
-SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks", "volumes", "secrets"}
+SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks", "volumes", "secrets", "configs"}
 DEPENDS_ON_CONDITIONS = {"service_started", "service_healthy", "service_completed_successfully"}
 
 
@@ -127,5 +128,5 @@ def validate(compose: dict[str, Any]) -> list[str]:
         warnings.extend(_validate_service(name, svc))
     hostnames(services)  # validate hostname/container_name/networks shapes at the gate
     _validate_depends_on(services)
-    validate_secrets(compose)
+    validate_all(compose, STORE_KINDS)
     return warnings
