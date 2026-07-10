@@ -14,6 +14,14 @@ class TestDependsOn:
     def test_missing_depends_on_is_empty(self) -> None:
         assert depends_on({"image": "x"}) == {}
 
+    def test_non_list_or_mapping_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'depends_on' must be a list or mapping"):
+            depends_on({"depends_on": "db"})
+
+    def test_mapping_entry_not_a_mapping_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="depends_on entry 'db' must be a mapping"):
+            depends_on({"depends_on": {"db": "service_healthy"}})
+
 
 class TestHostnames:
     def test_collects_service_names_and_aliases(self, chats_compose: dict) -> None:
@@ -40,6 +48,22 @@ class TestHostnames:
     def test_empty_hostname_is_skipped(self) -> None:
         services = {"a": {"image": "x", "hostname": ""}}
         assert hostnames(services) == ["a"]
+
+    def test_non_string_hostname_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'app': hostname must be a string"):
+            hostnames({"app": {"image": "x", "hostname": 5}})
+
+    def test_non_string_container_name_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'app': container_name must be a string"):
+            hostnames({"app": {"image": "x", "container_name": ["c"]}})
+
+    def test_networks_not_list_or_mapping_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'app': networks must be a list or mapping"):
+            hostnames({"app": {"image": "x", "networks": "default"}})
+
+    def test_networks_list_short_form_and_null_value_accepted(self) -> None:
+        assert hostnames({"app": {"image": "x", "networks": ["n1"]}}) == ["app"]
+        assert hostnames({"app": {"image": "x", "networks": {"default": None}}}) == ["app"]
 
 
 class TestStartupOrder:

@@ -10,24 +10,44 @@ def depends_on(svc: dict[str, Any]) -> dict[str, str]:
     deps = svc.get("depends_on") or {}
     if isinstance(deps, list):
         return cast(dict[str, str], dict.fromkeys(deps, "service_started"))
-    return {name: spec.get("condition", "service_started") for name, spec in deps.items()}
+    if not isinstance(deps, dict):
+        msg = "'depends_on' must be a list or mapping"
+        raise UnsupportedComposeError(msg)
+    result: dict[str, str] = {}
+    for dep, spec in deps.items():
+        if not isinstance(spec, dict):
+            msg = f"depends_on entry {dep!r} must be a mapping"
+            raise UnsupportedComposeError(msg)
+        result[dep] = spec.get("condition", "service_started")
+    return result
+
+
+def _host_names(name: str, svc: dict[str, Any]) -> list[str]:
+    """Names one service is reachable by: hostname, container_name, and network aliases."""
+    result: list[str] = []
+    for key in ("hostname", "container_name"):
+        value = svc.get(key)
+        if value is not None and not isinstance(value, str):
+            msg = f"service {name!r}: {key} must be a string"
+            raise UnsupportedComposeError(msg)
+        if value:
+            result.append(value)
+    networks = svc.get("networks")
+    if networks is not None and not isinstance(networks, list | dict):
+        msg = f"service {name!r}: networks must be a list or mapping"
+        raise UnsupportedComposeError(msg)
+    if isinstance(networks, dict):
+        for network in networks.values():
+            if isinstance(network, dict):
+                result.extend(network.get("aliases") or [])
+    return result
 
 
 def hostnames(services: dict[str, Any]) -> list[str]:
     """All names other services may use to reach a service: names, hostnames/container names, then aliases."""
     names = list(services)
-    for svc in services.values():
-        hostname = svc.get("hostname")
-        if hostname:
-            names.append(hostname)
-        container_name = svc.get("container_name")
-        if container_name:
-            names.append(container_name)
-        networks = svc.get("networks")
-        if isinstance(networks, dict):
-            for network in networks.values():
-                if isinstance(network, dict):
-                    names.extend(network.get("aliases") or [])
+    for name, svc in services.items():
+        names.extend(_host_names(name, svc))
     return names
 
 

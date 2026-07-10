@@ -3,8 +3,8 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.graph import depends_on
-from compose2pod.healthcheck import has_healthcheck
+from compose2pod.graph import depends_on, hostnames
+from compose2pod.healthcheck import has_healthcheck, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS
 
 
@@ -16,13 +16,21 @@ DEPENDS_ON_CONDITIONS = {"service_started", "service_healthy", "service_complete
 
 
 def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
-    """Check healthcheck keys against the supported subset, skipping 'x-' extension keys."""
-    for key in sorted(svc.get("healthcheck") or {}):
+    """Check healthcheck is a mapping with supported keys and a parseable interval."""
+    healthcheck = svc.get("healthcheck")
+    if healthcheck is None:
+        return
+    if not isinstance(healthcheck, dict):
+        msg = f"service {name!r}: healthcheck must be a mapping"
+        raise UnsupportedComposeError(msg)
+    for key in sorted(healthcheck):
         if key.startswith("x-"):
             continue
         if key not in SUPPORTED_HEALTHCHECK_KEYS:
             msg = f"service {name!r}: unsupported healthcheck key '{key}'"
             raise UnsupportedComposeError(msg)
+    if "interval" in healthcheck:
+        interval_seconds(healthcheck["interval"])
 
 
 def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
@@ -49,6 +57,14 @@ def _validate_entrypoint(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
+def _validate_tmpfs(name: str, svc: dict[str, Any]) -> None:
+    """Check tmpfs is a string or list."""
+    tmpfs = svc.get("tmpfs")
+    if tmpfs is not None and not isinstance(tmpfs, str | list):
+        msg = f"service {name!r}: tmpfs must be a string or list"
+        raise UnsupportedComposeError(msg)
+
+
 def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
     """Validate one service; returns warnings, raises UnsupportedComposeError."""
     warnings: list[str] = []
@@ -65,6 +81,7 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
     _validate_entrypoint(name, svc)
+    _validate_tmpfs(name, svc)
     for key, spec in SERVICE_KEYS.items():
         if key in svc:
             spec.validate(name, key, svc[key])
@@ -107,5 +124,6 @@ def validate(compose: dict[str, Any]) -> list[str]:
         raise UnsupportedComposeError(msg)
     for name, svc in services.items():
         warnings.extend(_validate_service(name, svc))
+    hostnames(services)  # validate hostname/container_name/networks shapes at the gate
     _validate_depends_on(services)
     return warnings
