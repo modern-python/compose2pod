@@ -15,7 +15,7 @@ PULL_POLICY_MAP: dict[str, str] = {
 }
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class _Expand:
     """A token whose Compose variable references expand at script-run time."""
 
@@ -36,7 +36,7 @@ def _key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     return [key if val is None else f"{key}={val}" for key, val in value.items()]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class KeySpec:
     """A service-key spec: how one Compose service key is validated and emitted."""
 
@@ -70,36 +70,36 @@ def _validate_map(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Co
 
 def _scalar(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-        return [flag, _Expand(str(value))]
+        return [flag, _Expand(value=str(value))]
 
-    return KeySpec(_validate_scalar, emit)
+    return KeySpec(validate=_validate_scalar, emit=emit)
 
 
 def _bool(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
         return [flag] if value else []
 
-    return KeySpec(_validate_bool, emit)
+    return KeySpec(validate=_validate_bool, emit=emit)
 
 
 def _list(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
         tokens: list[Token] = []
         for item in value:
-            tokens += [flag, _Expand(str(item))]
+            tokens += [flag, _Expand(value=str(item))]
         return tokens
 
-    return KeySpec(_validate_list, emit)
+    return KeySpec(validate=_validate_list, emit=emit)
 
 
 def _map(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
         tokens: list[Token] = []
         for pair in _key_value_pairs(value):
-            tokens += [flag, _Expand(str(pair))]
+            tokens += [flag, _Expand(value=str(pair))]
         return tokens
 
-    return KeySpec(_validate_map, emit)
+    return KeySpec(validate=_validate_map, emit=emit)
 
 
 def _extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
@@ -112,7 +112,7 @@ def _extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
 def _emit_extra_hosts(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     tokens: list[Token] = []
     for entry in _extra_host_pairs(value):
-        tokens += ["--add-host", _Expand(str(entry))]
+        tokens += ["--add-host", _Expand(value=str(entry))]
     return tokens
 
 
@@ -159,7 +159,7 @@ def _emit_ulimits(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values a
         return []
     tokens: list[Token] = []
     for arg in _ulimit_args(value):
-        tokens += ["--ulimit", _Expand(arg)]
+        tokens += ["--ulimit", _Expand(value=arg)]
     return tokens
 
 
@@ -177,9 +177,9 @@ SERVICE_KEYS: dict[str, KeySpec] = {
     "devices": _list("--device"),
     "labels": _map("--label"),
     "annotations": _map("--annotation"),
-    "extra_hosts": KeySpec(_validate_map, _emit_extra_hosts),
-    "pull_policy": KeySpec(_validate_pull_policy, _emit_pull_policy),
-    "ulimits": KeySpec(_validate_ulimits, _emit_ulimits),
+    "extra_hosts": KeySpec(validate=_validate_map, emit=_emit_extra_hosts),
+    "pull_policy": KeySpec(validate=_validate_pull_policy, emit=_emit_pull_policy),
+    "ulimits": KeySpec(validate=_validate_ulimits, emit=_emit_ulimits),
 }
 
 STRUCTURAL_KEYS: set[str] = {
