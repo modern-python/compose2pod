@@ -46,9 +46,12 @@ def interval_seconds(duration: object) -> int:
     if isinstance(duration, (int, float)):
         return max(int(duration), 1)
     text = str(duration).strip()
-    if text.endswith("ms"):
-        return max(int(float(text[:-2]) / 1000), 1)
-    if text.endswith("m"):
-        return max(int(float(text[:-1])) * 60, 1)
-    text = text.removesuffix("s")
-    return max(int(float(text)), 1)
+    try:
+        if text.endswith("ms"):
+            return max(int(float(text[:-2]) / 1000), 1)
+        if text.endswith("m"):
+            return max(int(float(text[:-1])) * 60, 1)
+        return max(int(float(text.removesuffix("s"))), 1)
+    except ValueError:
+        msg = f"unsupported healthcheck interval {duration!r} (use forms like '30s', '2m', '500ms')"
+        raise UnsupportedComposeError(msg) from None

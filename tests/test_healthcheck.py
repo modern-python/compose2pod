@@ -65,6 +65,11 @@ class TestIntervalSeconds:
     def test_float_value_below_one_floors_to_one(self) -> None:
         assert interval_seconds(0.4) == 1
 
+    def test_unparseable_interval_raises(self) -> None:
+        for bad in ("1h30m", "abc", "5x"):
+            with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+                interval_seconds(bad)
+
 
 class TestHasHealthcheck:
     def test_true_when_test_present(self) -> None:
