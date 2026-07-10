@@ -88,8 +88,10 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   `<path>:<options>` (e.g. `/tmp:mode=1777`), passed through verbatim as
   `podman run --tmpfs <value>` — Compose's short syntax maps directly onto
   podman's own `--tmpfs CONTAINER-DIR[:OPTIONS]` flag, so no translation is
-  needed. No format validation; a malformed option string surfaces as a
-  podman error at run time.
+  needed. The key itself must be a string or list — a non-string/non-list
+  value (e.g. a mapping) raises; no format validation beyond that, so a
+  malformed option string inside an accepted string/list surfaces as a podman
+  error at run time.
 - **`hostname` and `container_name`:** both are made resolvable to
   `127.0.0.1` like a network alias (added to the shared `--add-host` set), so
   other services can reach the service by either name. The pod shares the UTS
@@ -97,7 +99,17 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   container is always named `{pod}-{service}` regardless of `container_name`
   (used internally for `podman cp`, healthcheck polling, and target-container
   diagnostics) — only name *resolution* is meaningful to other services, and
-  no per-container `--hostname` or renamed `--name` is emitted.
+  no per-container `--hostname` or renamed `--name` is emitted. Each must be a
+  string when present; a non-string raises (`_host_names`,
+  `compose2pod/graph.py`).
+- **Per-service `networks`:** long (mapping) form contributes each entry's
+  `aliases` to the same resolvable-name set as `hostname`/`container_name`;
+  short (list) form carries no aliases (a bare network name has none to
+  contribute). The key must be a list or mapping — anything else raises. A
+  long-form *value* that isn't itself a mapping (e.g. `networks: {default:
+  true}`) is lenient, not rejected: it simply contributes no aliases, since
+  only a mapping value can carry an `aliases` list (`_host_names`,
+  `compose2pod/graph.py`).
 - **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty`, `stop_signal`,
   `stop_grace_period` — meaningless or irrelevant inside a single
   shared-namespace pod. `stop_signal`/`stop_grace_period` are inert because the
@@ -110,6 +122,16 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 ## Healthcheck keys
 
 - **Supported:** `test`, `interval`, `timeout`, `retries`, `start_period`.
+- A `healthcheck` value that isn't a mapping raises
+  (`_validate_service_healthcheck`, `compose2pod/parsing.py`) — previously a
+  non-mapping healthcheck reached `.get()` calls downstream and crashed raw
+  instead of failing at the gate.
+- **`interval`:** parsed to whole seconds by `interval_seconds`
+  (`compose2pod/healthcheck.py`). Supported forms: a bare number of seconds
+  (`30`, `"30"`, `"30s"`), minutes (`"2m"`), and milliseconds (`"500ms"`).
+  Compound durations (`"1h30m"`) and hour suffixes (`"1h"`) are not parsed —
+  each is rejected with an `UnsupportedComposeError` rather than silently
+  truncated or misinterpreted.
 - **Extension fields:** any `x-`-prefixed healthcheck key is accepted and
   ignored silently.
 - Everything else raises.
@@ -198,6 +220,13 @@ relies on a `.env` file.
 All three conditions are honored: `service_started`, `service_healthy`,
 `service_completed_successfully`. A `service_healthy` dependency on a service
 with no usable healthcheck raises.
+
+`depends_on` (`compose2pod/graph.py`) itself must be either a list of service
+names (short form, each defaulting to `service_started`) or a mapping of
+service name to a per-dependency mapping (long form, read for `condition`).
+Anything else — a bare string, a number, a mapping whose value isn't itself a
+mapping — raises `UnsupportedComposeError` at the gate instead of failing
+later with a raw `AttributeError`/`TypeError` when the shape is walked.
 
 ## YAML anchors and merge keys
 
