@@ -82,6 +82,10 @@ class TestRunFlags:
         flags = run_flags("db", svc, "p", [], "/builds/x")
         assert flags[4:6] == ["-v", _Expand(value="pgdata:/var/lib/postgresql/data")]
 
+    def test_secret_flag_emitted(self) -> None:
+        flags = run_flags("app", {"image": "x", "secrets": ["db"]}, "test-pod", [], "/b")
+        assert flags[-2:] == ["--secret", "source=test-pod-db,target=db"]
+
     def test_healthcheck_without_timeout_omits_health_timeout_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "healthcheck": {"test": "true"}}, "p", [], "/builds/x")
         assert flags[4:6] == ["--health-cmd", _Expand(value="true")]
@@ -263,6 +267,40 @@ class TestEntrypoint:
 
     def test_missing_entrypoint_is_empty(self) -> None:
         assert entrypoint_tokens({"image": "x"}) == []
+
+
+class TestSecretsLifecycle:
+    def _script(self, doc: dict) -> str:
+        options = EmitOptions(
+            target="app",
+            ci_image="ci",
+            command="",
+            pod="test-pod",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        return emit_script(compose=doc, options=options)
+
+    def test_file_secret_create_and_trap_and_mount(self) -> None:
+        doc = {"services": {"app": {"image": "x", "secrets": ["db"]}}, "secrets": {"db": {"file": "./db.txt"}}}
+        script = self._script(doc)
+        assert 'podman secret create test-pod-db "/proj/db.txt"' in script
+        assert "podman secret rm test-pod-db" in script
+        assert "--secret source=test-pod-db,target=db" in script
+
+    def test_env_secret_referenced_variable_noted(self) -> None:
+        doc = {"services": {"app": {"image": "x", "secrets": ["k"]}}, "secrets": {"k": {"environment": "API_KEY"}}}
+        options = EmitOptions(
+            target="app",
+            ci_image="ci",
+            command="",
+            pod="p",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        assert "API_KEY" in referenced_variables(doc, options)
 
 
 class TestEmitScript:
