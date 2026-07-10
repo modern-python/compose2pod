@@ -71,6 +71,23 @@ class TestValidateSecrets:
         with pytest.raises(UnsupportedComposeError, match="secret entry 'source' must be a string"):
             validate_secrets(_doc({"a": {"file": "./a"}}, [{"source": 123}]))
 
+    def test_injecting_secret_name_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must match"):
+            validate_secrets(_doc({"n'; touch /tmp/x; '": {"file": "./a"}}, None))
+
+    def test_dotted_dashed_secret_name_accepted(self) -> None:
+        validate_secrets(_doc({"db.pw-1": {"file": "./a"}}, ["db.pw-1"]))
+
+    def test_bad_env_var_name_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="not a valid identifier"):
+            validate_secrets(_doc({"s": {"environment": 'X"; touch /tmp/x; "'}}, None))
+
+    def test_non_scalar_long_form_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="secret 'mode' must be an int or string"):
+            validate_secrets(_doc({"s": {"file": "./a"}}, [{"source": "s", "mode": True}]))
+        with pytest.raises(UnsupportedComposeError, match="secret 'uid' must be an int or string"):
+            validate_secrets(_doc({"s": {"file": "./a"}}, [{"source": "s", "uid": [1]}]))
+
 
 class TestSecretEmission:
     def test_short_form_flag(self) -> None:

@@ -1,5 +1,6 @@
 """Translate compose secrets into podman secret store create / mount / remove."""
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,9 +10,14 @@ from compose2pod.shell import to_shell, variable_names
 
 
 _LONG_FORM_KEYS = {"source", "target", "uid", "gid", "mode"}
+_SECRET_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
+_ENV_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 def _validate_secret_def(name: str, definition: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    if not _SECRET_NAME.match(name):
+        msg = f"secret name {name!r} must match [a-zA-Z0-9][a-zA-Z0-9_.-]*"
+        raise UnsupportedComposeError(msg)
     if not isinstance(definition, dict):
         msg = f"secret {name!r} must be a mapping"
         raise UnsupportedComposeError(msg)
@@ -26,6 +32,16 @@ def _validate_secret_def(name: str, definition: Any) -> None:  # noqa: ANN401 - 
     if len(sources) != 1:
         msg = f"secret {name!r} must have exactly one of 'file' or 'environment' (a string)"
         raise UnsupportedComposeError(msg)
+    if sources[0] == "environment" and not _ENV_NAME.match(definition["environment"]):
+        msg = f"secret {name!r}: environment variable name {definition['environment']!r} is not a valid identifier"
+        raise UnsupportedComposeError(msg)
+
+
+def _check_long_form_scalars(name: str, ref: dict[str, Any]) -> None:
+    for key in ("uid", "gid", "mode"):
+        if key in ref and (isinstance(ref[key], bool) or not isinstance(ref[key], int | str)):
+            msg = f"service {name!r}: secret {key!r} must be an int or string"
+            raise UnsupportedComposeError(msg)
 
 
 def _ref_source(name: str, ref: Any) -> str:  # noqa: ANN401 - Compose values are untyped
@@ -42,6 +58,7 @@ def _ref_source(name: str, ref: Any) -> str:  # noqa: ANN401 - Compose values ar
     if not isinstance(source, str):
         msg = f"service {name!r}: secret entry 'source' must be a string"
         raise UnsupportedComposeError(msg)
+    _check_long_form_scalars(name, ref)
     return source
 
 
