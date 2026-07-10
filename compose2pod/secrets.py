@@ -1,14 +1,17 @@
 """Translate compose secrets into podman secret store create / mount / remove."""
 
+from pathlib import Path
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
+from compose2pod.keys import Token
+from compose2pod.shell import to_shell, variable_names
 
 
 _LONG_FORM_KEYS = {"source", "target", "uid", "gid", "mode"}
 
 
-def _validate_secret_def(name: str, definition: Any) -> None:  # noqa: ANN401
+def _validate_secret_def(name: str, definition: Any) -> None:  # noqa: ANN401 - Compose values are untyped
     if not isinstance(definition, dict):
         msg = f"secret {name!r} must be a mapping"
         raise UnsupportedComposeError(msg)
@@ -25,7 +28,7 @@ def _validate_secret_def(name: str, definition: Any) -> None:  # noqa: ANN401
         raise UnsupportedComposeError(msg)
 
 
-def _ref_source(name: str, ref: Any) -> str:  # noqa: ANN401
+def _ref_source(name: str, ref: Any) -> str:  # noqa: ANN401 - Compose values are untyped
     if isinstance(ref, str):
         return ref
     if not isinstance(ref, dict):
@@ -63,3 +66,59 @@ def validate_secrets(compose: dict[str, Any]) -> None:
             if source not in defs:
                 msg = f"service {name!r}: unknown secret {source!r}"
                 raise UnsupportedComposeError(msg)
+
+
+def _mode_str(mode: Any) -> str:  # noqa: ANN401 - Compose values are untyped
+    return format(mode, "04o") if isinstance(mode, int) else str(mode)
+
+
+def referenced_secret_names(services: dict[str, Any], order: list[str]) -> list[str]:
+    """Secret names referenced by services in `order`, unique in first-seen order."""
+    seen: dict[str, None] = {}
+    for name in order:
+        for ref in services[name].get("secrets") or []:
+            seen[ref if isinstance(ref, str) else ref["source"]] = None
+    return list(seen)
+
+
+def secret_flags(svc: dict[str, Any], pod: str) -> list[Token]:
+    """Per-service `--secret source=<pod>-<name>,target=...` flag tokens."""
+    tokens: list[Token] = []
+    for ref in svc.get("secrets") or []:
+        opts = {} if isinstance(ref, str) else ref
+        source = ref if isinstance(ref, str) else ref["source"]
+        parts = [f"source={pod}-{source}", f"target={opts.get('target', source)}"]
+        parts += [f"{key}={opts[key]}" for key in ("uid", "gid") if key in opts]
+        if "mode" in opts:
+            parts.append(f"mode={_mode_str(opts['mode'])}")
+        tokens += ["--secret", ",".join(parts)]
+    return tokens
+
+
+def secret_create_lines(compose: dict[str, Any], pod: str, project_dir: str, names: list[str]) -> list[str]:
+    """`podman secret create` lines for the referenced secrets (file or environment source)."""
+    defs = compose.get("secrets") or {}
+    lines: list[str] = []
+    for name in names:
+        definition = defs[name]
+        store = f"{pod}-{name}"
+        if "file" in definition:
+            path = to_shell(str(Path(project_dir, definition["file"])))
+            lines.append(f"podman secret create {store} {path}")
+        else:
+            var = definition["environment"]
+            lines.append(f"printf '%s' \"${{{var}-}}\" | podman secret create {store} -")
+    return lines
+
+
+def secret_referenced_variables(compose: dict[str, Any], project_dir: str, names: list[str]) -> set[str]:
+    """Run-time variable names the secret create lines expand (env-source vars + file-path vars)."""
+    defs = compose.get("secrets") or {}
+    result: set[str] = set()
+    for name in names:
+        definition = defs[name]
+        if "file" in definition:
+            result |= variable_names(str(Path(project_dir, definition["file"])))
+        else:
+            result.add(definition["environment"])
+    return result

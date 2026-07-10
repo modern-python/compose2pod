@@ -3,10 +3,16 @@ from typing import Any
 import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.secrets import validate_secrets
+from compose2pod.secrets import (
+    referenced_secret_names,
+    secret_create_lines,
+    secret_flags,
+    secret_referenced_variables,
+    validate_secrets,
+)
 
 
-def _doc(secrets: Any = None, svc_secrets: Any = None) -> dict[str, Any]:  # noqa: ANN401
+def _doc(secrets: Any = None, svc_secrets: Any = None) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped
     svc = {"image": "x"}
     if svc_secrets is not None:
         svc["secrets"] = svc_secrets
@@ -64,3 +70,34 @@ class TestValidateSecrets:
     def test_long_form_non_string_source_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="secret entry 'source' must be a string"):
             validate_secrets(_doc({"a": {"file": "./a"}}, [{"source": 123}]))
+
+
+class TestSecretEmission:
+    def test_short_form_flag(self) -> None:
+        assert secret_flags({"secrets": ["db"]}, "p") == ["--secret", "source=p-db,target=db"]
+
+    def test_long_form_flag_with_opts(self) -> None:
+        svc = {"secrets": [{"source": "db", "target": "pw", "uid": "1000", "gid": "1000", "mode": 0o400}]}
+        assert secret_flags(svc, "p") == ["--secret", "source=p-db,target=pw,uid=1000,gid=1000,mode=0400"]
+
+    def test_string_mode_passes_through(self) -> None:
+        svc = {"secrets": [{"source": "db", "mode": "0440"}]}
+        assert secret_flags(svc, "p") == ["--secret", "source=p-db,target=db,mode=0440"]
+
+    def test_referenced_names_deduped_in_order(self) -> None:
+        services = {"a": {"secrets": ["s1", "s2"]}, "b": {"secrets": [{"source": "s1"}]}}
+        assert referenced_secret_names(services, ["a", "b"]) == ["s1", "s2"]
+
+    def test_file_source_create_line(self) -> None:
+        doc = {"secrets": {"db": {"file": "./db.txt"}}}
+        assert secret_create_lines(doc, "p", "/proj", ["db"]) == ['podman secret create p-db "/proj/db.txt"']
+
+    def test_environment_source_create_line(self) -> None:
+        doc = {"secrets": {"k": {"environment": "API_KEY"}}}
+        assert secret_create_lines(doc, "p", "/proj", ["k"]) == [
+            "printf '%s' \"${API_KEY-}\" | podman secret create p-k -"
+        ]
+
+    def test_referenced_variables_from_env_and_path(self) -> None:
+        doc = {"secrets": {"k": {"environment": "API_KEY"}, "f": {"file": "${DIR}/s.txt"}}}
+        assert secret_referenced_variables(doc, "/proj", ["k", "f"]) == {"API_KEY", "DIR"}
