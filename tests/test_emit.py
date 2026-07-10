@@ -202,6 +202,36 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "pull_policy": None, "ulimits": None}, "p", [], "/b")
         assert flags == ["--pod", "p", "--name", "p-app"]
 
+    def test_registry_emission_order_across_shape_groups(self) -> None:
+        # Locks the cross-key flag order (scalar, bool, list, map, extra_hosts, pull_policy, ulimits)
+        # against a future reordering of the SERVICE_KEYS registry.
+        svc = {
+            "image": "x",
+            "user": "root",
+            "init": True,
+            "cap_add": ["NET_ADMIN"],
+            "labels": {"team": "api"},
+            "extra_hosts": {"db": "10.0.0.5"},
+            "pull_policy": "always",
+            "ulimits": {"nofile": 1024},
+        }
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:] == [
+            "--user",
+            _Expand("root"),
+            "--init",
+            "--cap-add",
+            _Expand("NET_ADMIN"),
+            "--label",
+            _Expand("team=api"),
+            "--add-host",
+            _Expand("db:10.0.0.5"),
+            "--pull",
+            "always",
+            "--ulimit",
+            _Expand("nofile=1024"),
+        ]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:
