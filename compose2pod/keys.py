@@ -196,4 +196,5 @@ STRUCTURAL_KEYS: set[str] = {
     "networks",
     "hostname",
     "container_name",
+    "secrets",
 }

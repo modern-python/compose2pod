@@ -21,6 +21,7 @@ def test_supported_service_keys_snapshot() -> None:
         "networks",
         "hostname",
         "container_name",
+        "secrets",
         "user",
         "working_dir",
         "platform",

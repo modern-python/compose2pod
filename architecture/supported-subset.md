@@ -9,7 +9,7 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 ## Top-level keys
 
 - **Supported:** `services` (required, non-empty), `version`, `name`,
-  `networks`.
+  `networks`, `secrets`.
 - **Ignored (warns):** `networks` — all services share the pod's single
   network namespace, so top-level network definitions have no effect.
 - **Extension fields:** any key prefixed `x-` is accepted and ignored
@@ -21,9 +21,10 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 
 - **Supported:** `image`, `build`, `command`, `entrypoint`, `environment`,
   `env_file`, `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
-  `container_name`, `tmpfs`, `user`, `working_dir`, `group_add`, `labels`,
-  `read_only`, `init`, `privileged`, `cap_add`, `cap_drop`, `security_opt`,
-  `platform`, `devices`, `annotations`, `extra_hosts`, `pull_policy`, `ulimits`.
+  `container_name`, `tmpfs`, `secrets`, `user`, `working_dir`, `group_add`,
+  `labels`, `read_only`, `init`, `privileged`, `cap_add`, `cap_drop`,
+  `security_opt`, `platform`, `devices`, `annotations`, `extra_hosts`,
+  `pull_policy`, `ulimits`.
   compose2pod never builds: a `build` section is accepted but its contents
   (context, dockerfile, args) are not read — `image_for` (`compose2pod/emit.py`)
   runs the CI image supplied via `--image` for any service that has one.
@@ -161,6 +162,58 @@ verbatim as `-v <path>` — podman creates an anonymous volume at that path (the
 common way to shadow a subdirectory of a bind mount). No host-path translation
 is applied, since the entry names a container path, not a host source. A
 colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
+
+## Secrets
+
+- **Top-level `secrets:` definitions:** each entry must be a mapping with
+  exactly one of `file:` (a host path, resolved against `--project-dir` when
+  relative) or `environment:` (a host environment variable name), both as a
+  plain string. `external: true` gets its own rejection message (compose's
+  "must already exist" secrets have no analogue here); any other unrecognized
+  key raises generically (`_validate_secret_def`, `compose2pod/secrets.py`).
+- **Per-service `secrets:` references:** short form (`- name`) or long form
+  (a mapping with `source` and optionally `target`, `uid`, `gid`, `mode`).
+  `source` must name a top-level secret; an unknown `source` raises at
+  `validate()` time (`_ref_source`/`validate_secrets`,
+  `compose2pod/secrets.py`).
+- **Closure-scoped creation:** only secrets referenced (by `source`) from
+  somewhere in the target service's dependency closure are ever created, so a
+  top-level secret nothing in the closure references never becomes a
+  `podman secret create` call (`referenced_secret_names`, driven by the same
+  `startup_order` closure used to decide which services run at all).
+- **Creation:** each referenced secret becomes one pod-namespaced
+  `podman secret create <pod>-<name> ...` line, emitted right after
+  `podman pod create` and before any `podman run` (`emit_script`,
+  `compose2pod/emit.py`). A `file:` source resolves
+  `Path(project_dir, file)` through `to_shell()`, so a `${VAR}` in the path
+  expands live when the script runs, exactly like other interpolated fields.
+  An `environment:` source instead pipes `printf '%s' "${VAR-}"` into
+  `podman secret create ... -`, where the `${VAR-}` means an *unset* host
+  variable yields an empty secret rather than failing the script
+  (`secret_create_lines`).
+- **Mounting:** each service reference becomes a
+  `--secret source=<pod>-<name>,target=<target>` flag on that service's
+  `podman run`, where `target` defaults to the secret's own name when the
+  reference doesn't give one (short form, or long form without `target`).
+  `uid`/`gid`/`mode` are only added when the long form gives them explicitly;
+  `mode` renders as a 4-digit octal string when given as a Python int
+  (`0o400` becomes `"0400"`) and passes through verbatim when given as a
+  string (`secret_flags`). When `uid`/`gid`/`mode` are omitted, podman itself
+  applies its own defaults: the secret is mounted at `/run/secrets/<target>`,
+  owned `0:0`, mode `0444`.
+- **Teardown:** the EXIT trap that force-removes the pod also runs
+  `podman secret rm <pod>-<name> ...` for every referenced secret, so the
+  store never outlives the pod even when the script exits abnormally
+  (`emit_script`).
+- **Variable interpolation:** an `environment:` source's variable name, and
+  any `${VAR}` inside a `file:` path, both count toward the CLI's
+  informational stderr note of variables the generated script expands at run
+  time (`secret_referenced_variables`, folded into `referenced_variables()`
+  in `compose2pod/emit.py`); see Variable interpolation, below, for the note
+  itself.
+- Everything else raises `UnsupportedComposeError` rather than silently doing
+  nothing: `external: true`, an unknown `source`, a definition with neither
+  or both of `file`/`environment`, and an unrecognized long-form key.
 
 ## Variable interpolation
 

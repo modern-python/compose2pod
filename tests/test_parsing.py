@@ -54,8 +54,8 @@ class TestValidate:
             validate({"services": {}})
 
     def test_unknown_top_level_key_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="secrets"):
-            validate({"services": {"app": {"image": "x"}}, "secrets": {}})
+        with pytest.raises(UnsupportedComposeError, match="foo"):
+            validate({"services": {"app": {"image": "x"}}, "foo": {}})
 
     def test_top_level_networks_is_ignored_with_warning(self) -> None:
         warnings = validate({"services": {"app": {"image": "x"}}, "networks": {"default": None}})
@@ -284,3 +284,12 @@ class TestValidate:
     def test_valid_networks_forms_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "networks": ["n1"]}}}) == []
         assert validate({"services": {"app": {"image": "x", "networks": {"default": None}}}}) == []
+
+    def test_secrets_top_level_and_service_ref_accepted(self) -> None:
+        doc = {"services": {"app": {"image": "x", "secrets": ["db"]}}, "secrets": {"db": {"file": "./db.txt"}}}
+        assert validate(doc) == []
+
+    def test_unknown_secret_reference_raises(self) -> None:
+        doc = {"services": {"app": {"image": "x", "secrets": ["ghost"]}}}
+        with pytest.raises(UnsupportedComposeError, match="unknown secret 'ghost'"):
+            validate(doc)
