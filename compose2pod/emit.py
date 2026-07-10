@@ -8,8 +8,9 @@ from typing import Any
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, Token, _Expand, _key_value_pairs
-from compose2pod.secrets import referenced_secret_names, secret_create_lines, secret_flags, secret_referenced_variables
 from compose2pod.shell import to_shell, variable_names
+from compose2pod.store import all_create_lines, all_flags, all_referenced_variables, all_teardown_names
+from compose2pod.stores import STORE_KINDS
 
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
@@ -99,7 +100,7 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     for key, spec in SERVICE_KEYS.items():
         if key in svc:
             flags += spec.emit(svc[key])
-    flags += secret_flags(svc, pod)
+    flags += all_flags(svc, pod, STORE_KINDS)
     return flags
 
 
@@ -186,7 +187,6 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
     services = compose["services"]
     hosts = hostnames(services)
     order = startup_order(services, options.target)
-    secret_names = referenced_secret_names(services, order)
     completion_gated = {
         dep
         for svc in services.values()
@@ -196,12 +196,13 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
 
     lines = [_SCRIPT_HEADER]
     teardown = f"podman pod rm -f {shlex.quote(options.pod)} >/dev/null 2>&1 || true"
-    if secret_names:
-        stores = " ".join(f"{options.pod}-{name}" for name in secret_names)
+    store_names = all_teardown_names(services, order, options.pod, STORE_KINDS)
+    if store_names:
+        stores = " ".join(store_names)
         teardown += f"; podman secret rm {stores} >/dev/null 2>&1 || true"
     lines.append(f"trap '{teardown}' EXIT")
     lines.append(f"podman pod create --name {shlex.quote(options.pod)}")
-    lines.extend(secret_create_lines(compose, options.pod, options.project_dir, secret_names))
+    lines.extend(all_create_lines(compose, order, options.pod, options.project_dir, STORE_KINDS))
     waited: set[str] = set()
     for name in order:
         for dep, condition in depends_on(services[name]).items():
@@ -235,5 +236,5 @@ def referenced_variables(compose: dict[str, Any], options: EmitOptions) -> list[
         for token in _run_tokens(name, services, options, hosts):
             if isinstance(token, _Expand):
                 names.update(variable_names(token.value))
-    names |= secret_referenced_variables(compose, options.project_dir, referenced_secret_names(services, order))
+    names |= all_referenced_variables(compose, order, options.project_dir, STORE_KINDS)
     return sorted(names)
