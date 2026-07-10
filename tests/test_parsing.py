@@ -255,3 +255,32 @@ class TestValidate:
 
     def test_ulimits_null_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "ulimits": None}}}) == []
+
+    def test_non_mapping_healthcheck_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="healthcheck must be a mapping"):
+            validate({"services": {"app": {"image": "x", "healthcheck": ["CMD", "true"]}}})
+
+    def test_unparseable_healthcheck_interval_raises(self) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "interval": "1h30m"}}}}
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+            validate(compose)
+
+    def test_tmpfs_non_string_or_list_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="tmpfs must be a string or list"):
+            validate({"services": {"app": {"image": "x", "tmpfs": {"a": "b"}}}})
+
+    def test_non_string_hostname_raises_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="hostname must be a string"):
+            validate({"services": {"app": {"image": "x", "hostname": 5}}})
+
+    def test_networks_not_list_or_mapping_raises_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="networks must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "networks": "default"}}})
+
+    def test_malformed_depends_on_raises_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'depends_on' must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "depends_on": "db"}}})
+
+    def test_valid_networks_forms_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "networks": ["n1"]}}}) == []
+        assert validate({"services": {"app": {"image": "x", "networks": {"default": None}}}}) == []
