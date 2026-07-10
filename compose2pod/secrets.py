@@ -119,7 +119,7 @@ def secret_create_lines(compose: dict[str, Any], pod: str, project_dir: str, nam
     for name in names:
         definition = defs[name]
         store = f"{pod}-{name}"
-        if "file" in definition:
+        if isinstance(definition.get("file"), str):
             path = to_shell(str(Path(project_dir, definition["file"])))
             lines.append(f"podman secret create {store} {path}")
         else:
@@ -134,7 +134,7 @@ def secret_referenced_variables(compose: dict[str, Any], project_dir: str, names
     result: set[str] = set()
     for name in names:
         definition = defs[name]
-        if "file" in definition:
+        if isinstance(definition.get("file"), str):
             result |= variable_names(str(Path(project_dir, definition["file"])))
         else:
             result.add(definition["environment"])

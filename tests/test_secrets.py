@@ -126,3 +126,12 @@ class TestSecretEmission:
     def test_referenced_variables_from_env_and_path(self) -> None:
         doc = {"secrets": {"k": {"environment": "API_KEY"}, "f": {"file": "${DIR}/s.txt"}}}
         assert secret_referenced_variables(doc, "/proj", ["k", "f"]) == {"API_KEY", "DIR"}
+
+    def test_non_string_file_takes_environment_branch(self) -> None:
+        # validate_secrets picks the *string* source (environment); emission must agree,
+        # not branch on `file` key presence and crash in Path() on the non-string value.
+        doc = {"secrets": {"k": {"file": ["x"], "environment": "API_KEY"}}}
+        assert secret_create_lines(doc, "p", "/proj", ["k"]) == [
+            "printf '%s' \"${API_KEY-}\" | podman secret create p-k -"
+        ]
+        assert secret_referenced_variables(doc, "/proj", ["k"]) == {"API_KEY"}
