@@ -2,45 +2,13 @@
 
 from typing import Any
 
-# PULL_POLICY_MAP is shared vocabulary: validation checks membership, emission maps values.
-# Deliberate one-way import (emit.py never imports parsing.py), so no cycle.
-from compose2pod.emit import PULL_POLICY_MAP
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on
 from compose2pod.healthcheck import has_healthcheck
+from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS
 
 
-SUPPORTED_SERVICE_KEYS = {
-    "image",
-    "build",
-    "command",
-    "entrypoint",
-    "environment",
-    "env_file",
-    "volumes",
-    "healthcheck",
-    "depends_on",
-    "networks",
-    "hostname",
-    "container_name",
-    "tmpfs",
-    "user",
-    "working_dir",
-    "group_add",
-    "labels",
-    "read_only",
-    "init",
-    "privileged",
-    "cap_add",
-    "cap_drop",
-    "security_opt",
-    "platform",
-    "devices",
-    "annotations",
-    "extra_hosts",
-    "pull_policy",
-    "ulimits",
-}
+SUPPORTED_SERVICE_KEYS = set(SERVICE_KEYS) | STRUCTURAL_KEYS
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty", "stop_signal", "stop_grace_period"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
 SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks", "volumes"}
@@ -74,57 +42,11 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         # volume implicitly on first reference.
 
 
-def _validate_service_forms(name: str, svc: dict[str, Any]) -> None:
-    """Check the process/identity keys use their allowed Compose forms."""
-    for key in ("user", "working_dir", "platform"):
-        if key in svc and not isinstance(svc[key], str):
-            msg = f"service {name!r}: '{key}' must be a string"
-            raise UnsupportedComposeError(msg)
-    for key in ("group_add", "cap_add", "cap_drop", "security_opt", "devices"):
-        if key in svc and not isinstance(svc[key], list):
-            msg = f"service {name!r}: '{key}' must be a list"
-            raise UnsupportedComposeError(msg)
-    for key in ("labels", "annotations", "extra_hosts"):
-        if key in svc and not isinstance(svc[key], list | dict):
-            msg = f"service {name!r}: '{key}' must be a list or mapping"
-            raise UnsupportedComposeError(msg)
+def _validate_entrypoint(name: str, svc: dict[str, Any]) -> None:
+    """Check the structural entrypoint key's form (it is not a registry key)."""
     if "entrypoint" in svc and not isinstance(svc["entrypoint"], str | list):
         msg = f"service {name!r}: 'entrypoint' must be a string or list"
         raise UnsupportedComposeError(msg)
-    for key in ("read_only", "init", "privileged"):
-        if key in svc and not isinstance(svc[key], bool):
-            msg = f"service {name!r}: '{key}' must be a boolean"
-            raise UnsupportedComposeError(msg)
-
-
-def _validate_pull_policy(name: str, svc: dict[str, Any]) -> None:
-    """Check pull_policy is a supported enum value (mapped to podman's --pull)."""
-    policy = svc.get("pull_policy")
-    if policy is not None and (not isinstance(policy, str) or policy not in PULL_POLICY_MAP):
-        allowed = "/".join(PULL_POLICY_MAP)
-        msg = f"service {name!r}: unsupported pull_policy {policy!r} (use {allowed})"
-        raise UnsupportedComposeError(msg)
-
-
-def _validate_ulimits(name: str, svc: dict[str, Any]) -> None:
-    """Check ulimits maps each name to an int/str scalar or a {soft, hard} mapping."""
-    ulimits = svc.get("ulimits")
-    if ulimits is None:
-        return
-    if not isinstance(ulimits, dict):
-        msg = f"service {name!r}: 'ulimits' must be a mapping"
-        raise UnsupportedComposeError(msg)
-    for limit, spec in ulimits.items():
-        if isinstance(spec, dict):
-            if set(spec) != {"soft", "hard"}:
-                msg = f"service {name!r}: ulimit {limit!r} mapping must have exactly 'soft' and 'hard'"
-                raise UnsupportedComposeError(msg)
-            if not isinstance(spec["soft"], int | str) or not isinstance(spec["hard"], int | str):
-                msg = f"service {name!r}: ulimit {limit!r} 'soft' and 'hard' must be int or str"
-                raise UnsupportedComposeError(msg)
-        elif not isinstance(spec, int | str):
-            msg = f"service {name!r}: ulimit {limit!r} must be an int or a soft/hard mapping"
-            raise UnsupportedComposeError(msg)
 
 
 def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
@@ -142,9 +64,10 @@ def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
         warnings.append(f"service {name!r}: string entrypoint runs via shell; 'command' is ignored")
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
-    _validate_service_forms(name, svc)
-    _validate_pull_policy(name, svc)
-    _validate_ulimits(name, svc)
+    _validate_entrypoint(name, svc)
+    for key, spec in SERVICE_KEYS.items():
+        if key in svc:
+            spec.validate(name, key, svc[key])
     return warnings
 
 

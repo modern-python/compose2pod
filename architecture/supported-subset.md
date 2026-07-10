@@ -27,6 +27,16 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   compose2pod never builds: a `build` section is accepted but its contents
   (context, dockerfile, args) are not read — `image_for` (`compose2pod/emit.py`)
   runs the CI image supplied via `--image` for any service that has one.
+- **Service-key registry:** the declarative, uniformly-shaped flag keys —
+  `user`, `working_dir`, `platform`, `init`, `read_only`, `privileged`,
+  `group_add`, `cap_add`, `cap_drop`, `security_opt`, `devices`, `labels`,
+  `annotations`, `extra_hosts`, `pull_policy`, `ulimits` — are defined once,
+  each as a `(validate, emit)` pair, in the **service-key registry**
+  (`SERVICE_KEYS` in `compose2pod/keys.py`); see `architecture/glossary.md`
+  for the service-key spec / service-key registry / structural key terms.
+  The remaining keys documented below are **structural keys**, handled
+  outside the registry because their `emit` needs `project_dir`, spans
+  multiple keys, or occupies the image/command slot.
 - **`environment`:** list form (`- KEY=value`, `- KEY`) or mapping form
   (`KEY: value`, `KEY:`). A null mapping value (`KEY:`) means "pass `KEY`
   through from the host", emitted as a bare `-e KEY` exactly like the list
@@ -133,14 +143,35 @@ colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
 ## Variable interpolation
 
 compose2pod does not resolve Compose Spec `${VAR}` references at generation
-time. `to_shell()` (`compose2pod/shell.py`) instead re-encodes every
-compose-derived string leaf (`environment`, `image`, `command`, `volumes`,
-`tmpfs`, `env_file`, healthcheck `test`) into a double-quoted POSIX-shell
-fragment with the variable references left live, so the generated script's
-own shell expands them against its runtime environment when the script
-runs. Only those field values pass through `to_shell()`; other document
-fields (service and network names, ports, and the like) are never
-interpolated. Supported forms: `$VAR`, `${VAR}`,
+time. `to_shell()` (`compose2pod/shell.py`) instead re-encodes each
+interpolated string leaf into a double-quoted POSIX-shell fragment with the
+variable references left live, so the generated script's own shell expands
+them against its runtime environment when the script runs.
+
+The interpolated set is exactly what `_Expand(...)` wraps in
+`compose2pod/emit.py` and `compose2pod/keys.py` — there is no separate list
+to maintain by hand, so treat the **service-key registry**
+(`SERVICE_KEYS` in `compose2pod/keys.py`; see `architecture/glossary.md`)
+and the `_Expand(...)` call sites in `emit.py` as the source of truth if this
+enumeration ever appears to drift:
+
+- **Structural fields:** `image` (only when the service has no `build`
+  override — otherwise the CI image is used, not the compose value),
+  `command`, `entrypoint`, `environment`, `env_file`, `volumes`, `tmpfs`, and
+  the healthcheck `test` command.
+- **Service-key registry fields** whose spec wraps its value in `_Expand`:
+  `user`, `working_dir`, `platform`, `group_add`, `cap_add`, `cap_drop`,
+  `security_opt`, `devices`, `labels`, `annotations`, `extra_hosts`, and
+  `ulimits` — every `SERVICE_KEYS` entry except `pull_policy` (a validated
+  enum emitted verbatim from `PULL_POLICY_MAP`) and the three boolean flags
+  `init`/`read_only`/`privileged` (each emits a bare flag with no value to
+  interpolate).
+
+Everything else is never interpolated: `build`'s own contents (context,
+dockerfile, args — never read), `depends_on`, `networks`, `hostname`, and
+`container_name` (the last two are emitted as literal `--add-host
+host:127.0.0.1` entries, not expanded), and the healthcheck
+`timeout`/`start_period`/`retries` numbers. Supported forms: `$VAR`, `${VAR}`,
 `${VAR:-default}`, `${VAR-default}`, `${VAR:?msg}`, `${VAR?msg}`,
 `${VAR:+alt}`, `${VAR+alt}`, and `$$` for a literal `$`. The operator forms
 map onto identical POSIX `sh` parameter expansion; bare `$VAR`/`${VAR}` is

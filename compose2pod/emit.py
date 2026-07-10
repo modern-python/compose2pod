@@ -7,48 +7,18 @@ from typing import Any
 
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
+from compose2pod.keys import SERVICE_KEYS, Token, _Expand, _key_value_pairs
 from compose2pod.shell import to_shell, variable_names
 
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
-
-_SCALAR_FLAGS: dict[str, str] = {"user": "--user", "working_dir": "--workdir", "platform": "--platform"}
-
-_BOOL_FLAGS: dict[str, str] = {"init": "--init", "read_only": "--read-only", "privileged": "--privileged"}
-
-_LIST_FLAGS: dict[str, str] = {
-    "group_add": "--group-add",
-    "cap_add": "--cap-add",
-    "cap_drop": "--cap-drop",
-    "security_opt": "--security-opt",
-    "devices": "--device",
-}
-
-_MAP_FLAGS: dict[str, str] = {"labels": "--label", "annotations": "--annotation"}
-
-PULL_POLICY_MAP: dict[str, str] = {
-    "always": "always",
-    "never": "never",
-    "missing": "missing",
-    "if_not_present": "missing",
-}
-
-
-@dataclasses.dataclass(frozen=True)
-class _Expand:
-    """A token whose Compose variable references expand at script-run time."""
-
-    value: str
-
-
-Token = str | _Expand
 
 
 def image_for(svc: dict[str, Any], ci_image: str) -> Token:
     """Services with a build section run the freshly built CI image."""
     if "build" in svc:
         return ci_image
-    return _Expand(svc["image"])
+    return _Expand(value=svc["image"])
 
 
 def command_tokens(svc: dict[str, Any]) -> list[Token]:
@@ -57,8 +27,8 @@ def command_tokens(svc: dict[str, Any]) -> list[Token]:
     if command is None:
         return []
     if isinstance(command, str):
-        return ["/bin/sh", "-c", _Expand(command)]
-    return [_Expand(str(token)) for token in command]
+        return ["/bin/sh", "-c", _Expand(value=command)]
+    return [_Expand(value=str(token)) for token in command]
 
 
 def entrypoint_tokens(svc: dict[str, Any]) -> list[Token]:
@@ -67,15 +37,15 @@ def entrypoint_tokens(svc: dict[str, Any]) -> list[Token]:
     if entrypoint is None:
         return []
     if isinstance(entrypoint, str):
-        return ["/bin/sh", "-c", _Expand(entrypoint)]
-    return [_Expand(str(token)) for token in entrypoint]
+        return ["/bin/sh", "-c", _Expand(value=entrypoint)]
+    return [_Expand(value=str(token)) for token in entrypoint]
 
 
 def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
     """Add healthcheck flags to the flags list."""
     cmd = health_cmd(healthcheck.get("test"))
     if cmd is not None:
-        flags += ["--health-cmd", _Expand(cmd)]
+        flags += ["--health-cmd", _Expand(value=cmd)]
         if "timeout" in healthcheck:
             flags += ["--health-timeout", str(healthcheck["timeout"])]
         if "start_period" in healthcheck:
@@ -84,34 +54,16 @@ def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
             flags += ["--health-retries", str(healthcheck["retries"])]
 
 
-def _key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
-    """Compose list/map key-value section as 'KEY=value' / 'KEY' entries.
-
-    A null map value yields a bare 'KEY'. Meaning is caller-defined: '-e KEY'
-    passes the host value through; '--label KEY' sets an empty label.
-    """
-    if isinstance(value, list):
-        return value
-    return [key if val is None else f"{key}={val}" for key, val in value.items()]
-
-
-def _extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
-    """Compose extra_hosts as 'host:ip' entries; map values keep their colons (IPv6-safe)."""
-    if isinstance(value, list):
-        return value
-    return [f"{host}:{ip}" for host, ip in value.items()]
-
-
 def _add_env_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
     """Add -e and --env-file flags to the flags list."""
     # A null environment value means "pass KEY through from the host" (bare `-e KEY`).
     for pair in _key_value_pairs(svc.get("environment") or {}):
-        flags += ["-e", _Expand(str(pair))]
+        flags += ["-e", _Expand(value=str(pair))]
     env_files = svc.get("env_file") or []
     if isinstance(env_files, str):
         env_files = [env_files]
     for env_file in env_files:
-        flags += ["--env-file", _Expand(str(Path(project_dir, env_file)))]
+        flags += ["--env-file", _Expand(value=str(Path(project_dir, env_file)))]
 
 
 def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
@@ -119,7 +71,7 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
     for volume in svc.get("volumes") or []:
         if ":" not in volume:
             # Anonymous volume: a bare container path, no host source to translate.
-            flags += ["-v", _Expand(volume)]
+            flags += ["-v", _Expand(value=volume)]
             continue
         source, destination = volume.split(":", 1)
         if source.startswith("."):
@@ -127,55 +79,12 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
             source = str(Path(project_dir, source))
         # Absolute bind mount (starts with "/") and named volume (bare
         # identifier) are both kept as-is — neither is a path to translate.
-        flags += ["-v", _Expand(f"{source}:{destination}")]
+        flags += ["-v", _Expand(value=f"{source}:{destination}")]
     tmpfs = svc.get("tmpfs") or []
     if isinstance(tmpfs, str):
         tmpfs = [tmpfs]
     for mount in tmpfs:
-        flags += ["--tmpfs", _Expand(mount)]
-
-
-def _add_extra_host_flags(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add per-service --add-host flags from extra_hosts (explicit host:ip)."""
-    for entry in _extra_host_pairs(svc.get("extra_hosts") or []):
-        flags += ["--add-host", _Expand(str(entry))]
-
-
-def _add_pull_policy_flag(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add --pull from pull_policy (a validated enum, mapped to podman's vocabulary)."""
-    policy = svc.get("pull_policy")
-    if policy is not None:
-        flags += ["--pull", PULL_POLICY_MAP[policy]]
-
-
-def _ulimit_args(ulimits: dict[str, Any]) -> list[str]:
-    """Compose ulimits as podman `name=soft:hard` / `name=value` args."""
-    args: list[str] = []
-    for limit, spec in ulimits.items():
-        args.append(f"{limit}={spec['soft']}:{spec['hard']}" if isinstance(spec, dict) else f"{limit}={spec}")
-    return args
-
-
-def _add_ulimit_flags(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add --ulimit flags from ulimits (a soft/hard mapping or a scalar)."""
-    for arg in _ulimit_args(svc.get("ulimits") or {}):
-        flags += ["--ulimit", _Expand(arg)]
-
-
-def _add_declarative_flags(flags: list[Token], svc: dict[str, Any]) -> None:
-    """Add the scalar-, boolean-, list-, and label-driven flags to the flags list."""
-    for key, flag in _SCALAR_FLAGS.items():
-        if key in svc:
-            flags += [flag, _Expand(str(svc[key]))]
-    for key, flag in _BOOL_FLAGS.items():
-        if svc.get(key):
-            flags.append(flag)
-    for key, flag in _LIST_FLAGS.items():
-        for item in svc.get(key) or []:
-            flags += [flag, _Expand(str(item))]
-    for key, flag in _MAP_FLAGS.items():
-        for pair in _key_value_pairs(svc.get(key) or {}):
-            flags += [flag, _Expand(str(pair))]
+        flags += ["--tmpfs", _Expand(value=mount)]
 
 
 def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:
@@ -186,10 +95,9 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     _add_env_flags(flags, svc, project_dir)
     _add_volume_flags(flags, svc, project_dir)
     _add_health_flags(flags, svc.get("healthcheck") or {})
-    _add_declarative_flags(flags, svc)
-    _add_extra_host_flags(flags, svc)
-    _add_pull_policy_flag(flags, svc)
-    _add_ulimit_flags(flags, svc)
+    for key, spec in SERVICE_KEYS.items():
+        if key in svc:
+            flags += spec.emit(svc[key])
     return flags
 
 
@@ -217,7 +125,7 @@ wait_healthy() {
 """
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class EmitOptions:
     """Options for emit_script rendering."""
 
