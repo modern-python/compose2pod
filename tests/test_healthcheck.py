@@ -70,6 +70,12 @@ class TestIntervalSeconds:
             with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
                 interval_seconds(bad)
 
+    def test_non_finite_interval_raises(self) -> None:
+        # inf/nan are valid YAML floats; they must be refused, not crash raw.
+        for bad in (float("inf"), float("nan"), "1e400"):
+            with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+                interval_seconds(bad)
+
 
 class TestHasHealthcheck:
     def test_true_when_test_present(self) -> None:

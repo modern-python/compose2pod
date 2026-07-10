@@ -1,6 +1,7 @@
 """Healthcheck translation: compose healthcheck -> podman --health-* values."""
 
 import json
+import math
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
@@ -43,8 +44,9 @@ def interval_seconds(duration: object) -> int:
     """Compose duration ('1s', '2m', '500ms', int) to whole seconds, minimum 1."""
     if duration is None:
         return 1
-    if isinstance(duration, (int, float)):
+    if isinstance(duration, (int, float)) and math.isfinite(duration):
         return max(int(duration), 1)
+    # Non-finite floats (inf/nan) fall through to the guarded parse below and are refused.
     text = str(duration).strip()
     try:
         if text.endswith("ms"):
@@ -52,6 +54,6 @@ def interval_seconds(duration: object) -> int:
         if text.endswith("m"):
             return max(int(float(text[:-1])) * 60, 1)
         return max(int(float(text.removesuffix("s"))), 1)
-    except ValueError:
+    except (ValueError, OverflowError):
         msg = f"unsupported healthcheck interval {duration!r} (use forms like '30s', '2m', '500ms')"
         raise UnsupportedComposeError(msg) from None
