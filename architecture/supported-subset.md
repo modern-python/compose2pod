@@ -112,10 +112,16 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   only a mapping value can carry an `aliases` list (`_host_names`,
   `compose2pod/graph.py`).
 - **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty`, `stop_signal`,
-  `stop_grace_period` — meaningless or irrelevant inside a single
+  `stop_grace_period`, `profiles` — meaningless or irrelevant inside a single
   shared-namespace pod. `stop_signal`/`stop_grace_period` are inert because the
   script force-removes the pod (`podman pod rm -f`) and never gracefully stops a
-  container.
+  container. `profiles` is inert because compose2pod's run set is fixed by
+  `--target` plus its `depends_on` closure, not by profile activation: targeting
+  a service by name runs it regardless of its profile (as Compose does), and a
+  service outside the closure never runs. One divergence follows: if the target
+  `depends_on` a member Compose would leave in a disabled profile, compose2pod
+  runs it anyway (the closure is authoritative) — more permissive than Compose,
+  never a silent drop.
 - **Extension fields:** any `x-`-prefixed service key is accepted and ignored
   silently.
 - Everything else raises.
