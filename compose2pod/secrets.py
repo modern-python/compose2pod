@@ -9,4 +9,5 @@ SECRET = StoreKind(
     prefix="",
     sources=frozenset({"file", "environment"}),
     default_target=lambda name: name,
+    require_absolute_target=False,
 )

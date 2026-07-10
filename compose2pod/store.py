@@ -25,6 +25,7 @@ class StoreKind:
     prefix: str
     sources: frozenset[str]
     default_target: Callable[[str], str]
+    require_absolute_target: bool
 
 
 def _validate_def(name: str, definition: Any, kind: StoreKind) -> None:  # noqa: ANN401 - Compose values are untyped
@@ -62,6 +63,12 @@ def _check_long_form_scalars(name: str, ref: dict[str, Any], kind: StoreKind) ->
             raise UnsupportedComposeError(msg)
 
 
+def _check_target(name: str, ref: dict[str, Any], kind: StoreKind) -> None:
+    if kind.require_absolute_target and isinstance(ref.get("target"), str) and not ref["target"].startswith("/"):
+        msg = f"service {name!r}: {kind.label} target {ref['target']!r} must be an absolute path"
+        raise UnsupportedComposeError(msg)
+
+
 def _ref_source(name: str, ref: Any, kind: StoreKind) -> str:  # noqa: ANN401 - Compose values are untyped
     if isinstance(ref, str):
         return ref
@@ -77,6 +84,7 @@ def _ref_source(name: str, ref: Any, kind: StoreKind) -> str:  # noqa: ANN401 - 
         msg = f"service {name!r}: {kind.label} entry 'source' must be a string"
         raise UnsupportedComposeError(msg)
     _check_long_form_scalars(name, ref, kind)
+    _check_target(name, ref, kind)
     return source
 
 
@@ -139,6 +147,8 @@ def create_lines(compose: dict[str, Any], pod: str, project_dir: str, names: lis
         if isinstance(definition.get("file"), str):
             path = to_shell(str(Path(project_dir, definition["file"])))
             lines.append(f"podman secret create {store} {path}")
+        elif isinstance(definition.get("content"), str):
+            lines.append(f"printf '%s' {to_shell(definition['content'])} | podman secret create {store} -")
         else:
             var = definition["environment"]
             lines.append(f"printf '%s' \"${{{var}-}}\" | podman secret create {store} -")
@@ -153,6 +163,8 @@ def referenced_variables(compose: dict[str, Any], project_dir: str, names: list[
         definition = defs[name]
         if isinstance(definition.get("file"), str):
             result |= variable_names(str(Path(project_dir, definition["file"])))
+        elif isinstance(definition.get("content"), str):
+            result |= variable_names(definition["content"])
         else:
             result.add(definition["environment"])
     return result
