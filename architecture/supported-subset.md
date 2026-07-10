@@ -9,7 +9,7 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 ## Top-level keys
 
 - **Supported:** `services` (required, non-empty), `version`, `name`,
-  `networks`, `secrets`.
+  `networks`, `volumes`, `secrets`, `configs`.
 - **Ignored (warns):** `networks` — all services share the pod's single
   network namespace, so top-level network definitions have no effect.
 - **Extension fields:** any key prefixed `x-` is accepted and ignored
@@ -170,50 +170,121 @@ colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
   relative) or `environment:` (a host environment variable name), both as a
   plain string. `external: true` gets its own rejection message (compose's
   "must already exist" secrets have no analogue here); any other unrecognized
-  key raises generically (`_validate_secret_def`, `compose2pod/secrets.py`).
+  key raises generically (`_validate_def`, `compose2pod/store.py`, via the
+  `SECRET` `StoreKind` in `compose2pod/secrets.py`).
 - **Per-service `secrets:` references:** short form (`- name`) or long form
   (a mapping with `source` and optionally `target`, `uid`, `gid`, `mode`).
   `source` must name a top-level secret; an unknown `source` raises at
-  `validate()` time (`_ref_source`/`validate_secrets`,
-  `compose2pod/secrets.py`).
+  `validate()` time (`_ref_source`/`validate_all`, `compose2pod/store.py` --
+  `validate_all` dispatches per store kind through the internal
+  `_validate_kind`).
 - **Closure-scoped creation:** only secrets referenced (by `source`) from
   somewhere in the target service's dependency closure are ever created, so a
   top-level secret nothing in the closure references never becomes a
-  `podman secret create` call (`referenced_secret_names`, driven by the same
-  `startup_order` closure used to decide which services run at all).
+  `podman secret create` call (`referenced_names`, `compose2pod/store.py`,
+  driven by the same `startup_order` closure used to decide which services
+  run at all).
 - **Creation:** each referenced secret becomes one pod-namespaced
   `podman secret create <pod>-<name> ...` line, emitted right after
-  `podman pod create` and before any `podman run` (`emit_script`,
-  `compose2pod/emit.py`). A `file:` source resolves
-  `Path(project_dir, file)` through `to_shell()`, so a `${VAR}` in the path
-  expands live when the script runs, exactly like other interpolated fields.
-  An `environment:` source instead pipes `printf '%s' "${VAR-}"` into
-  `podman secret create ... -`, where the `${VAR-}` means an *unset* host
-  variable yields an empty secret rather than failing the script
-  (`secret_create_lines`).
+  `podman pod create` and before any `podman run` by `all_create_lines`
+  (`compose2pod/store.py`, called from `emit_script`, `compose2pod/emit.py`).
+  A `file:` source resolves `Path(project_dir, file)` through `to_shell()`,
+  so a `${VAR}` in the path expands live when the script runs, exactly like
+  other interpolated fields. An `environment:` source instead pipes
+  `printf '%s' "${VAR-}"` into `podman secret create ... -`, where the
+  `${VAR-}` means an *unset* host variable yields an empty secret rather than
+  failing the script (`create_lines`, `compose2pod/store.py`).
 - **Mounting:** each service reference becomes a
   `--secret source=<pod>-<name>,target=<target>` flag on that service's
-  `podman run`, where `target` defaults to the secret's own name when the
-  reference doesn't give one (short form, or long form without `target`).
-  `uid`/`gid`/`mode` are only added when the long form gives them explicitly;
-  `mode` renders as a 4-digit octal string when given as a Python int
-  (`0o400` becomes `"0400"`) and passes through verbatim when given as a
-  string (`secret_flags`). When `uid`/`gid`/`mode` are omitted, podman itself
-  applies its own defaults: the secret is mounted at `/run/secrets/<target>`,
-  owned `0:0`, mode `0444`.
+  `podman run`, assembled per service by `all_flags` (`compose2pod/store.py`,
+  called from `emit_script`, `compose2pod/emit.py`), where `target` defaults
+  to the secret's own name when the reference doesn't give one (short form,
+  or long form without `target`). `uid`/`gid`/`mode` are only added when the
+  long form gives them explicitly; `mode` renders as a 4-digit octal string
+  when given as a Python int (`0o400` becomes `"0400"`) and passes through
+  verbatim when given as a string (`flags`, `compose2pod/store.py`). When
+  `uid`/`gid`/`mode` are omitted, podman itself applies its own defaults: the
+  secret is mounted at `/run/secrets/<target>`, owned `0:0`, mode `0444`.
 - **Teardown:** the EXIT trap that force-removes the pod also runs
   `podman secret rm <pod>-<name> ...` for every referenced secret, so the
   store never outlives the pod even when the script exits abnormally
-  (`emit_script`).
+  (`all_teardown_names`, `compose2pod/store.py`, called from `emit_script`,
+  `compose2pod/emit.py`).
 - **Variable interpolation:** an `environment:` source's variable name, and
   any `${VAR}` inside a `file:` path, both count toward the CLI's
   informational stderr note of variables the generated script expands at run
-  time (`secret_referenced_variables`, folded into `referenced_variables()`
-  in `compose2pod/emit.py`); see Variable interpolation, below, for the note
-  itself.
+  time (`referenced_variables`, `compose2pod/store.py`, assembled across
+  store kinds by `all_referenced_variables` and folded into
+  `referenced_variables()` in `compose2pod/emit.py`); see Variable
+  interpolation, below, for the note itself.
 - Everything else raises `UnsupportedComposeError` rather than silently doing
   nothing: `external: true`, an unknown `source`, a definition with neither
   or both of `file`/`environment`, and an unrecognized long-form key.
+
+## Configs
+
+- **Top-level `configs:` definitions:** each entry must be a mapping with
+  exactly one of `file:` (a host path, resolved against `--project-dir` when
+  relative), `environment:` (a host environment variable name), or `content:`
+  (inline literal text), all as a plain string. `external: true` gets its own
+  rejection message, mirroring secrets; any other unrecognized key raises
+  generically (`_validate_def`, `compose2pod/store.py`, via the `CONFIG`
+  `StoreKind` in `compose2pod/configs.py`).
+- **Per-service `configs:` references:** short form (`- name`) or long form
+  (a mapping with `source` and optionally `target`, `uid`, `gid`, `mode`).
+  `source` must name a top-level config; an unknown `source` raises at
+  `validate()` time (`_ref_source`/`validate_all`, `compose2pod/store.py`).
+- **Closure-scoped creation:** only configs referenced (by `source`) from
+  somewhere in the target service's dependency closure are ever created, so a
+  top-level config nothing in the closure references never becomes a
+  `podman secret create` call -- the same closure-scoped-creation rule
+  secrets follow (`referenced_names`, `compose2pod/store.py`).
+- **Creation and delivery:** configs are delivered through podman's secret
+  store, exactly like secrets, but pod- *and kind*-namespaced with a
+  `config-` prefix (store name `<pod>-config-<name>`, vs. a secret's bare
+  `<pod>-<name>`), so a config never collides with a same-named secret. Each
+  referenced config becomes one `podman secret create <pod>-config-<name>
+  ...` line, emitted right after `podman pod create` and before any
+  `podman run` by `all_create_lines` (`compose2pod/store.py`, called from
+  `emit_script`, `compose2pod/emit.py`). A `file:` source resolves
+  `Path(project_dir, file)` through `to_shell()`; an `environment:` source
+  pipes `printf '%s' "${VAR-}"` into `podman secret create ... -`; and a
+  `content:` source pipes the literal text through `to_shell()` into that
+  same `podman secret create ... -` form, so a `${VAR}` written inside
+  `content:` stays live and expands against the generated script's own
+  runtime environment when the script runs -- the same deferred-interpolation
+  model as `file:`/`environment:` (`create_lines`, `compose2pod/store.py`).
+- **Mounting:** each service reference becomes a
+  `--secret source=<pod>-config-<name>,target=<target>` flag on that
+  service's `podman run`, assembled per service by `all_flags`
+  (`compose2pod/store.py`, called from `emit_script`, `compose2pod/emit.py`).
+  Unlike a secret, whose default `target` is its own name (mounted by podman
+  under `/run/secrets/<target>`), a config's default `target` is the
+  container-root absolute path `/<name>` (`CONFIG.default_target`,
+  `compose2pod/configs.py`). A long-form `target` must be an absolute path
+  (start with `/`); a relative target raises
+  (`CONFIG.require_absolute_target`, checked by `_check_target`,
+  `compose2pod/store.py`). `uid`/`gid`/`mode` behave exactly as for secrets:
+  only added when the long form gives them explicitly, `mode` renders as a
+  4-digit octal string when given as a Python int and passes through
+  verbatim when given as a string (`flags`, `compose2pod/store.py`).
+- **Teardown:** the EXIT trap that force-removes the pod also runs
+  `podman secret rm <pod>-config-<name> ...` for every referenced config, so
+  the store never outlives the pod even when the script exits abnormally --
+  byte-for-byte the same teardown parity as secrets (`all_teardown_names`,
+  `compose2pod/store.py`, called from `emit_script`, `compose2pod/emit.py`).
+- **Variable interpolation:** an `environment:` source's variable name, any
+  `${VAR}` inside a `file:` path, and any `${VAR}` inside `content:` all
+  count toward the CLI's informational stderr note of variables the
+  generated script expands at run time (`referenced_variables`,
+  `compose2pod/store.py`, assembled across store kinds by
+  `all_referenced_variables` and folded into `referenced_variables()` in
+  `compose2pod/emit.py`); see Variable interpolation, below, for the note
+  itself.
+- Everything else raises `UnsupportedComposeError` rather than silently
+  doing nothing: `external: true`, an unknown `source`, a definition with
+  not exactly one of `file`/`environment`/`content`, an unrecognized
+  long-form key, and a relative long-form `target`.
 
 ## Variable interpolation
 
