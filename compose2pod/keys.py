@@ -197,4 +197,5 @@ STRUCTURAL_KEYS: set[str] = {
     "hostname",
     "container_name",
     "secrets",
+    "configs",
 }

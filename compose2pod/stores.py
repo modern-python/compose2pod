@@ -1,6 +1,7 @@
 """The registry of store kinds that emit and parsing weave into the script."""
 
+from compose2pod.configs import CONFIG
 from compose2pod.secrets import SECRET
 
 
-STORE_KINDS = (SECRET,)
+STORE_KINDS = (SECRET, CONFIG)
