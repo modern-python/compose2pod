@@ -15,7 +15,7 @@ _ENV_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 def _validate_secret_def(name: str, definition: Any) -> None:  # noqa: ANN401 - Compose values are untyped
-    if not _SECRET_NAME.match(name):
+    if not _SECRET_NAME.fullmatch(name):
         msg = f"secret name {name!r} must match [a-zA-Z0-9][a-zA-Z0-9_.-]*"
         raise UnsupportedComposeError(msg)
     if not isinstance(definition, dict):
@@ -32,7 +32,7 @@ def _validate_secret_def(name: str, definition: Any) -> None:  # noqa: ANN401 - 
     if len(sources) != 1:
         msg = f"secret {name!r} must have exactly one of 'file' or 'environment' (a string)"
         raise UnsupportedComposeError(msg)
-    if sources[0] == "environment" and not _ENV_NAME.match(definition["environment"]):
+    if sources[0] == "environment" and not _ENV_NAME.fullmatch(definition["environment"]):
         msg = f"secret {name!r}: environment variable name {definition['environment']!r} is not a valid identifier"
         raise UnsupportedComposeError(msg)
 

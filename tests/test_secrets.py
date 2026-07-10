@@ -82,6 +82,14 @@ class TestValidateSecrets:
         with pytest.raises(UnsupportedComposeError, match="not a valid identifier"):
             validate_secrets(_doc({"s": {"environment": 'X"; touch /tmp/x; "'}}, None))
 
+    def test_newline_in_secret_name_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must match"):
+            validate_secrets(_doc({"db\n": {"file": "./a"}}, None))
+
+    def test_newline_in_env_var_name_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="not a valid identifier"):
+            validate_secrets(_doc({"s": {"environment": "VAR\n"}}, None))
+
     def test_non_scalar_long_form_value_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="secret 'mode' must be an int or string"):
             validate_secrets(_doc({"s": {"file": "./a"}}, [{"source": "s", "mode": True}]))
