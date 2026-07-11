@@ -35,6 +35,18 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="must be a mapping"):
             validate({"services": {"web": None}})
 
+    def test_resource_limits_accepted(self) -> None:
+        svc = {"image": "x", "mem_limit": "512m", "cpus": 0.5, "pids_limit": 100, "oom_kill_disable": True}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_mem_limit_bool_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'mem_limit' must be a number or string"):
+            validate({"services": {"app": {"image": "x", "mem_limit": True}}})
+
+    def test_cpus_list_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'cpus' must be a number or string"):
+            validate({"services": {"app": {"image": "x", "cpus": [1]}}})
+
     def test_unsupported_service_key_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="network_mode"):
             validate({"services": {"app": {"image": "x", "network_mode": "host"}}})
@@ -321,3 +333,17 @@ class TestValidate:
         }
         with pytest.raises(UnsupportedComposeError, match="must be an absolute path"):
             validate(doc)
+
+    def test_deploy_resources_accepted(self) -> None:
+        svc = {"image": "x", "deploy": {"resources": {"limits": {"cpus": "0.5", "memory": "256m"}}}}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_deploy_legacy_conflict_rejected_at_gate(self) -> None:
+        svc = {"image": "x", "mem_limit": "512m", "deploy": {"resources": {"limits": {"memory": "256m"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"conflicts with deploy.resources.limits.memory"):
+            validate({"services": {"app": svc}})
+
+    def test_deploy_reservations_cpus_rejected_at_gate(self) -> None:
+        svc = {"image": "x", "deploy": {"resources": {"reservations": {"cpus": "0.5"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"reservations.cpus is not supported"):
+            validate({"services": {"app": svc}})

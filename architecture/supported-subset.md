@@ -174,6 +174,45 @@ warns (ignored, behavior-neutral inside a single pod) or raises
     `configs`) are not auto-imported by `extends` — as in Compose, the
     extending service must declare what it needs.
 
+## Resource limits
+
+Compose exposes container resource limits two ways — the legacy scalar
+service keys and the Compose-spec `deploy.resources` block — and compose2pod
+honors both, refusing loudly on overlap rather than picking a precedence.
+
+- **Legacy keys** (`SERVICE_KEYS` in `compose2pod/keys.py`) map straight onto
+  podman run flags: `mem_limit` → `--memory`, `memswap_limit` →
+  `--memory-swap`, `mem_reservation` → `--memory-reservation`,
+  `mem_swappiness` → `--memory-swappiness`, `cpus` → `--cpus`, `cpu_shares` →
+  `--cpu-shares`, `cpu_quota` → `--cpu-quota`, `cpu_period` → `--cpu-period`,
+  `cpuset` → `--cpuset-cpus`, `pids_limit` → `--pids-limit`, `shm_size` →
+  `--shm-size`, `oom_score_adj` → `--oom-score-adj`. Each of these twelve is a
+  number-scalar key (`_number_scalar`/`_validate_number`): the value is
+  passed through unchanged (a `${VAR}` inside stays live at run time, per
+  Variable interpolation, below); a non-number, non-string value — including
+  a bool — is refused. `oom_kill_disable` → `--oom-kill-disable` is the one
+  boolean-typed exception in this group: like `read_only`/`init`/`privileged`,
+  it validates as an actual bool (`_bool`/`_validate_bool`) and emits the bare
+  flag only when true (nothing when false or absent).
+- **`deploy.resources`** (`compose2pod/resources.py`, wired in from
+  `validate_deploy`/`deploy_resource_flags` called by `parsing.py`/`emit.py`):
+  under `deploy`, only `resources` is honored — any other `deploy` subkey
+  (`replicas`, `placement`, `restart_policy`, ...) raises. Within `resources`,
+  only `limits` and `reservations` are read. `limits.cpus`/`limits.memory`/
+  `limits.pids` map to `--cpus`/`--memory`/`--pids-limit`;
+  `reservations.memory` maps to `--memory-reservation`. `reservations.cpus`
+  and `reservations.devices` have no podman equivalent and are refused
+  outright, regardless of value.
+- **Refuse on conflict:** when a legacy key and its `deploy.resources`
+  counterpart both set the same flag — `mem_limit`/`limits.memory`,
+  `cpus`/`limits.cpus`, `pids_limit`/`limits.pids`, and
+  `mem_reservation`/`reservations.memory` — conversion refuses loudly rather
+  than picking a precedence the Compose spec itself leaves undefined.
+- **Non-goals:** `blkio_config` and the Windows-only `cpu_count`/
+  `cpu_percent` remain rejected — neither key is in the service-key registry
+  or the structural-key set, so each hits the generic "everything else
+  raises" gate.
+
 ## Healthcheck keys
 
 - **Supported:** `test`, `interval`, `timeout`, `retries`, `start_period`.
@@ -359,13 +398,17 @@ enumeration ever appears to drift:
   override — otherwise the CI image is used, not the compose value),
   `command`, `entrypoint`, `environment`, `env_file`, `volumes`, `tmpfs`, and
   the healthcheck `test` command.
-- **Service-key registry fields** whose spec wraps its value in `_Expand`:
-  `user`, `working_dir`, `platform`, `group_add`, `cap_add`, `cap_drop`,
-  `security_opt`, `devices`, `labels`, `annotations`, `extra_hosts`, and
-  `ulimits` — every `SERVICE_KEYS` entry except `pull_policy` (a validated
-  enum emitted verbatim from `PULL_POLICY_MAP`) and the three boolean flags
-  `init`/`read_only`/`privileged` (each emits a bare flag with no value to
-  interpolate).
+- **Service-key registry fields** whose spec wraps its value in `_Expand` —
+  e.g. `user`, `working_dir`, `platform`, `group_add`, `cap_add`, `cap_drop`,
+  `security_opt`, `devices`, `labels`, `annotations`, `extra_hosts`,
+  `ulimits`, and every numeric resource-limit key (`mem_limit`, `cpus`,
+  `pids_limit`, ...). The rule, not the list, is authoritative: this is every
+  `SERVICE_KEYS` entry whose `emit` wraps its value (the
+  `_scalar`/`_number_scalar`/`_list`/`_map` factories, plus the custom
+  `extra_hosts`/`ulimits` emitters) except `pull_policy` (a validated enum
+  emitted verbatim from `PULL_POLICY_MAP`) and the four boolean flags
+  `init`/`read_only`/`privileged`/`oom_kill_disable` (each emits a bare flag
+  with no value to interpolate).
 
 Everything else is never interpolated: `build`'s own contents (context,
 dockerfile, args — never read), `depends_on`, `networks`, `hostname`, and
