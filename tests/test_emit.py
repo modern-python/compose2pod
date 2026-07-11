@@ -104,6 +104,27 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", [], "/b")
         assert flags[4:8] == ["--user", _Expand(value="root"), "--workdir", _Expand(value="/app")]
 
+    def test_mem_limit_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "mem_limit": "512m"}, "p", [], "/b")
+        assert flags[4:6] == ["--memory", _Expand(value="512m")]
+
+    def test_cpus_numeric_value_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "cpus": 0.5}, "p", [], "/b")
+        assert flags[4:6] == ["--cpus", _Expand(value="0.5")]
+
+    def test_pids_limit_int_flag(self) -> None:
+        flags = run_flags("app", {"image": "x", "pids_limit": 100}, "p", [], "/b")
+        assert flags[4:6] == ["--pids-limit", _Expand(value="100")]
+
+    def test_cpuset_and_shm_size_flags(self) -> None:
+        svc = {"image": "x", "cpuset": "0-3", "shm_size": "64m"}
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:8] == ["--cpuset-cpus", _Expand(value="0-3"), "--shm-size", _Expand(value="64m")]
+
+    def test_oom_kill_disable_bool_flag(self) -> None:
+        assert run_flags("app", {"image": "x", "oom_kill_disable": True}, "p", [], "/b")[4:5] == ["--oom-kill-disable"]
+        assert "--oom-kill-disable" not in run_flags("app", {"image": "x", "oom_kill_disable": False}, "p", [], "/b")
+
     def test_group_add_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "group_add": ["docker", 1000]}, "p", [], "/b")
         assert flags[4:8] == ["--group-add", _Expand(value="docker"), "--group-add", _Expand(value="1000")]

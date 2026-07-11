@@ -56,6 +56,12 @@ def _validate_bool(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - C
         raise UnsupportedComposeError(msg)
 
 
+def _validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        msg = f"service {name!r}: '{key}' must be a number or string"
+        raise UnsupportedComposeError(msg)
+
+
 def _validate_list(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     if not isinstance(value, list):
         msg = f"service {name!r}: '{key}' must be a list"
@@ -80,6 +86,13 @@ def _bool(flag: str) -> KeySpec:
         return [flag] if value else []
 
     return KeySpec(validate=_validate_bool, emit=emit)
+
+
+def _number_scalar(flag: str) -> KeySpec:
+    def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+        return [flag, _Expand(value=str(value))]
+
+    return KeySpec(validate=_validate_number, emit=emit)
 
 
 def _list(flag: str) -> KeySpec:
@@ -180,6 +193,19 @@ SERVICE_KEYS: dict[str, KeySpec] = {
     "extra_hosts": KeySpec(validate=_validate_map, emit=_emit_extra_hosts),
     "pull_policy": KeySpec(validate=_validate_pull_policy, emit=_emit_pull_policy),
     "ulimits": KeySpec(validate=_validate_ulimits, emit=_emit_ulimits),
+    "mem_limit": _number_scalar("--memory"),
+    "memswap_limit": _number_scalar("--memory-swap"),
+    "mem_reservation": _number_scalar("--memory-reservation"),
+    "mem_swappiness": _number_scalar("--memory-swappiness"),
+    "cpus": _number_scalar("--cpus"),
+    "cpu_shares": _number_scalar("--cpu-shares"),
+    "cpu_quota": _number_scalar("--cpu-quota"),
+    "cpu_period": _number_scalar("--cpu-period"),
+    "cpuset": _number_scalar("--cpuset-cpus"),
+    "pids_limit": _number_scalar("--pids-limit"),
+    "shm_size": _number_scalar("--shm-size"),
+    "oom_score_adj": _number_scalar("--oom-score-adj"),
+    "oom_kill_disable": _bool("--oom-kill-disable"),
 }
 
 STRUCTURAL_KEYS: set[str] = {
