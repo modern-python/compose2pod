@@ -8,6 +8,7 @@ from typing import Any
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, Token, _Expand, _key_value_pairs
+from compose2pod.resources import deploy_resource_flags
 from compose2pod.shell import to_shell, variable_names
 from compose2pod.store import all_create_lines, all_flags, all_referenced_variables, all_teardown_names
 from compose2pod.stores import STORE_KINDS
@@ -101,6 +102,7 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
         if key in svc:
             flags += spec.emit(svc[key])
     flags += all_flags(svc, pod, STORE_KINDS)
+    flags += deploy_resource_flags(svc)
     return flags
 
 

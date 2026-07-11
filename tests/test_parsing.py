@@ -333,3 +333,17 @@ class TestValidate:
         }
         with pytest.raises(UnsupportedComposeError, match="must be an absolute path"):
             validate(doc)
+
+    def test_deploy_resources_accepted(self) -> None:
+        svc = {"image": "x", "deploy": {"resources": {"limits": {"cpus": "0.5", "memory": "256m"}}}}
+        assert validate({"services": {"app": svc}}) == []
+
+    def test_deploy_legacy_conflict_rejected_at_gate(self) -> None:
+        svc = {"image": "x", "mem_limit": "512m", "deploy": {"resources": {"limits": {"memory": "256m"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"conflicts with deploy.resources.limits.memory"):
+            validate({"services": {"app": svc}})
+
+    def test_deploy_reservations_cpus_rejected_at_gate(self) -> None:
+        svc = {"image": "x", "deploy": {"resources": {"reservations": {"cpus": "0.5"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"reservations.cpus is not supported"):
+            validate({"services": {"app": svc}})

@@ -6,6 +6,7 @@ from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS
+from compose2pod.resources import validate_deploy
 from compose2pod.store import validate_all
 from compose2pod.stores import STORE_KINDS
 
@@ -87,6 +88,7 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     _validate_service_volumes(name, svc)
     _validate_entrypoint(name, svc)
     _validate_tmpfs(name, svc)
+    validate_deploy(name, svc)
     for key, spec in SERVICE_KEYS.items():
         if key in svc:
             spec.validate(name, key, svc[key])

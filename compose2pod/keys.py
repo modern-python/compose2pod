@@ -224,4 +224,5 @@ STRUCTURAL_KEYS: set[str] = {
     "container_name",
     "secrets",
     "configs",
+    "deploy",
 }

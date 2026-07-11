@@ -23,6 +23,7 @@ def test_supported_service_keys_snapshot() -> None:
         "container_name",
         "secrets",
         "configs",
+        "deploy",
         "user",
         "working_dir",
         "platform",

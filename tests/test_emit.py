@@ -257,6 +257,14 @@ class TestRunFlags:
             _Expand(value="nofile=1024"),
         ]
 
+    def test_deploy_resource_flags_emitted(self) -> None:
+        svc = {
+            "image": "x",
+            "deploy": {"resources": {"limits": {"memory": "256m"}, "reservations": {"memory": "128m"}}},
+        }
+        flags = run_flags("app", svc, "p", [], "/b")
+        assert flags[4:8] == ["--memory", _Expand(value="256m"), "--memory-reservation", _Expand(value="128m")]
+
 
 class TestImageAndCommand:
     def test_build_service_uses_ci_image(self, chats_compose: dict) -> None:
