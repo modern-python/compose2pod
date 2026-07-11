@@ -126,6 +126,54 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   silently.
 - Everything else raises.
 
+## Extends
+
+- **Resolution timing:** `extends` is resolved by `resolve_extends`
+  (`compose2pod/extends.py`) as a pre-validation flattening step, called from
+  `cli.py` immediately before `validate()` — the rest of the pipeline
+  (`validate()`, `emit_script()`) never sees an `extends` key.
+- **Supported form:** only the mapping form `extends: {service: <name>}`;
+  `service` must name another service in the same document. Resolution is
+  transitive (a chain of `extends` is fully flattened) and cycle-checked — an
+  `extends` cycle raises `UnsupportedComposeError`.
+- **Merge rules**, applied per key when both the base service and the local
+  (extending) service define it:
+  - **Mapping-merge, local wins:** `environment`, `labels`, `annotations`,
+    `extra_hosts`, `ulimits`, `healthcheck`, `depends_on` — base's and local's
+    keys are combined into one mapping, with local's value winning on
+    collision.
+  - **Sequence-concatenate, base then local:** `cap_add`, `cap_drop`,
+    `security_opt`, `devices`, `group_add`, `secrets`, `configs`, `volumes`,
+    `tmpfs`, `env_file` — base's list is followed by local's list, unchanged.
+  - **Override, local replaces:** every other key, including `command` and
+    `entrypoint` (argv replaced wholesale, never concatenated) — this also
+    covers unknown keys, which `validate()` then rejects downstream exactly
+    as it would without `extends`.
+  - **Normalization before merge:** list-form `environment`
+    (`- KEY=value` / `- KEY`) and list-form `depends_on` (a bare
+    service-name list) are normalized to mappings before the mapping-merge;
+    scalar-form `tmpfs`/`env_file` (a single string) are normalized to a
+    one-element list before the concatenation.
+- **Refused loudly** (`UnsupportedComposeError`), rather than guessed at:
+  cross-file `extends: {file: ..., service: ...}`; a bare-string `extends`
+  (or any other non-mapping value); an unrecognized key under `extends`
+  other than `service`; a non-string `service`; an `extends` `service`
+  naming a service that doesn't exist in the document; and a merge across
+  incompatible forms — a mapping-merge key that is neither a mapping nor a
+  list-form `environment`/`depends_on`, or a sequence-concatenate key that is
+  neither a list nor a scalar string.
+- **Divergences from Compose:**
+  - Only `environment` and `depends_on` accept list form for the
+    mapping-merge; the other mapping-merge keys (`labels`, `annotations`,
+    `extra_hosts`, `ulimits`, `healthcheck`) in list form on a merged side are
+    refused as an incompatible form rather than silently coerced.
+  - Short-form `volumes` are concatenated rather than merged by target path;
+    podman resolves duplicate mounts at run time rather than compose2pod
+    deduplicating them at generation time.
+  - Referenced resources (top-level `volumes`, `networks`, `secrets`,
+    `configs`) are not auto-imported by `extends` — as in Compose, the
+    extending service must declare what it needs.
+
 ## Healthcheck keys
 
 - **Supported:** `test`, `interval`, `timeout`, `retries`, `start_period`.
