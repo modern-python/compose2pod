@@ -79,8 +79,8 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   (`nofile: {soft, hard}` → `--ulimit nofile=soft:hard`). A mapping value must
   have exactly `soft` and `hard`, each an int or string; other shapes are
   rejected. (`sysctls`, by
-  contrast, is refused — it is pod-level, not per-container; see
-  `planning/decisions/2026-07-09-sysctls-pod-level.md`.)
+  contrast, is pod-level rather than per-container — see the
+  Pod-level options section below.)
 - **`labels`:** list (`- KEY=value` / `- KEY`) or mapping (`KEY: value` / `KEY:`),
   emitted as repeated `--label`. A null value means an empty label
   (`--label KEY`) -- the same emitted shape as `environment`'s null but a
@@ -173,6 +173,48 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   - Referenced resources (top-level `volumes`, `networks`, `secrets`,
     `configs`) are not auto-imported by `extends` — as in Compose, the
     extending service must declare what it needs.
+
+## Pod-level options
+
+A Podman pod shares one network namespace across every container joined to
+it, so a handful of Compose keys cannot be per-container `podman run` flags.
+compose2pod hoists them onto `podman pod create` instead
+(`compose2pod/pod.py`) — the tool's only pod-create flags.
+
+- **Supported:** `dns`, `dns_search`, `dns_opt`, `sysctls` — mapped to
+  `--dns`, `--dns-search`, `--dns-option`, `--sysctl` respectively (`_DNS_KEYS`,
+  `pod.py`).
+- **Aggregation is closure-scoped:** `pod_create_flags(services, order)` is
+  called with `order` — the target's dependency closure (`startup_order`) —
+  exactly like other closure-scoped constructs (secrets, configs). `dns` /
+  `dns_search` / `dns_opt` are unioned across the closure (deduplicated,
+  first-seen order); `sysctls` are unioned by key, and two services in the
+  closure setting the same key to different values is refused
+  (`UnsupportedComposeError: conflicting sysctl ...`) rather than resolved by
+  last-writer-wins.
+- **Value shapes:** `dns` / `dns_search` / `dns_opt` accept a string or a list
+  of strings; `sysctls` accepts a mapping (`key: value`) or a list of
+  `"key=value"` strings, each value a string or number. A `${VAR}` inside a
+  value is wrapped in `_Expand` like other interpolated fields, so it stays
+  live at run time and counts toward `referenced_variables` — the generated
+  script's own shell expands it when it runs, not compose2pod at generation
+  time.
+- **Pod-wide divergence:** unlike every other service key, these apply to
+  every container in the pod once emitted — including services that never
+  declared them — because the pod shares one `/etc/resolv.conf` and one
+  sysctl set. `validate()` (`compose2pod/parsing.py`) is target-agnostic
+  shape validation over the whole document: whenever any service anywhere
+  declares `dns` / `dns_search` / `dns_opt` / `sysctls` (`uses_pod_options`),
+  it emits the warning "dns/sysctls apply pod-wide -- all containers in the
+  pod share one /etc/resolv.conf and sysctl set", regardless of whether that
+  service turns out to be inside the target's closure. Conversely, at emit
+  time a `dns` / `sysctls` declaration on a service outside the target's
+  closure is silently ignored by `pod_create_flags` — no flag is emitted for
+  it, since that service is never run.
+- **Non-goals:** per-service DNS/sysctls — impossible inside a
+  shared-namespace pod, not a compose2pod limitation; last-writer-wins on a
+  sysctl key conflict — refused instead, matching the refuse-on-conflict
+  policy used elsewhere (see Resource limits, below).
 
 ## Resource limits
 
