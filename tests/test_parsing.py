@@ -31,6 +31,10 @@ class TestValidate:
             with pytest.raises(UnsupportedComposeError, match="must be a mapping"):
                 validate(bad)  # ty: ignore[invalid-argument-type]
 
+    def test_non_dict_service_value_is_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must be a mapping"):
+            validate({"services": {"web": None}})
+
     def test_unsupported_service_key_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="network_mode"):
             validate({"services": {"app": {"image": "x", "network_mode": "host"}}})

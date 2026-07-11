@@ -67,8 +67,11 @@ def _validate_tmpfs(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
-def _validate_service(name: str, svc: dict[str, Any]) -> list[str]:
+def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compose values are untyped
     """Validate one service; returns warnings, raises UnsupportedComposeError."""
+    if not isinstance(svc, dict):
+        msg = f"service {name!r} must be a mapping"
+        raise UnsupportedComposeError(msg)
     warnings: list[str] = []
     for key in sorted(svc):
         if key.startswith("x-"):

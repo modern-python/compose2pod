@@ -25,6 +25,7 @@ class TestPublicApi:
             "EmitOptions",
             "UnsupportedComposeError",
             "emit_script",
+            "resolve_extends",
             "to_shell",
             "validate",
         }
@@ -186,6 +187,39 @@ class TestMain:
         assert "--env-file" in out.out
         assert "${ENV_DIR-}" in out.out
         assert "ENV_DIR" in out.err
+
+    def test_extends_is_resolved_before_emit(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "app", "environment": {"LOG": "info"}},
+                "web": {"extends": {"service": "base"}, "environment": {"PORT": "8080"}},
+            }
+        }
+        rc = run_main(json.dumps(doc), ["--target", "web", "--image", "i"], monkeypatch)
+        out = capsys.readouterr().out
+        assert rc == 0
+        # merged web runs the base image with both env vars
+        assert "app" in out
+        assert "LOG=info" in out
+        assert "PORT=8080" in out
+
+    def test_cross_file_extends_is_rejected_by_cli(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        doc = {"services": {"web": {"extends": {"service": "base", "file": "other.yml"}}}}
+        rc = run_main(json.dumps(doc), ["--target", "web", "--image", "i"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "cross-file" in capsys.readouterr().err
+
+    def test_extends_non_dict_base_is_clean_error(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        doc = {"services": {"base": None, "web": {"extends": {"service": "base"}, "image": "x"}}}
+        rc = run_main(json.dumps(doc), ["--target", "web", "--image", "i"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "must be a mapping" in capsys.readouterr().err
 
     def test_yaml_anchor_extension_fields_convert(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
