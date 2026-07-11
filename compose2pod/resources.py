@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Token, _Expand
+from compose2pod.keys import Token, _Expand, _is_number
 
 
 # deploy.resources.limits.<field> -> (podman flag, conflicting legacy key)
@@ -11,12 +11,14 @@ _LIMITS = {"cpus": ("--cpus", "cpus"), "memory": ("--memory", "mem_limit"), "pid
 
 
 def _check_number(name: str, field: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
-    if isinstance(value, bool) or not isinstance(value, int | float | str):
+    if not _is_number(value):
         msg = f"service {name!r}: {field} must be a number or string"
         raise UnsupportedComposeError(msg)
 
 
 def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    if limits is None:
+        return
     if not isinstance(limits, dict):
         msg = f"service {name!r}: deploy.resources.limits must be a mapping"
         raise UnsupportedComposeError(msg)
@@ -33,6 +35,8 @@ def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # no
 
 
 def _validate_reservations(name: str, svc: dict[str, Any], reservations: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    if reservations is None:
+        return
     if not isinstance(reservations, dict):
         msg = f"service {name!r}: deploy.resources.reservations must be a mapping"
         raise UnsupportedComposeError(msg)

@@ -89,6 +89,12 @@ class TestValidateDeploy:
         with pytest.raises(UnsupportedComposeError, match=match):
             validate_deploy("app", _svc(deploy, mem_reservation="256m"))
 
+    def test_null_limits_is_noop(self) -> None:
+        validate_deploy("app", _svc({"resources": {"limits": None}}))
+
+    def test_null_reservations_is_noop(self) -> None:
+        validate_deploy("app", _svc({"resources": {"reservations": None}}))
+
 
 class TestDeployResourceFlags:
     def test_no_deploy_no_flags(self) -> None:

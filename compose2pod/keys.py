@@ -56,8 +56,12 @@ def _validate_bool(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - C
         raise UnsupportedComposeError(msg)
 
 
+def _is_number(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    return not isinstance(value, bool) and isinstance(value, int | float | str)
+
+
 def _validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    if isinstance(value, bool) or not isinstance(value, int | float | str):
+    if not _is_number(value):
         msg = f"service {name!r}: '{key}' must be a number or string"
         raise UnsupportedComposeError(msg)
 
