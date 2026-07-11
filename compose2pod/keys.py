@@ -229,4 +229,8 @@ STRUCTURAL_KEYS: set[str] = {
     "secrets",
     "configs",
     "deploy",
+    "dns",
+    "dns_search",
+    "dns_opt",
+    "sysctls",
 }

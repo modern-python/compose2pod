@@ -601,6 +601,16 @@ class TestEmitScript:
         assert '--ulimit "nproc=65535"' in script
         assert '--ulimit "nofile=20000:40000"' in script
 
+    def test_pod_create_carries_dns_and_sysctl_flags(self) -> None:
+        svc = {"image": "x", "dns": ["1.1.1.1", "8.8.8.8"], "sysctls": {"net.core.somaxconn": 1024}}
+        script = self._single(svc)
+        assert 'podman pod create --name p --dns "1.1.1.1" --dns "8.8.8.8"' in script
+        assert '--sysctl "net.core.somaxconn=1024"' in script
+
+    def test_pod_create_unchanged_without_pod_options(self) -> None:
+        script = self._single({"image": "x"})
+        assert "podman pod create --name p\n" in script
+
 
 class TestReferencedVariables:
     def _options(self, command: str = "") -> EmitOptions:
@@ -617,6 +627,10 @@ class TestReferencedVariables:
     def test_collects_from_interpolated_fields_sorted(self) -> None:
         compose = {"services": {"app": {"image": "${IMG}", "environment": {"A": "${AVAR}", "B": "${BVAR}"}}}}
         assert referenced_variables(compose, self._options()) == ["AVAR", "BVAR", "IMG"]
+
+    def test_dns_variable_is_referenced(self) -> None:
+        doc = {"services": {"app": {"image": "x", "dns": ["${DNS_HOST}"]}}}
+        assert "DNS_HOST" in referenced_variables(doc, self._options())
 
     def test_includes_env_file_excludes_non_interpolated_fields(self) -> None:
         compose = {
