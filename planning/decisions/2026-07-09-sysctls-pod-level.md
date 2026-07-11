@@ -50,3 +50,12 @@ a per-container `podman run --sysctl` would be rejected or wrong.
 - The pod-level-aggregation pattern is built (for `dns` or otherwise), giving
   `sysctls` a `podman pod create --sysctl` home; or a live podman run
   contradicts the documented per-container-`--sysctl`-in-pod behavior.
+
+## Resolved
+
+The revisit trigger was met: `changes/2026-07-11.03-pod-dns-sysctls.md` built
+the pod-level-aggregation pattern, so `sysctls` (and `dns`/`dns_search`/
+`dns_opt`) are now supported via `podman pod create --sysctl`/`--dns`, unioned
+and conflict-checked across the target's closure. This decision's reasoning
+(sysctls is pod-level, not per-container) was realized, not reversed, so its
+status stays `accepted` as the record of why the pod-level home was chosen.
