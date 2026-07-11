@@ -178,3 +178,11 @@ class TestResolveExtends:
         }
         with pytest.raises(UnsupportedComposeError, match="cannot merge 'cap_add' across incompatible forms"):
             resolve_extends(doc)
+
+    def test_extends_non_dict_base_defers_to_validate(self) -> None:
+        # A non-dict base cannot be merged; resolve must not crash — it leaves
+        # the invalid base for validate() to reject.
+        doc = {"services": {"base": None, "web": {"extends": {"service": "base"}, "image": "x"}}}
+        result = resolve_extends(doc)
+        assert "extends" not in result["services"]["web"]
+        assert result["services"]["base"] is None

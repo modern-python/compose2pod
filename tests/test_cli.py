@@ -213,6 +213,14 @@ class TestMain:
         assert rc == EXIT_USAGE_ERROR
         assert "cross-file" in capsys.readouterr().err
 
+    def test_extends_non_dict_base_is_clean_error(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        doc = {"services": {"base": None, "web": {"extends": {"service": "base"}, "image": "x"}}}
+        rc = run_main(json.dumps(doc), ["--target", "web", "--image", "i"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "must be a mapping" in capsys.readouterr().err
+
     def test_yaml_anchor_extension_fields_convert(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:

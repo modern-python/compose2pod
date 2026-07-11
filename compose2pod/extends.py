@@ -115,8 +115,11 @@ def resolve_extends(compose: Any) -> Any:  # noqa: ANN401 - Compose values are u
             raise UnsupportedComposeError(msg)
         base = resolve(base_name)
         local = {key: value for key, value in svc.items() if key != "extends"}
-        merged = _merge(base, local, name)
         resolving.discard(name)
+        if not isinstance(base, dict):
+            resolved[name] = local
+            return local
+        merged = _merge(base, local, name)
         resolved[name] = merged
         return merged
 
