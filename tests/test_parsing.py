@@ -19,6 +19,13 @@ class TestValidate:
         assert any("stop_signal" in w for w in warnings)
         assert any("stop_grace_period" in w for w in warnings)
 
+    def test_profiles_is_ignored_with_warning(self) -> None:
+        # profiles cannot change the --target + depends_on run set, so it is
+        # accepted and warned, not rejected.
+        svc = {"image": "x", "profiles": ["debug"]}
+        warnings = validate({"services": {"app": svc}})
+        assert any("profiles" in w for w in warnings)
+
     def test_non_dict_document_raises(self) -> None:
         for bad in (None, [], "compose", 42):
             with pytest.raises(UnsupportedComposeError, match="must be a mapping"):

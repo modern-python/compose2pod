@@ -636,3 +636,46 @@ class TestReferencedVariables:
     def test_collects_from_ulimits(self) -> None:
         compose = {"services": {"app": {"image": "x", "ulimits": {"nofile": "${MAX}"}}}}
         assert referenced_variables(compose, self._options()) == ["MAX"]
+
+
+class TestProfiles:
+    def _script(self, doc: dict, target: str = "app") -> str:
+        options = EmitOptions(
+            target=target,
+            ci_image="ci",
+            command="",
+            pod="test-pod",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        return emit_script(compose=doc, options=options)
+
+    def test_profiles_key_does_not_change_the_emitted_script(self) -> None:
+        # Nothing in emit reads 'profiles', so a service in the closure emits
+        # identically with and without it.
+        base = {"services": {"app": {"image": "x"}}}
+        with_profiles = {"services": {"app": {"image": "x", "profiles": ["debug"]}}}
+        assert self._script(with_profiles) == self._script(base)
+
+    def test_profiled_service_outside_closure_is_not_run(self) -> None:
+        # debug-tools is not in app's depends_on closure, so it never gets a
+        # container (its name would appear as `test-pod-debug-tools` if run).
+        doc = {
+            "services": {
+                "app": {"image": "x"},
+                "debug-tools": {"image": "y", "profiles": ["debug"]},
+            }
+        }
+        assert "test-pod-debug-tools" not in self._script(doc)
+
+    def test_target_on_a_profiled_service_still_runs_it(self) -> None:
+        # Targeting a service by name runs it regardless of its profile
+        # (Compose auto-activates a targeted service's profile).
+        doc = {
+            "services": {
+                "app": {"image": "x"},
+                "debug-tools": {"image": "y", "profiles": ["debug"]},
+            }
+        }
+        assert "test-pod-debug-tools" in self._script(doc, target="debug-tools")
