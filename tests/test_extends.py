@@ -157,6 +157,18 @@ class TestResolveExtends:
         with pytest.raises(UnsupportedComposeError, match="cannot merge 'environment' across incompatible forms"):
             resolve_extends(doc)
 
+    def test_diamond_inheritance_resolves_base_once(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "app", "environment": {"COMMON": "1"}},
+                "web": {"extends": {"service": "base"}, "environment": {"ROLE": "web"}},
+                "worker": {"extends": {"service": "base"}, "environment": {"ROLE": "worker"}},
+            }
+        }
+        services = resolve_extends(doc)["services"]
+        assert services["web"]["environment"] == {"COMMON": "1", "ROLE": "web"}
+        assert services["worker"]["environment"] == {"COMMON": "1", "ROLE": "worker"}
+
     def test_incompatible_sequence_form_is_refused(self) -> None:
         doc = {
             "services": {

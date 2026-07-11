@@ -11,6 +11,7 @@ from typing import Any
 
 from compose2pod.emit import EmitOptions, emit_script, referenced_variables
 from compose2pod.exceptions import UnsupportedComposeError
+from compose2pod.extends import resolve_extends
 from compose2pod.parsing import validate
 
 
@@ -97,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         allow_exit_codes=args.allow_exit_code,
     )
     try:
+        compose = resolve_extends(compose)
         warnings = validate(compose)
         script = emit_script(compose=compose, options=options)
     except UnsupportedComposeError as error:
