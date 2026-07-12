@@ -6,6 +6,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from compose2pod import stores
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
@@ -13,8 +14,6 @@ from compose2pod.keys import SERVICE_KEYS, Token, _Expand, _key_value_pairs
 from compose2pod.pod import pod_create_flags
 from compose2pod.resources import deploy_resource_flags
 from compose2pod.shell import to_shell, variable_names
-from compose2pod.store import all_create_lines, all_flags, all_referenced_variables, all_teardown_names
-from compose2pod.stores import STORE_KINDS
 
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
@@ -105,7 +104,7 @@ def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], projec
     for key, spec in SERVICE_KEYS.items():
         if key in svc:
             flags += spec.emit(svc[key])
-    flags += all_flags(svc, pod, STORE_KINDS)
+    flags += stores.flags(svc, pod)
     flags += deploy_resource_flags(svc)
     return flags
 
@@ -205,17 +204,16 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
 
     lines = [_SCRIPT_HEADER]
     teardown = f"podman pod rm -f {shlex.quote(options.pod)} >/dev/null 2>&1 || true"
-    store_names = all_teardown_names(services, order, options.pod, STORE_KINDS)
-    if store_names:
-        stores = " ".join(store_names)
-        teardown += f"; podman secret rm {stores} >/dev/null 2>&1 || true"
+    store_teardown = stores.teardown_line(compose, order, options.pod)
+    if store_teardown:
+        teardown += f"; {store_teardown}"
     lines.append(f"trap '{teardown}' EXIT")
     pod_flags = pod_create_flags(services, order)
     pod_create = f"podman pod create --name {shlex.quote(options.pod)}"
     if pod_flags:
         pod_create += " " + _render(pod_flags)
     lines.append(pod_create)
-    lines.extend(all_create_lines(compose, order, options.pod, options.project_dir, STORE_KINDS))
+    lines.extend(stores.create_lines(compose, order, options.pod, options.project_dir))
     waited: set[str] = set()
     for name in order:
         for dep, condition in depends_on(services[name]).items():
@@ -252,5 +250,5 @@ def referenced_variables(compose: dict[str, Any], options: EmitOptions) -> list[
     for token in pod_create_flags(services, order):
         if isinstance(token, _Expand):
             names.update(variable_names(token.value))
-    names |= all_referenced_variables(compose, order, options.project_dir, STORE_KINDS)
+    names |= stores.referenced_variables(compose, order, options.project_dir)
     return sorted(names)
