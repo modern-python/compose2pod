@@ -3,13 +3,12 @@
 import argparse
 import contextlib
 import json
-import re
 import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from compose2pod.emit import EmitOptions, emit_script, referenced_variables
+from compose2pod.emit import POD_NAME_PATTERN, EmitOptions, emit_script, referenced_variables
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.extends import resolve_extends
 from compose2pod.parsing import validate
@@ -18,9 +17,6 @@ from compose2pod.parsing import validate
 _yaml: ModuleType | None = None
 with contextlib.suppress(ImportError):  # the optional [yaml] extra is not installed
     import yaml as _yaml
-
-
-POD_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
 def _load_yaml(text: str) -> Any:  # noqa: ANN401 - returns arbitrary parsed compose data
@@ -72,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         help="target exit code treated as success in addition to 0",
     )
     args = parser.parse_args(argv)
-    if not POD_NAME_PATTERN.match(args.pod_name):
+    if not POD_NAME_PATTERN.fullmatch(args.pod_name):
         sys.stderr.write(f"compose2pod: error: invalid pod name {args.pod_name!r}\n")
         return 2
     if args.file:

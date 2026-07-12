@@ -1,10 +1,12 @@
 """Render the podman-pod test script for a target service and its dependencies."""
 
 import dataclasses
+import re
 import shlex
 from pathlib import Path
 from typing import Any
 
+from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, Token, _Expand, _key_value_pairs
@@ -16,6 +18,7 @@ from compose2pod.stores import STORE_KINDS
 
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
+POD_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
 def image_for(svc: dict[str, Any], ci_image: str) -> Token:
@@ -187,6 +190,9 @@ def _emit_target(lines: list[str], run_tokens: list[Token], options: EmitOptions
 
 def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
     """Render the full pod test script for `target` and its dependency closure."""
+    if not POD_NAME_PATTERN.fullmatch(options.pod):
+        msg = f"invalid pod name {options.pod!r}"
+        raise UnsupportedComposeError(msg)
     services = compose["services"]
     hosts = hostnames(services)
     order = startup_order(services, options.target)
