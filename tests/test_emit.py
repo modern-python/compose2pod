@@ -1,3 +1,5 @@
+import pytest
+
 from compose2pod.emit import (
     EmitOptions,
     _Expand,
@@ -8,6 +10,7 @@ from compose2pod.emit import (
     referenced_variables,
     run_flags,
 )
+from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.parsing import validate
 
 
@@ -722,3 +725,27 @@ class TestProfiles:
             }
         }
         assert "test-pod-debug-tools" in self._script(doc, target="debug-tools")
+
+
+class TestPodNameValidation:
+    def _options(self, pod: str) -> EmitOptions:
+        return EmitOptions(
+            target="app",
+            ci_image="i",
+            command="",
+            pod=pod,
+            project_dir="/b",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+
+    def test_emit_script_rejects_invalid_pod_names(self) -> None:
+        doc = {"services": {"app": {"image": "x"}}}
+        for bad in ("p'; rm -rf /; '", "bad name", "$(touch x)", "", "-p", "p\n"):
+            with pytest.raises(UnsupportedComposeError, match="invalid pod name"):
+                emit_script(compose=doc, options=self._options(bad))
+
+    def test_emit_script_accepts_a_valid_pod_name(self) -> None:
+        doc = {"services": {"app": {"image": "x"}}}
+        script = emit_script(compose=doc, options=self._options("test-pod.1"))
+        assert "podman pod create --name test-pod.1" in script

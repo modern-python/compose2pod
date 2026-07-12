@@ -468,7 +468,13 @@ check. A braced reference whose text after the name is not one of these
 operators (e.g. `${FOO!bar}`) is malformed and raises
 `UnsupportedComposeError` rather than silently dropping the trailing text.
 Tool/CLI-supplied values (`--project-dir`, `--image`, the pod name,
-the `--command` override) are literal and never interpolated. The CLI
+the `--command` override) are literal and never interpolated. The pod
+name is embedded into the pod-create line, the single-quoted `EXIT`
+trap, and the `<pod>-<name>` store names (some of them unquoted), so it
+must be a shell-inert identifier — `emit_script` validates it against
+`POD_NAME_PATTERN` (`^[A-Za-z0-9][A-Za-z0-9_.-]*$`) and raises
+`UnsupportedComposeError` on any other value, guarding library callers
+as well as the CLI's `--pod-name` (`compose2pod/emit.py`). The CLI
 prints one informational stderr note listing the variable names the
 generated script actually expands at run time — `referenced_variables()`
 (`compose2pod/emit.py`) collects these from the same tokens `to_shell()`
