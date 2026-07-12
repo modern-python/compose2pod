@@ -2,14 +2,13 @@
 
 from typing import Any
 
+from compose2pod import stores
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS
 from compose2pod.pod import uses_pod_options, validate_pod_options
 from compose2pod.resources import validate_deploy
-from compose2pod.store import validate_all
-from compose2pod.stores import STORE_KINDS
 
 
 SUPPORTED_SERVICE_KEYS = set(SERVICE_KEYS) | STRUCTURAL_KEYS
@@ -135,7 +134,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
         warnings.extend(_validate_service(name, svc))
     hostnames(services)  # validate hostname/container_name/networks shapes at the gate
     _validate_depends_on(services)
-    validate_all(compose, STORE_KINDS)
+    stores.validate(compose)
     if uses_pod_options(services):
         warnings.append(
             "dns/sysctls apply pod-wide -- all containers in the pod share one /etc/resolv.conf and sysctl set"
