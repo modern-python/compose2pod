@@ -8,6 +8,7 @@ from typing import Any
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, Token, _Expand, _key_value_pairs
+from compose2pod.pod import pod_create_flags
 from compose2pod.resources import deploy_resource_flags
 from compose2pod.shell import to_shell, variable_names
 from compose2pod.store import all_create_lines, all_flags, all_referenced_variables, all_teardown_names
@@ -203,7 +204,11 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
         stores = " ".join(store_names)
         teardown += f"; podman secret rm {stores} >/dev/null 2>&1 || true"
     lines.append(f"trap '{teardown}' EXIT")
-    lines.append(f"podman pod create --name {shlex.quote(options.pod)}")
+    pod_flags = pod_create_flags(services, order)
+    pod_create = f"podman pod create --name {shlex.quote(options.pod)}"
+    if pod_flags:
+        pod_create += " " + _render(pod_flags)
+    lines.append(pod_create)
     lines.extend(all_create_lines(compose, order, options.pod, options.project_dir, STORE_KINDS))
     waited: set[str] = set()
     for name in order:
@@ -238,5 +243,8 @@ def referenced_variables(compose: dict[str, Any], options: EmitOptions) -> list[
         for token in _run_tokens(name, services, options, hosts):
             if isinstance(token, _Expand):
                 names.update(variable_names(token.value))
+    for token in pod_create_flags(services, order):
+        if isinstance(token, _Expand):
+            names.update(variable_names(token.value))
     names |= all_referenced_variables(compose, order, options.project_dir, STORE_KINDS)
     return sorted(names)

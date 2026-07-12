@@ -6,6 +6,7 @@ from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS
+from compose2pod.pod import uses_pod_options, validate_pod_options
 from compose2pod.resources import validate_deploy
 from compose2pod.store import validate_all
 from compose2pod.stores import STORE_KINDS
@@ -89,6 +90,7 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     _validate_entrypoint(name, svc)
     _validate_tmpfs(name, svc)
     validate_deploy(name, svc)
+    validate_pod_options(name, svc)
     for key, spec in SERVICE_KEYS.items():
         if key in svc:
             spec.validate(name, key, svc[key])
@@ -134,4 +136,8 @@ def validate(compose: dict[str, Any]) -> list[str]:
     hostnames(services)  # validate hostname/container_name/networks shapes at the gate
     _validate_depends_on(services)
     validate_all(compose, STORE_KINDS)
+    if uses_pod_options(services):
+        warnings.append(
+            "dns/sysctls apply pod-wide -- all containers in the pod share one /etc/resolv.conf and sysctl set"
+        )
     return warnings

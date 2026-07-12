@@ -53,4 +53,8 @@ def test_supported_service_keys_snapshot() -> None:
         "shm_size",
         "oom_score_adj",
         "oom_kill_disable",
+        "dns",
+        "dns_search",
+        "dns_opt",
+        "sysctls",
     } == SUPPORTED_SERVICE_KEYS

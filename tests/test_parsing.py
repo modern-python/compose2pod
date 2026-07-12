@@ -39,6 +39,18 @@ class TestValidate:
         svc = {"image": "x", "mem_limit": "512m", "cpus": 0.5, "pids_limit": 100, "oom_kill_disable": True}
         assert validate({"services": {"app": svc}}) == []
 
+    def test_dns_and_sysctls_accepted_with_pod_wide_warning(self) -> None:
+        svc = {"image": "x", "dns": ["1.1.1.1"], "sysctls": {"net.core.somaxconn": 1024}}
+        warnings = validate({"services": {"app": svc}})
+        assert any("pod-wide" in w for w in warnings)
+
+    def test_dns_bad_shape_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must be a string or list of strings"):
+            validate({"services": {"app": {"image": "x", "dns": {"bad": "shape"}}}})
+
+    def test_no_pod_options_no_pod_wide_warning(self) -> None:
+        assert validate({"services": {"app": {"image": "x"}}}) == []
+
     def test_mem_limit_bool_value_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'mem_limit' must be a number or string"):
             validate({"services": {"app": {"image": "x", "mem_limit": True}}})
@@ -267,11 +279,6 @@ class TestValidate:
     def test_ulimits_non_scalar_soft_hard_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": [1, 2], "hard": 3}}}}})
-
-    def test_sysctls_stays_unsupported(self) -> None:
-        # Deliberate: sysctls is pod-level (decisions/2026-07-09-sysctls-pod-level.md), keeps raising.
-        with pytest.raises(UnsupportedComposeError, match="unsupported key 'sysctls'"):
-            validate({"services": {"app": {"image": "x", "sysctls": {"net.core.somaxconn": 1024}}}})
 
     def test_pull_policy_null_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "pull_policy": None}}}) == []
