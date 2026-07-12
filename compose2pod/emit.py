@@ -146,8 +146,26 @@ class EmitOptions:
     allow_exit_codes: list[int]
 
 
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class PlannedScript:
+    """The rendered pod script and the run-time variables it expands.
+
+    Both are products of a single `_plan` traversal, so they cannot drift.
+    """
+
+    script: str
+    variables: list[str]
+
+
 def _render(tokens: list[Token]) -> str:
     return " ".join(to_shell(token.value) if isinstance(token, _Expand) else shlex.quote(token) for token in tokens)
+
+
+def _collect_vars(tokens: list[Token], names: set[str]) -> None:
+    """Add the run-time variables any `_Expand` tokens expand to `names`."""
+    for token in tokens:
+        if isinstance(token, _Expand):
+            names.update(variable_names(token.value))
 
 
 def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions, hosts: list[str]) -> list[Token]:
@@ -187,11 +205,14 @@ def _emit_target(lines: list[str], run_tokens: list[Token], options: EmitOptions
     lines.append("esac")
 
 
-def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
-    """Render the full pod test script for `target` and its dependency closure."""
-    if not POD_NAME_PATTERN.fullmatch(options.pod):
-        msg = f"invalid pod name {options.pod!r}"
-        raise UnsupportedComposeError(msg)
+def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
+    """Walk the target's dependency closure once, building the script and its variables.
+
+    Every token source is visited a single time and feeds both outputs: each
+    service's `_run_tokens` and the `pod_create_flags` render into lines *and*
+    have their `_Expand` variables collected, so the script and the variable
+    list cannot disagree about what the script expands at run time.
+    """
     services = compose["services"]
     hosts = hostnames(services)
     order = startup_order(services, options.target)
@@ -201,6 +222,7 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
         for dep, condition in depends_on(svc).items()
         if condition == "service_completed_successfully"
     }
+    names: set[str] = set()
 
     lines = [_SCRIPT_HEADER]
     teardown = f"podman pod rm -f {shlex.quote(options.pod)} >/dev/null 2>&1 || true"
@@ -209,11 +231,13 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
         teardown += f"; {store_teardown}"
     lines.append(f"trap '{teardown}' EXIT")
     pod_flags = pod_create_flags(services, order)
+    _collect_vars(pod_flags, names)
     pod_create = f"podman pod create --name {shlex.quote(options.pod)}"
     if pod_flags:
         pod_create += " " + _render(pod_flags)
     lines.append(pod_create)
     lines.extend(stores.create_lines(compose, order, options.pod, options.project_dir))
+    names |= stores.referenced_variables(compose, order, options.project_dir)
     waited: set[str] = set()
     for name in order:
         for dep, condition in depends_on(services[name]).items():
@@ -223,32 +247,30 @@ def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
                 lines.append(f"wait_healthy {shlex.quote(f'{options.pod}-{dep}')} {attempts} {interval}")
                 waited.add(dep)
         run_tokens = _run_tokens(name, services, options, hosts)
+        _collect_vars(run_tokens, names)
         if name == options.target:
             _emit_target(lines, run_tokens, options)
         elif name in completion_gated:
             lines.append(f"podman run --rm {_render(run_tokens)}")
         else:
             lines.append(f"podman run -d {_render(run_tokens)}")
-    return "\n".join(lines) + "\n"
+    return PlannedScript(script="\n".join(lines) + "\n", variables=sorted(names))
+
+
+def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
+    """Render the full pod test script for `target` and its dependency closure."""
+    if not POD_NAME_PATTERN.fullmatch(options.pod):
+        msg = f"invalid pod name {options.pod!r}"
+        raise UnsupportedComposeError(msg)
+    return _plan(compose, options).script
 
 
 def referenced_variables(compose: dict[str, Any], options: EmitOptions) -> list[str]:
     """Variable names the emitted script expands at run time (sorted, unique).
 
-    Reuses the same token construction as `emit_script`, so it counts exactly
-    the values that pass through `to_shell` -- never a `${VAR}` in a field that
-    is emitted literally, and never the `--command` override (a literal CLI value).
+    Projects the same `_plan` traversal `emit_script` renders from, so it counts
+    exactly the values that pass through `to_shell` -- never a `${VAR}` in a
+    field emitted literally, and never the `--command` override (a literal CLI
+    value).
     """
-    services = compose["services"]
-    hosts = hostnames(services)
-    order = startup_order(services, options.target)
-    names: set[str] = set()
-    for name in order:
-        for token in _run_tokens(name, services, options, hosts):
-            if isinstance(token, _Expand):
-                names.update(variable_names(token.value))
-    for token in pod_create_flags(services, order):
-        if isinstance(token, _Expand):
-            names.update(variable_names(token.value))
-    names |= stores.referenced_variables(compose, order, options.project_dir)
-    return sorted(names)
+    return _plan(compose, options).variables
