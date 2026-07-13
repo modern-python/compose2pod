@@ -88,11 +88,18 @@ def _validate_command(name: str, svc: dict[str, Any]) -> None:
 
 
 def _validate_tmpfs(name: str, svc: dict[str, Any]) -> None:
-    """Check tmpfs is a string or list."""
+    """Check tmpfs is a string or list of strings (emit iterates it)."""
     tmpfs = svc.get("tmpfs")
-    if tmpfs is not None and not isinstance(tmpfs, str | list):
+    if tmpfs is None:
+        return
+    if not isinstance(tmpfs, str | list):
         msg = f"service {name!r}: tmpfs must be a string or list"
         raise UnsupportedComposeError(msg)
+    if isinstance(tmpfs, list):
+        for entry in tmpfs:
+            if not isinstance(entry, str):
+                msg = f"service {name!r}: tmpfs entry must be a string"
+                raise UnsupportedComposeError(msg)
 
 
 def _validate_environment(name: str, svc: dict[str, Any]) -> None:

@@ -314,6 +314,17 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="tmpfs must be a string or list"):
             validate({"services": {"app": {"image": "x", "tmpfs": {"a": "b"}}}})
 
+    def test_tmpfs_list_with_non_string_entry_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError (shell.py to_shell/variable_names
+        # expects a str) -- the same element-level gap already fixed for env_file.
+        with pytest.raises(UnsupportedComposeError, match="tmpfs entry must be a string"):
+            validate({"services": {"app": {"image": "x", "tmpfs": [5]}}})
+
+    def test_tmpfs_string_and_list_of_strings_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "tmpfs": "/tmp"}}}) == []  # noqa: S108
+        assert validate({"services": {"app": {"image": "x", "tmpfs": ["/tmp", "/run"]}}}) == []  # noqa: S108
+        assert validate({"services": {"app": {"image": "x", "tmpfs": None}}}) == []
+
     def test_non_string_hostname_raises_at_gate(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="hostname must be a string"):
             validate({"services": {"app": {"image": "x", "hostname": 5}}})
