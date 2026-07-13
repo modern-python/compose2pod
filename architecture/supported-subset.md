@@ -42,23 +42,42 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   The remaining keys documented below are **structural keys**, handled
   outside the registry because their `emit` needs `project_dir`, spans
   multiple keys, or occupies the image/command slot.
+  The list-shaped registry keys (`group_add`, `cap_add`, `cap_drop`,
+  `security_opt`, `devices`) share one validator, `keys._validate_list`; the
+  map-shaped ones (`labels`, `annotations`) and the pod-level `extra_hosts`
+  share `keys.validate_map`. Both require every list element to be a string
+  and every mapping value to be a string, number, or null — a non-string
+  element or a non-scalar value (e.g. `cap_add: [{NET_ADMIN: true}]`, a list
+  entry that is itself a mapping) used to be accepted and `str()`'d/`repr()`'d
+  straight into the flag value instead of being rejected.
 - **`image`:** a string; `image_for` (`compose2pod/emit.py`) reads it verbatim
   when the service has no `build`. A service must set at least one of `image`
   or `build`; a service with neither, or a non-string `image` while `build` is
   absent, raises at the gate (`_validate_image`, `compose2pod/parsing.py`). A
   non-string `image` alongside `build` is accepted, since `image_for` never
   reads it in that case — the CI image always wins.
-- **`command`:** string or list, exactly like `entrypoint`. List form is argv
-  tokens; string form runs via `/bin/sh -c`. Any other shape (e.g. a mapping)
-  raises at the gate (`_validate_command`, `compose2pod/parsing.py`) — a
-  mapping is rejected outright rather than reaching `podman run` with only
-  its keys emitted as bare tokens and its values silently discarded.
+- **`command`:** string or list. List form is argv tokens; string form runs
+  via `/bin/sh -c`. Any other shape (e.g. a mapping) raises at the gate
+  (`_validate_command`, `compose2pod/parsing.py`) — a mapping is rejected
+  outright rather than reaching `podman run` with only its keys emitted as
+  bare tokens and its values silently discarded. Each list element must
+  itself be a string; a non-string element (e.g. `command: [{run: tests}]`,
+  the same list/map YAML slip that trips up `environment`) raises the same
+  way, rather than being `str()`'d into a single mangled argv token.
+  `command: null` is accepted, treated the same as an absent `command` —
+  unlike `entrypoint: null` (see below), a narrower pre-existing divergence
+  between the two keys.
 - **`environment`:** list form (`- KEY=value`, `- KEY`) or mapping form
   (`KEY: value`, `KEY:`). A null mapping value (`KEY:`) means "pass `KEY`
   through from the host", emitted as a bare `-e KEY` exactly like the list
   form `- KEY`.
   The key itself must be a list or mapping; any other shape (e.g. a bare
-  string) raises at the gate.
+  string) raises at the gate. List elements must themselves be strings, and
+  mapping values must be a string, number, or null; the commonest violation
+  is the classic YAML slip of mixing list and map form
+  (`environment: [{KEY: value}]` instead of `- KEY=value`), which used to be
+  accepted and emit the literal `-e "{'KEY': 'value'}"` — both rules are
+  enforced by the shared `keys.validate_map` (`compose2pod/keys.py`).
 - **`env_file`:** a string or a list. Any other shape raises
   (`_validate_env_file`, `compose2pod/parsing.py`). Each list element must
   itself be a string; a non-string element (e.g. `env_file: [5]`) raises the
@@ -68,7 +87,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   shell form (`/bin/sh -c <string>`), mirroring `command`. Emitted as
   `--entrypoint <first-token>` with the remaining tokens placed ahead of the
   command after the image, so `podman run --entrypoint a IMAGE b <command>`
-  runs `a b <command>` -- no JSON needed. A string (shell-form) entrypoint
+  runs `a b <command>` -- no JSON needed. Each list element must itself be a
+  string, the same rule and rejection as `command`'s list form. Unlike
+  `command`, `entrypoint: null` raises rather than being treated as absent —
+  a pre-existing, narrower divergence in how the two keys' validators handle
+  an explicit `null` (`_validate_command` checks for `None` first and treats
+  it as "absent"; `_validate_entrypoint` does not). A string (shell-form) entrypoint
   ignores the service `command`, matching Docker; `validate()` warns when both
   are set. The target's `--command` override still applies as explicit intent,
   but when the target has a string entrypoint, the override tokens land after
@@ -318,6 +342,16 @@ honors both, refusing loudly on overlap rather than picking a precedence.
   (`_validate_service_healthcheck`, `compose2pod/parsing.py`) — previously a
   non-mapping healthcheck reached `.get()` calls downstream and crashed raw
   instead of failing at the gate.
+- **`test`:** a bare string (shell form), `"NONE"` / `["NONE"]` (disabled),
+  `["CMD", ...]` (exec form), or `["CMD-SHELL", <string>]`. `health_cmd`
+  (`compose2pod/healthcheck.py`) is the sole reader and the sole validator —
+  `_validate_service_healthcheck` (`compose2pod/parsing.py`) calls it at
+  `validate()` time purely for its shape check (the returned `--health-cmd`
+  value is discarded there; `emit.py` calls it again to get the value for
+  real). Any other shape raises, including a `CMD-SHELL` whose argument isn't
+  a string and a `CMD` whose trailing elements aren't all strings (e.g.
+  `["CMD-SHELL", ["curl", "-f"]]`) — both used to reach `emit_script()`
+  unchecked and crash raw.
 - **`interval`:** parsed to whole seconds by `interval_seconds`
   (`compose2pod/healthcheck.py`). Supported forms: a bare number of seconds
   (`30`, `"30"`, `"30s"`), minutes (`"2m"`), and milliseconds (`"500ms"`).
@@ -496,6 +530,15 @@ interpolated string leaf into a double-quoted POSIX-shell fragment with the
 variable references left live, so the generated script's own shell expands
 them against its runtime environment when the script runs.
 
+`Expand` (`compose2pod/keys.py`) is a frozen dataclass wrapping the `str`
+value every interpolated field carries; it rejects a non-`str` value at
+construction (`__post_init__`) with `UnsupportedComposeError`, since
+`to_shell()`/`variable_names()` both assume a `str` and crash raw otherwise.
+This is a chokepoint, not a substitute for validating each key's shape at
+`validate()` time: it only converts an already-malformed value into a clean
+error one step later, at `emit_script()`, instead of leaving it to crash
+inside `shell.py`'s regex matching.
+
 The interpolated set is exactly what `Expand(...)` wraps in
 `compose2pod/emit.py` and `compose2pod/keys.py` — there is no separate list
 to maintain by hand, so treat the **service-key registry**
@@ -566,7 +609,12 @@ names (short form, each defaulting to `service_started`) or a mapping of
 service name to a per-dependency mapping (long form, read for `condition`).
 Anything else — a bare string, a number, a mapping whose value isn't itself a
 mapping — raises `UnsupportedComposeError` at the gate instead of failing
-later with a raw `AttributeError`/`TypeError` when the shape is walked.
+later with a raw `AttributeError`/`TypeError` when the shape is walked. Each
+short-form list element must itself be a string; a non-string element (e.g.
+`depends_on: [{db: {condition: service_healthy}}]`, the same list/map YAML
+slip that trips up `environment`/`command`) raises the same way, instead of
+crashing raw (`TypeError: unhashable type`) from inside `validate()` itself
+when the list was passed to `dict.fromkeys`.
 
 ## YAML anchors and merge keys
 
