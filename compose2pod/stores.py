@@ -95,6 +95,9 @@ def _check_long_form_scalars(name: str, ref: dict[str, Any], kind: StoreKind) ->
 
 
 def _check_target(name: str, ref: dict[str, Any], kind: StoreKind) -> None:
+    if "target" in ref and not isinstance(ref["target"], str):
+        msg = f"service {name!r}: {kind.label} target must be a string"
+        raise UnsupportedComposeError(msg)
     if kind.require_absolute_target and isinstance(ref.get("target"), str) and not ref["target"].startswith("/"):
         msg = f"service {name!r}: {kind.label} target {ref['target']!r} must be an absolute path"
         raise UnsupportedComposeError(msg)

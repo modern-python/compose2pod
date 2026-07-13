@@ -433,8 +433,8 @@ colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
   `podman run`, assembled per service by `stores.flags` (`compose2pod/stores.py`,
   called from `emit_script`, `compose2pod/emit.py`), where `target` defaults
   to the secret's own name when the reference doesn't give one (short form,
-  or long form without `target`). `uid`/`gid`/`mode` are only added when the
-  long form gives them explicitly; `mode` renders as a 4-digit octal string
+  or long form without `target`). When present, `target` must be a string.
+  `uid`/`gid`/`mode` are only added when the long form gives them explicitly; `mode` renders as a 4-digit octal string
   when given as a Python int (`0o400` becomes `"0400"`) and passes through
   verbatim when given as a string (`_flags_for`, `compose2pod/stores.py`). When
   `uid`/`gid`/`mode` are omitted, podman itself applies its own defaults: the
@@ -496,7 +496,7 @@ colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
   Unlike a secret, whose default `target` is its own name (mounted by podman
   under `/run/secrets/<target>`), a config's default `target` is the
   container-root absolute path `/<name>` (`CONFIG.default_target`,
-  `compose2pod/stores.py`). A long-form `target` must be an absolute path
+  `compose2pod/stores.py`). When present, `target` must be a string. A long-form `target` must be an absolute path
   (start with `/`); a relative target raises
   (`CONFIG.require_absolute_target`, checked by `_check_target`,
   `compose2pod/stores.py`). `uid`/`gid`/`mode` behave exactly as for secrets:

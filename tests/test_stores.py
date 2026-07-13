@@ -93,6 +93,12 @@ class TestValidateSecretKind:
         with pytest.raises(UnsupportedComposeError, match="must be an int or string"):
             stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "uid": [1]}]))
 
+    def test_non_string_target_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="secret target"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "target": 5}]))
+        with pytest.raises(UnsupportedComposeError, match="secret target"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "target": ["t"]}]))
+
     def test_content_in_secret_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
             stores.validate(_doc("secrets", {"a": {"content": "x"}}))
@@ -108,6 +114,12 @@ class TestValidateConfigKind:
     def test_relative_long_form_target_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"config target 'c.conf' must be an absolute path"):
             stores.validate(_doc("configs", {"c": {"file": "./c"}}, [{"source": "c", "target": "c.conf"}]))
+
+    def test_non_string_target_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="config target"):
+            stores.validate(_doc("configs", {"c": {"file": "./c"}}, [{"source": "c", "target": 5}]))
+        with pytest.raises(UnsupportedComposeError, match="config target"):
+            stores.validate(_doc("configs", {"c": {"file": "./c"}}, [{"source": "c", "target": ["/etc"]}]))
 
     def test_external_rejected_with_config_wording(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="external configs are not supported"):
