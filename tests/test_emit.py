@@ -290,6 +290,11 @@ class TestEntrypoint:
     def test_missing_entrypoint_is_empty(self) -> None:
         assert entrypoint_tokens({"image": "x"}) == []
 
+    def test_empty_list_is_empty(self) -> None:
+        # An empty list means "no override", not "an entrypoint of zero tokens" --
+        # the same convention `command: []` follows.
+        assert entrypoint_tokens({"entrypoint": []}) == []
+
 
 class TestRunTokens:
     def _options(self, command: str = "") -> EmitOptions:
