@@ -365,13 +365,13 @@ class TestValidate:
             assert validate({"services": {"app": {"image": "x", "healthcheck": {"test": test}}}}) == []
 
     def test_tmpfs_non_string_or_list_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="tmpfs must be a string or list"):
+        with pytest.raises(UnsupportedComposeError, match="'tmpfs' must be a string or list"):
             validate({"services": {"app": {"image": "x", "tmpfs": {"a": "b"}}}})
 
     def test_tmpfs_list_with_non_string_entry_rejected_at_gate(self) -> None:
         # Used to reach emit and crash with TypeError (shell.py to_shell/variable_names
         # expects a str) -- the same element-level gap already fixed for env_file.
-        with pytest.raises(UnsupportedComposeError, match="tmpfs entry must be a string"):
+        with pytest.raises(UnsupportedComposeError, match="'tmpfs' entry must be a string"):
             validate({"services": {"app": {"image": "x", "tmpfs": [5]}}})
 
     def test_tmpfs_string_and_list_of_strings_still_accepted(self) -> None:
