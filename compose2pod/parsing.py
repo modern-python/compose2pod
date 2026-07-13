@@ -75,11 +75,18 @@ def _validate_environment(name: str, svc: dict[str, Any]) -> None:
 
 
 def _validate_env_file(name: str, svc: dict[str, Any]) -> None:
-    """Check env_file is a string or list (emit iterates it)."""
+    """Check env_file is a string or list of strings (emit iterates it)."""
     env_file = svc.get("env_file")
-    if env_file is not None and not isinstance(env_file, str | list):
+    if env_file is None:
+        return
+    if not isinstance(env_file, str | list):
         msg = f"service {name!r}: 'env_file' must be a string or list"
         raise UnsupportedComposeError(msg)
+    if isinstance(env_file, list):
+        for entry in env_file:
+            if not isinstance(entry, str):
+                msg = f"service {name!r}: 'env_file' entry must be a string"
+                raise UnsupportedComposeError(msg)
 
 
 def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compose values are untyped

@@ -375,3 +375,8 @@ class TestValidate:
         assert validate({"services": {"app": {"image": "x", "env_file": "tests.env"}}}) == []
         assert validate({"services": {"app": {"image": "x", "env_file": ["a.env", "b.env"]}}}) == []
         assert validate({"services": {"app": {"image": "x", "env_file": None}}}) == []
+
+    def test_env_file_list_with_non_string_entry_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError: argument should be a str or an os.PathLike object.
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' entry must be a string"):
+            validate({"services": {"app": {"image": "x", "env_file": [5]}}})
