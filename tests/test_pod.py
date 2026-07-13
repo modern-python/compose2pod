@@ -1,7 +1,7 @@
 import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import _Expand
+from compose2pod.keys import Expand
 from compose2pod.pod import pod_create_flags, uses_pod_options, validate_pod_options
 
 
@@ -59,32 +59,32 @@ class TestPodCreateFlags:
         services = {"a": {"dns": ["1.1.1.1", "8.8.8.8"]}, "b": {"dns": "8.8.8.8"}}
         assert pod_create_flags(services, ["a", "b"], []) == [
             "--dns",
-            _Expand(value="1.1.1.1"),
+            Expand(value="1.1.1.1"),
             "--dns",
-            _Expand(value="8.8.8.8"),
+            Expand(value="8.8.8.8"),
         ]
 
     def test_dns_search_and_opt_flags(self) -> None:
         services = {"a": {"dns_search": "corp.internal", "dns_opt": ["ndots:2"]}}
         assert pod_create_flags(services, ["a"], []) == [
             "--dns-search",
-            _Expand(value="corp.internal"),
+            Expand(value="corp.internal"),
             "--dns-option",
-            _Expand(value="ndots:2"),
+            Expand(value="ndots:2"),
         ]
 
     def test_sysctls_mapping_and_list_merge(self) -> None:
         services = {"a": {"sysctls": {"net.core.somaxconn": 1024}}, "b": {"sysctls": ["net.ipv4.tcp_syncookies=1"]}}
         assert pod_create_flags(services, ["a", "b"], []) == [
             "--sysctl",
-            _Expand(value="net.core.somaxconn=1024"),
+            Expand(value="net.core.somaxconn=1024"),
             "--sysctl",
-            _Expand(value="net.ipv4.tcp_syncookies=1"),
+            Expand(value="net.ipv4.tcp_syncookies=1"),
         ]
 
     def test_sysctls_same_key_same_value_merges(self) -> None:
         services = {"a": {"sysctls": {"net.x": "1"}}, "b": {"sysctls": {"net.x": 1}}}
-        assert pod_create_flags(services, ["a", "b"], []) == ["--sysctl", _Expand(value="net.x=1")]
+        assert pod_create_flags(services, ["a", "b"], []) == ["--sysctl", Expand(value="net.x=1")]
 
     def test_sysctls_same_key_conflict_refused(self) -> None:
         services = {"a": {"sysctls": {"net.x": "1"}}, "b": {"sysctls": {"net.x": "2"}}}
@@ -109,17 +109,17 @@ class TestAddHostFlags:
 
     def test_extra_hosts_list_form(self) -> None:
         services = {"a": {"extra_hosts": ["db:10.0.0.5"]}}
-        assert pod_create_flags(services, ["a"], []) == ["--add-host", _Expand(value="db:10.0.0.5")]
+        assert pod_create_flags(services, ["a"], []) == ["--add-host", Expand(value="db:10.0.0.5")]
 
     def test_extra_hosts_mapping_form(self) -> None:
         services = {"a": {"extra_hosts": {"db": "10.0.0.5"}}}
-        assert pod_create_flags(services, ["a"], []) == ["--add-host", _Expand(value="db:10.0.0.5")]
+        assert pod_create_flags(services, ["a"], []) == ["--add-host", Expand(value="db:10.0.0.5")]
 
     def test_extra_hosts_ipv6_value_keeps_colons(self) -> None:
         services = {"a": {"extra_hosts": {"myhost": "2001:db8::1"}}}
         assert pod_create_flags(services, ["a"], []) == [
             "--add-host",
-            _Expand(value="myhost:2001:db8::1"),
+            Expand(value="myhost:2001:db8::1"),
         ]
 
     def test_alias_and_extra_hosts_on_different_hosts_both_appear(self) -> None:
@@ -128,12 +128,12 @@ class TestAddHostFlags:
             "--add-host",
             "web:127.0.0.1",
             "--add-host",
-            _Expand(value="db:10.0.0.5"),
+            Expand(value="db:10.0.0.5"),
         ]
 
     def test_same_host_same_address_across_sources_dedups_silently(self) -> None:
         services = {"a": {"extra_hosts": {"web": "127.0.0.1"}}}
-        assert pod_create_flags(services, ["a"], ["web"]) == ["--add-host", _Expand(value="web:127.0.0.1")]
+        assert pod_create_flags(services, ["a"], ["web"]) == ["--add-host", Expand(value="web:127.0.0.1")]
 
     def test_conflicting_extra_hosts_across_services_refused(self) -> None:
         services = {"a": {"extra_hosts": {"db": "10.0.0.5"}}, "b": {"extra_hosts": {"db": "10.0.0.6"}}}

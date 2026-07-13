@@ -16,16 +16,16 @@ PULL_POLICY_MAP: dict[str, str] = {
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
-class _Expand:
+class Expand:
     """A token whose Compose variable references expand at script-run time."""
 
     value: str
 
 
-Token = str | _Expand
+Token = str | Expand
 
 
-def _key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
+def key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     """Compose list/map key-value section as 'KEY=value' / 'KEY' entries.
 
     A null map value yields a bare 'KEY'. Meaning is caller-defined: '-e KEY'
@@ -57,12 +57,12 @@ def _validate_bool(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - C
         raise UnsupportedComposeError(msg)
 
 
-def _is_number(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+def is_number(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     return not isinstance(value, bool) and isinstance(value, int | float | str)
 
 
 def _validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    if not _is_number(value):
+    if not is_number(value):
         msg = f"service {name!r}: '{key}' must be a number or string"
         raise UnsupportedComposeError(msg)
 
@@ -73,7 +73,7 @@ def _validate_list(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - C
         raise UnsupportedComposeError(msg)
 
 
-def _validate_map(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+def validate_map(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     if not isinstance(value, list | dict):
         msg = f"service {name!r}: '{key}' must be a list or mapping"
         raise UnsupportedComposeError(msg)
@@ -94,8 +94,8 @@ def _concat_list(name: str, key: str, base: Any, local: Any) -> list[Any]:  # no
     return _as_list(name, key, base) + _as_list(name, key, local)
 
 
-def _pairs_to_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    """Normalize list-or-dict key-value form to a mapping; inverse of _key_value_pairs."""
+def pairs_to_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Normalize list-or-dict key-value form to a mapping; inverse of key_value_pairs."""
     if isinstance(value, dict):
         return value
     if isinstance(value, list):
@@ -110,12 +110,12 @@ def _pairs_to_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noq
 
 def _merge_map(name: str, key: str, base: Any, local: Any) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     """Merge policy for map-shaped keys: key-by-key merge, local wins."""
-    return {**_pairs_to_mapping(name, key, base), **_pairs_to_mapping(name, key, local)}
+    return {**pairs_to_mapping(name, key, base), **pairs_to_mapping(name, key, local)}
 
 
 def _scalar(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-        return [flag, _Expand(value=str(value))]
+        return [flag, Expand(value=str(value))]
 
     return KeySpec(validate=_validate_scalar, emit=emit)
 
@@ -129,7 +129,7 @@ def _bool(flag: str) -> KeySpec:
 
 def _number_scalar(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-        return [flag, _Expand(value=str(value))]
+        return [flag, Expand(value=str(value))]
 
     return KeySpec(validate=_validate_number, emit=emit)
 
@@ -138,7 +138,7 @@ def _list(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
         tokens: list[Token] = []
         for item in value:
-            tokens += [flag, _Expand(value=str(item))]
+            tokens += [flag, Expand(value=str(item))]
         return tokens
 
     return KeySpec(validate=_validate_list, emit=emit, merge=_concat_list)
@@ -147,14 +147,14 @@ def _list(flag: str) -> KeySpec:
 def _map(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
         tokens: list[Token] = []
-        for pair in _key_value_pairs(value):
-            tokens += [flag, _Expand(value=str(pair))]
+        for pair in key_value_pairs(value):
+            tokens += [flag, Expand(value=str(pair))]
         return tokens
 
-    return KeySpec(validate=_validate_map, emit=emit, merge=_merge_map)
+    return KeySpec(validate=validate_map, emit=emit, merge=_merge_map)
 
 
-def _extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
+def extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     """Compose extra_hosts as 'host:ip' entries; map values keep their colons (IPv6-safe)."""
     if isinstance(value, list):
         return value
@@ -204,7 +204,7 @@ def _emit_ulimits(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values a
         return []
     tokens: list[Token] = []
     for arg in _ulimit_args(value):
-        tokens += ["--ulimit", _Expand(value=arg)]
+        tokens += ["--ulimit", Expand(value=arg)]
     return tokens
 
 
