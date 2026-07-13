@@ -178,7 +178,7 @@ def _collect_vars(tokens: list[Token], names: set[str]) -> None:
             names.update(variable_names(token.value))
 
 
-def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions) -> list[Token]:
+def run_tokens(name: str, services: dict[str, Any], options: EmitOptions) -> list[Token]:
     svc = services[name]
     tokens = run_flags(name, svc, options.pod, options.project_dir)
     entrypoint = entrypoint_tokens(svc)
@@ -195,10 +195,10 @@ def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions) -> li
     return tokens
 
 
-def _emit_target(lines: list[str], run_tokens: list[Token], options: EmitOptions) -> None:
+def _emit_target(lines: list[str], tokens: list[Token], options: EmitOptions) -> None:
     target_ctr = shlex.quote(f"{options.pod}-{options.target}")
     lines.append("rc=0")
-    lines.append(f"podman run {_render(run_tokens)} || rc=$?")
+    lines.append(f"podman run {_render(tokens)} || rc=$?")
     for artifact in options.artifacts:
         source, destination = artifact.split(":", 1)
         lines.append(f"podman cp {target_ctr}:{shlex.quote(source)} {shlex.quote(destination)} || true")
@@ -219,7 +219,7 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     """Walk the target's dependency closure once, building the script and its variables.
 
     Every token source is visited a single time and feeds both outputs: each
-    service's `_run_tokens` and the `pod_create_flags` render into lines *and*
+    service's `run_tokens` and the `pod_create_flags` render into lines *and*
     have their `Expand` variables collected, so the script and the variable
     list cannot disagree about what the script expands at run time.
     """
@@ -256,14 +256,14 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
                 attempts = max(HEALTHY_WAIT_BUDGET_SECONDS // interval, 1)
                 lines.append(f"wait_healthy {shlex.quote(f'{options.pod}-{dep}')} {attempts} {interval}")
                 waited.add(dep)
-        run_tokens = _run_tokens(name, services, options)
-        _collect_vars(run_tokens, names)
+        tokens = run_tokens(name, services, options)
+        _collect_vars(tokens, names)
         if name == options.target:
-            _emit_target(lines, run_tokens, options)
+            _emit_target(lines, tokens, options)
         elif name in completion_gated:
-            lines.append(f"podman run --rm {_render(run_tokens)}")
+            lines.append(f"podman run --rm {_render(tokens)}")
         else:
-            lines.append(f"podman run -d {_render(run_tokens)}")
+            lines.append(f"podman run -d {_render(tokens)}")
     return PlannedScript(script="\n".join(lines) + "\n", variables=sorted(names))
 
 

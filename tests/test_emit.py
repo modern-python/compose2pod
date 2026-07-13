@@ -15,6 +15,7 @@ from compose2pod.emit import (
     image_for,
     referenced_variables,
     run_flags,
+    run_tokens,
 )
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.parsing import validate
@@ -289,6 +290,78 @@ class TestEntrypoint:
     def test_missing_entrypoint_is_empty(self) -> None:
         assert entrypoint_tokens({"image": "x"}) == []
 
+    def test_empty_list_is_empty(self) -> None:
+        # An empty list means "no override", not "an entrypoint of zero tokens" --
+        # the same convention `command: []` follows.
+        assert entrypoint_tokens({"entrypoint": []}) == []
+
+
+class TestRunTokens:
+    def _options(self, command: str = "") -> EmitOptions:
+        return EmitOptions(
+            target="app",
+            ci_image="ci",
+            command=command,
+            pod="p",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+
+    def test_list_entrypoint_prepends_to_command(self) -> None:
+        svc = {"image": "x", "entrypoint": ["prog", "--flag"], "command": ["run"]}
+        tokens = run_tokens("app", {"app": svc}, self._options())
+        assert tokens[-5:] == [
+            "--entrypoint",
+            Expand(value="prog"),
+            Expand(value="x"),
+            Expand(value="--flag"),
+            Expand(value="run"),
+        ]
+
+    def test_string_entrypoint_ignores_service_command(self) -> None:
+        svc = {"image": "x", "entrypoint": "serve now", "command": ["dropped"]}
+        tokens = run_tokens("app", {"app": svc}, self._options())
+        assert tokens[-5:] == [
+            "--entrypoint",
+            "/bin/sh",
+            Expand(value="x"),
+            "-c",
+            Expand(value="serve now"),
+        ]
+        assert Expand(value="dropped") not in tokens
+
+    def test_command_override_lands_after_entrypoint(self) -> None:
+        svc = {"image": "x", "entrypoint": "serve"}
+        tokens = run_tokens("app", {"app": svc}, self._options(command="pytest tests"))
+        assert tokens[-7:] == [
+            "--entrypoint",
+            "/bin/sh",
+            Expand(value="x"),
+            "-c",
+            Expand(value="serve"),
+            "pytest",
+            "tests",
+        ]
+
+    def test_list_entrypoint_composes_with_command_override(self) -> None:
+        svc = {"image": "x", "entrypoint": ["prog", "--flag"]}
+        tokens = run_tokens("app", {"app": svc}, self._options(command="run me"))
+        assert tokens[-6:] == [
+            "--entrypoint",
+            Expand(value="prog"),
+            Expand(value="x"),
+            Expand(value="--flag"),
+            "run",
+            "me",
+        ]
+
+    def test_empty_list_entrypoint_is_a_noop(self) -> None:
+        svc = {"image": "x", "entrypoint": [], "command": ["run"]}
+        tokens = run_tokens("app", {"app": svc}, self._options())
+        assert "--entrypoint" not in tokens
+        assert tokens[-2:] == [Expand(value="x"), Expand(value="run")]
+
 
 class TestSecretsLifecycle:
     def _script(self, doc: dict) -> str:
@@ -507,17 +580,6 @@ class TestEmitScript:
         )
         return emit_script(compose={"services": {"app": svc}}, options=options)
 
-    def test_list_entrypoint_prepends_to_command(self) -> None:
-        script = self._single({"image": "x", "entrypoint": ["prog", "--flag"], "command": ["run"]})
-        assert '--entrypoint "prog"' in script
-        assert '"x" "--flag" "run"' in script
-
-    def test_string_entrypoint_ignores_service_command(self) -> None:
-        script = self._single({"image": "x", "entrypoint": "serve now", "command": ["dropped"]})
-        assert "--entrypoint /bin/sh" in script
-        assert '-c "serve now"' in script
-        assert "dropped" not in script
-
     def test_command_override_still_applies_with_entrypoint(self) -> None:
         script = self._single({"image": "x", "entrypoint": "serve"}, command="pytest tests")
         assert "--entrypoint /bin/sh" in script
@@ -527,21 +589,6 @@ class TestEmitScript:
         # passed positionally to `sh -c` ($0/$1...) rather than executed --
         # a string entrypoint still runs only `serve`, never `pytest tests`.
         assert target_line.index('-c "serve"') < target_line.index("pytest")
-
-    def test_empty_list_entrypoint_is_a_noop(self) -> None:
-        # Mirrors the existing `command: []` convention: an empty list means
-        # "no override", not "an entrypoint of zero tokens".
-        assert entrypoint_tokens({"entrypoint": []}) == []
-        script = self._single({"image": "x", "entrypoint": [], "command": ["run"]})
-        assert "--entrypoint" not in script
-        assert '"x" "run"' in script
-
-    def test_list_entrypoint_composes_with_command_override(self) -> None:
-        script = self._single({"image": "x", "entrypoint": ["prog", "--flag"]}, command="run me")
-        target_line = next(line for line in script.splitlines() if "--entrypoint" in line)
-        assert target_line.index('--entrypoint "prog"') < target_line.index('"x"')
-        assert target_line.index('"x"') < target_line.index('"--flag"')
-        assert target_line.index('"--flag"') < target_line.index("run me")
 
     def test_all_process_identity_keys_compose_on_one_service(self) -> None:
         svc = {
