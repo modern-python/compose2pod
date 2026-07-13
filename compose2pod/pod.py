@@ -3,11 +3,11 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Token, _Expand
+from compose2pod.keys import Token, _Expand, _extra_host_pairs, _validate_map
 
 
 _DNS_KEYS = {"dns": "--dns", "dns_search": "--dns-search", "dns_opt": "--dns-option"}
-_POD_OPTION_KEYS = (*_DNS_KEYS, "sysctls")
+_POD_OPTION_KEYS = (*_DNS_KEYS, "sysctls", "extra_hosts")
 
 
 def _as_str_list(name: str, key: str, value: Any) -> list[str]:  # noqa: ANN401 - Compose values are untyped
@@ -47,6 +47,8 @@ def validate_pod_options(name: str, svc: dict[str, Any]) -> None:
             _as_str_list(name, key, svc[key])
     if "sysctls" in svc:
         _sysctl_pairs(name, svc["sysctls"])
+    if "extra_hosts" in svc:
+        _validate_map(name, "extra_hosts", svc["extra_hosts"])
 
 
 def uses_pod_options(services: dict[str, Any]) -> bool:
@@ -85,10 +87,42 @@ def _sysctl_flags(services: dict[str, Any], order: list[str]) -> list[Token]:
     return tokens
 
 
-def pod_create_flags(services: dict[str, Any], order: list[str]) -> list[Token]:
-    """Pod-create flag tokens aggregated across the closure `order`.
+def _add_host_flags(services: dict[str, Any], order: list[str], hosts: list[str]) -> list[Token]:
+    """Merge alias/hostname hosts (fixed 127.0.0.1) with extra_hosts (order-scoped) into one add-host set.
 
-    dns/dns_search/dns_opt are unioned (dedup, first-seen order); sysctls are
-    unioned by key and a same-key value conflict is refused.
+    A host name landing on two different addresses -- across services' extra_hosts,
+    or against an alias's fixed 127.0.0.1 -- is refused rather than guessed at, matching
+    the sysctls conflict rule below. Alias entries render as plain tokens (unquoted, as
+    before this move); extra_hosts entries render via `_Expand` (as before, quoted/interpolated)
+    -- relocating the flags changes nothing else observable about either source.
     """
-    return _dns_flags(services, order) + _sysctl_flags(services, order)
+    merged: dict[str, str] = {}
+    from_extra_hosts: set[str] = set()
+    for host in hosts:
+        merged[host] = "127.0.0.1"
+    for name in order:
+        svc = services[name]
+        if "extra_hosts" not in svc:
+            continue
+        for entry in _extra_host_pairs(svc["extra_hosts"]):
+            host, _sep, addr = str(entry).partition(":")
+            if merged.get(host, addr) != addr:
+                msg = f"service {name!r}: conflicting host {host!r} ({merged[host]!r} vs {addr!r})"
+                raise UnsupportedComposeError(msg)
+            merged[host] = addr
+            from_extra_hosts.add(host)
+    tokens: list[Token] = []
+    for host, addr in merged.items():
+        value = _Expand(value=f"{host}:{addr}") if host in from_extra_hosts else f"{host}:{addr}"
+        tokens += ["--add-host", value]
+    return tokens
+
+
+def pod_create_flags(services: dict[str, Any], order: list[str], hosts: list[str]) -> list[Token]:
+    """Pod-create flag tokens aggregated across the closure `order`, plus `hosts` for add-host.
+
+    Add-host is merged from alias/hostname resolution (`hosts`, fixed 127.0.0.1) and each
+    closure service's `extra_hosts`, conflict-checked (see `_add_host_flags`). dns/dns_search/
+    dns_opt are unioned (dedup, first-seen order); sysctls are unioned by key.
+    """
+    return _add_host_flags(services, order, hosts) + _dns_flags(services, order) + _sysctl_flags(services, order)

@@ -126,13 +126,6 @@ def _extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     return [f"{host}:{ip}" for host, ip in value.items()]
 
 
-def _emit_extra_hosts(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    tokens: list[Token] = []
-    for entry in _extra_host_pairs(value):
-        tokens += ["--add-host", _Expand(value=str(entry))]
-    return tokens
-
-
 def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
     if value is not None and (not isinstance(value, str) or value not in PULL_POLICY_MAP):
         allowed = "/".join(PULL_POLICY_MAP)
@@ -194,7 +187,6 @@ SERVICE_KEYS: dict[str, KeySpec] = {
     "devices": _list("--device"),
     "labels": _map("--label"),
     "annotations": _map("--annotation"),
-    "extra_hosts": KeySpec(validate=_validate_map, emit=_emit_extra_hosts),
     "pull_policy": KeySpec(validate=_validate_pull_policy, emit=_emit_pull_policy),
     "ulimits": KeySpec(validate=_validate_ulimits, emit=_emit_ulimits),
     "mem_limit": _number_scalar("--memory"),
@@ -233,4 +225,5 @@ STRUCTURAL_KEYS: set[str] = {
     "dns_search",
     "dns_opt",
     "sysctls",
+    "extra_hosts",
 }

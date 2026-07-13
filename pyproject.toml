@@ -74,13 +74,17 @@ isort.lines-after-imports = 2
 isort.no-lines-before = ["standard-library", "local-folder"]
 
 [tool.pytest.ini_options]
-addopts = ""
+addopts = "-m 'not integration'"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: end-to-end tests that execute generated scripts against real podman (CI-only)",
+]
 
 [tool.coverage]
 report.exclude_also = ["if typing.TYPE_CHECKING:"]
 # The __main__.py shim is a pure `sys.exit(main())` entrypoint exercised only via
 # subprocess (tests/test_cli.py::test_python_m_runs), which the parent coverage process
 # can't measure; omit it rather than enable subprocess/branch coverage machinery.
-run.omit = ["compose2pod/__main__.py"]
+# tests/integration/* only runs in the dedicated podman CI job, never in the gated run.
+run.omit = ["compose2pod/__main__.py", "tests/integration/*"]

@@ -31,10 +31,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 - **Service-key registry:** the declarative, uniformly-shaped flag keys —
   `user`, `working_dir`, `platform`, `init`, `read_only`, `privileged`,
   `group_add`, `cap_add`, `cap_drop`, `security_opt`, `devices`, `labels`,
-  `annotations`, `extra_hosts`, `pull_policy`, `ulimits` — are defined once,
-  each as a `(validate, emit)` pair, in the **service-key registry**
-  (`SERVICE_KEYS` in `compose2pod/keys.py`); see `architecture/glossary.md`
-  for the service-key spec / service-key registry / structural key terms.
+  `annotations`, `pull_policy`, `ulimits` — are defined once, each as a
+  `(validate, emit)` pair, in the **service-key registry** (`SERVICE_KEYS` in
+  `compose2pod/keys.py`); see `architecture/glossary.md` for the service-key
+  spec / service-key registry / structural key terms. `extra_hosts` is a
+  supported key but not a registry entry — it is pod-level, see Pod-level
+  options below.
   The remaining keys documented below are **structural keys**, handled
   outside the registry because their `emit` needs `project_dir`, spans
   multiple keys, or occupies the image/command slot.
@@ -67,9 +69,11 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 - **`annotations`:** list or mapping, emitted as repeated `--annotation`
   (`KEY=value`, or bare `KEY` for a null value), sharing the `_MAP_FLAGS`
   machinery with `labels`.
-- **`extra_hosts`:** list (`- host:ip`) or mapping (`host: ip`), emitted as
-  per-service `--add-host host:ip`. Distinct from the alias/hostname entries
-  (which resolve to `127.0.0.1`); IPv6 values keep their colons.
+- **`extra_hosts`:** list (`- host:ip`) or mapping (`host: ip`), pod-level like
+  `dns`/`sysctls` — see the Pod-level options section below. Distinct from
+  the alias/hostname set in one respect: alias/hostname resolution is
+  always fixed at `127.0.0.1`, while `extra_hosts` carries a user-specified
+  address; IPv6 values keep their colons.
 - **`pull_policy`:** a validated enum mapped to podman's `--pull`
   (`if_not_present` → `missing`; `always`/`never`/`missing` pass through),
   emitted literally. `build` and unknown values are rejected — compose2pod
@@ -181,36 +185,48 @@ it, so a handful of Compose keys cannot be per-container `podman run` flags.
 compose2pod hoists them onto `podman pod create` instead
 (`compose2pod/pod.py`) — the tool's only pod-create flags.
 
-- **Supported:** `dns`, `dns_search`, `dns_opt`, `sysctls` — mapped to
-  `--dns`, `--dns-search`, `--dns-option`, `--sysctl` respectively (`_DNS_KEYS`,
+- **Supported:** `dns`, `dns_search`, `dns_opt`, `sysctls`, `extra_hosts` —
+  mapped to `--dns`, `--dns-search`, `--dns-option`, `--sysctl`, and (merged
+  with the alias/hostname set) `--add-host` respectively (`_DNS_KEYS`,
   `pod.py`).
-- **Aggregation is closure-scoped:** `pod_create_flags(services, order)` is
-  called with `order` — the target's dependency closure (`startup_order`) —
-  exactly like other closure-scoped constructs (secrets, configs). `dns` /
-  `dns_search` / `dns_opt` are unioned across the closure (deduplicated,
-  first-seen order); `sysctls` are unioned by key, and two services in the
-  closure setting the same key to different values is refused
-  (`UnsupportedComposeError: conflicting sysctl ...`) rather than resolved by
-  last-writer-wins.
+- **Aggregation is closure-scoped:** `pod_create_flags(services, order,
+  hosts)` is called with `order` — the target's dependency closure
+  (`startup_order`) — exactly like other closure-scoped constructs (secrets,
+  configs). `dns` / `dns_search` / `dns_opt` are unioned across the closure
+  (deduplicated, first-seen order); `sysctls` are unioned by key, and two
+  services in the closure setting the same key to different values is
+  refused (`UnsupportedComposeError: conflicting sysctl ...`) rather than
+  resolved by last-writer-wins. `--add-host` is seeded from the
+  alias/hostname set (`hosts`, computed document-wide by `graph.hostnames`,
+  not closure-scoped — pre-existing, orthogonal behavior), then layered with
+  each closure service's `extra_hosts` (closure-scoped like `dns`/`sysctls`);
+  a host name landing on two different addresses — across two services'
+  `extra_hosts`, or between an `extra_hosts` entry and an alias's fixed
+  `127.0.0.1` — is refused (`UnsupportedComposeError: conflicting host ...`),
+  the same refuse-rather-than-guess rule as the `sysctls` conflict.
 - **Value shapes:** `dns` / `dns_search` / `dns_opt` accept a string or a list
   of strings; `sysctls` accepts a mapping (`key: value`) or a list of
   `"key=value"` strings, each value a string or number. A `${VAR}` inside a
   value is wrapped in `_Expand` like other interpolated fields, so it stays
   live at run time and counts toward `referenced_variables` — the generated
   script's own shell expands it when it runs, not compose2pod at generation
-  time.
+  time. `--add-host` entries render differently by source: an alias/hostname
+  entry stays a plain unquoted token (pre-existing behavior, unchanged by
+  this move), while an `extra_hosts` entry goes through `_Expand` (quoted,
+  `${VAR}`-live) — same as before it was per-service.
 - **Pod-wide divergence:** unlike every other service key, these apply to
   every container in the pod once emitted — including services that never
-  declared them — because the pod shares one `/etc/resolv.conf` and one
-  sysctl set. `validate()` (`compose2pod/parsing.py`) is target-agnostic
-  shape validation over the whole document: whenever any service anywhere
-  declares `dns` / `dns_search` / `dns_opt` / `sysctls` (`uses_pod_options`),
-  it emits the warning "dns/sysctls apply pod-wide -- all containers in the
-  pod share one /etc/resolv.conf and sysctl set", regardless of whether that
+  declared them — because the pod shares one `/etc/resolv.conf`, one sysctl
+  set, and one `/etc/hosts`. `validate()` (`compose2pod/parsing.py`) is
+  target-agnostic shape validation over the whole document: whenever any
+  service anywhere declares `dns` / `dns_search` / `dns_opt` / `sysctls` /
+  `extra_hosts` (`uses_pod_options`), it emits the warning "dns/sysctls/
+  extra_hosts apply pod-wide -- all containers in the pod share one
+  /etc/resolv.conf, sysctl set, and /etc/hosts", regardless of whether that
   service turns out to be inside the target's closure. Conversely, at emit
-  time a `dns` / `sysctls` declaration on a service outside the target's
-  closure is silently ignored by `pod_create_flags` — no flag is emitted for
-  it, since that service is never run.
+  time a `dns` / `sysctls` / `extra_hosts` declaration on a service outside
+  the target's closure is silently ignored by `pod_create_flags` — no flag
+  is emitted for it, since that service is never run.
 - **Non-goals:** per-service DNS/sysctls — impossible inside a
   shared-namespace pod, not a compose2pod limitation; last-writer-wins on a
   sysctl key conflict — refused instead, matching the refuse-on-conflict
@@ -444,13 +460,13 @@ enumeration ever appears to drift:
   the healthcheck `test` command.
 - **Service-key registry fields** whose spec wraps its value in `_Expand` —
   e.g. `user`, `working_dir`, `platform`, `group_add`, `cap_add`, `cap_drop`,
-  `security_opt`, `devices`, `labels`, `annotations`, `extra_hosts`,
-  `ulimits`, and every numeric resource-limit key (`mem_limit`, `cpus`,
-  `pids_limit`, ...). The rule, not the list, is authoritative: this is every
-  `SERVICE_KEYS` entry whose `emit` wraps its value (the
-  `_scalar`/`_number_scalar`/`_list`/`_map` factories, plus the custom
-  `extra_hosts`/`ulimits` emitters) except `pull_policy` (a validated enum
-  emitted verbatim from `PULL_POLICY_MAP`) and the four boolean flags
+  `security_opt`, `devices`, `labels`, `annotations`, `ulimits`, and every
+  numeric resource-limit key (`mem_limit`, `cpus`, `pids_limit`, ...). The
+  rule, not the list, is authoritative: this is every `SERVICE_KEYS` entry
+  whose `emit` wraps its value (the `_scalar`/`_number_scalar`/`_list`/`_map`
+  factories, plus the custom `ulimits` emitter) except `pull_policy` (a
+  validated enum emitted verbatim from `PULL_POLICY_MAP`) and the four
+  boolean flags
   `init`/`read_only`/`privileged`/`oom_kill_disable` (each emits a bare flag
   with no value to interpolate).
 

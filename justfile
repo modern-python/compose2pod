@@ -40,6 +40,11 @@ test-ci:
 test-branch:
     uv run --no-sync pytest --cov=. --cov-branch --cov-fail-under=100
 
+# Integration tests: execute generated scripts against real podman. CI-only; needs podman.
+# The CLI -m overrides the default `-m 'not integration'` in pyproject addopts.
+test-integration:
+    uv run --no-sync pytest -m integration
+
 # Build + publish to PyPI. Version comes from the git tag ($GITHUB_REF_NAME); no pyproject bump.
 # Auth via PyPI Trusted Publishing (OIDC); uv publish auto-detects the CI id-token.
 publish:

@@ -137,6 +137,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
     stores.validate(compose)
     if uses_pod_options(services):
         warnings.append(
-            "dns/sysctls apply pod-wide -- all containers in the pod share one /etc/resolv.conf and sysctl set"
+            "dns/sysctls/extra_hosts apply pod-wide -- all containers in the pod share one "
+            "/etc/resolv.conf, sysctl set, and /etc/hosts"
         )
     return warnings
