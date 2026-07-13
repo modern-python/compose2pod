@@ -365,3 +365,13 @@ class TestValidate:
 
     def test_null_environment_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "environment": None}}}) == []
+
+    def test_non_string_non_list_env_file_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError: 'int' object is not iterable.
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' must be a string or list"):
+            validate({"services": {"app": {"image": "x", "env_file": 5}}})
+
+    def test_string_and_list_env_file_are_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "env_file": "tests.env"}}}) == []
+        assert validate({"services": {"app": {"image": "x", "env_file": ["a.env", "b.env"]}}}) == []
+        assert validate({"services": {"app": {"image": "x", "env_file": None}}}) == []
