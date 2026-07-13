@@ -27,12 +27,12 @@ def health_cmd(test: object) -> str | None:
         raise UnsupportedComposeError(msg)
     kind = test[0]
     if kind == "CMD-SHELL":
-        if len(test) < _CMD_MIN_LENGTH:
+        if len(test) < _CMD_MIN_LENGTH or not isinstance(test[1], str):
             msg = f"unsupported healthcheck test: {test!r}"
             raise UnsupportedComposeError(msg)
-        return test[1]  # ty: ignore
+        return test[1]
     if kind == "CMD":
-        if len(test) < _CMD_MIN_LENGTH:
+        if len(test) < _CMD_MIN_LENGTH or not all(isinstance(item, str) for item in test[1:]):
             msg = f"unsupported healthcheck test: {test!r}"
             raise UnsupportedComposeError(msg)
         return json.dumps(test[1:])

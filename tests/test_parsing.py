@@ -346,6 +346,24 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'start_period' must be a number or string"):
             validate(compose)
 
+    def test_healthcheck_test_cmd_shell_nested_list_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash raw: health_cmd() returned test[1]
+        # (the nested list) unchecked, and it hit shell.py's re.finditer.
+        compose = {
+            "services": {"app": {"image": "x", "healthcheck": {"test": ["CMD-SHELL", ["curl", "-f"]]}}},
+        }
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck test"):
+            validate(compose)
+
+    def test_healthcheck_test_cmd_non_string_argument_rejected_at_gate(self) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": ["CMD", 123]}}}}
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck test"):
+            validate(compose)
+
+    def test_healthcheck_test_forms_still_accepted(self) -> None:
+        for test in ("true", "NONE", ["NONE"], ["CMD", "a", "b"], ["CMD-SHELL", "some string"]):
+            assert validate({"services": {"app": {"image": "x", "healthcheck": {"test": test}}}}) == []
+
     def test_tmpfs_non_string_or_list_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="tmpfs must be a string or list"):
             validate({"services": {"app": {"image": "x", "tmpfs": {"a": "b"}}}})

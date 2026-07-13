@@ -5,7 +5,7 @@ from typing import Any
 from compose2pod import stores
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
-from compose2pod.healthcheck import has_healthcheck, interval_seconds
+from compose2pod.healthcheck import has_healthcheck, health_cmd, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS, is_number, validate_map
 from compose2pod.pod import uses_pod_options, validate_pod_options
 from compose2pod.resources import validate_deploy
@@ -35,6 +35,11 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
             raise UnsupportedComposeError(msg)
     if "interval" in healthcheck:
         interval_seconds(healthcheck["interval"])
+    if "test" in healthcheck:
+        # health_cmd's return value is unused here -- it raises on any
+        # unsupported shape, which is all this gate needs (emit.py calls it
+        # again for the actual --health-cmd value at emit time).
+        health_cmd(healthcheck["test"])
     for key in _HEALTHCHECK_SCALAR_KEYS:
         if key in healthcheck and healthcheck[key] is not None and not is_number(healthcheck[key]):
             msg = f"service {name!r}: healthcheck {key!r} must be a number or string"
