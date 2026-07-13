@@ -318,6 +318,34 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
             validate(compose)
 
+    def test_healthcheck_scalars_accept_ints_and_strings(self) -> None:
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "healthcheck": {"test": "true", "retries": 15, "timeout": "5s", "start_period": "10s"},
+                }
+            }
+        }
+        assert validate(compose) == []
+
+    def test_healthcheck_retries_mapping_rejected_at_gate(self) -> None:
+        # Used to be silently accepted and mis-emitted as the literal
+        # --health-retries "{'a': 1}".
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "retries": {"a": 1}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'retries' must be a number or string"):
+            validate(compose)
+
+    def test_healthcheck_timeout_list_rejected_at_gate(self) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "timeout": [5]}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'timeout' must be a number or string"):
+            validate(compose)
+
+    def test_healthcheck_start_period_mapping_rejected_at_gate(self) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "start_period": {"a": 1}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'start_period' must be a number or string"):
+            validate(compose)
+
     def test_tmpfs_non_string_or_list_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="tmpfs must be a string or list"):
             validate({"services": {"app": {"image": "x", "tmpfs": {"a": "b"}}}})
