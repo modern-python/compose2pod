@@ -221,6 +221,14 @@ def _emit_target(lines: list[str], tokens: list[Token], options: EmitOptions) ->
     lines.append("esac")
 
 
+def _validate_options(options: EmitOptions) -> None:
+    """Check option values emit destructures (artifacts are split on ':')."""
+    for artifact in options.artifacts:
+        if ":" not in artifact:
+            msg = f"artifact {artifact!r} must be in SRC:DST form"
+            raise UnsupportedComposeError(msg)
+
+
 def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     """Walk the target's dependency closure once, building the script and its variables.
 
@@ -229,6 +237,7 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     have their `Expand` variables collected, so the script and the variable
     list cannot disagree about what the script expands at run time.
     """
+    _validate_options(options)
     services = compose["services"]
     hosts = hostnames(services)
     order = startup_order(services, options.target)

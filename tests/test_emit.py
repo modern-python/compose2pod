@@ -800,6 +800,36 @@ class TestPodNameValidation:
         assert "podman pod create --name test-pod.1" in script
 
 
+class TestArtifactValidation:
+    def _options(self, artifacts: list[str]) -> EmitOptions:
+        return EmitOptions(
+            target="application",
+            ci_image="ci:latest",
+            command="",
+            pod="test-pod",
+            project_dir=".",
+            artifacts=artifacts,
+            allow_exit_codes=[],
+        )
+
+    def test_artifact_without_colon_raises(self, chats_compose: dict) -> None:
+        # Used to escape as a raw ValueError: not enough values to unpack.
+        options = self._options(["nocolon"])
+        with pytest.raises(UnsupportedComposeError, match=r"artifact 'nocolon' must be in SRC:DST form"):
+            emit_script(compose=chats_compose, options=options)
+
+    def test_artifact_without_colon_also_raises_from_referenced_variables(self, chats_compose: dict) -> None:
+        # The other public entry point projects the same _plan traversal.
+        options = self._options(["nocolon"])
+        with pytest.raises(UnsupportedComposeError, match=r"artifact 'nocolon' must be in SRC:DST form"):
+            referenced_variables(chats_compose, options)
+
+    def test_valid_artifact_still_emits_podman_cp(self, chats_compose: dict) -> None:
+        options = self._options(["/srv/out/junit.xml:junit.xml"])
+        script = emit_script(compose=chats_compose, options=options)
+        assert "podman cp test-pod-application:/srv/out/junit.xml junit.xml || true" in script
+
+
 class TestPodmanVersionGuard:
     def _run_header(self, tmp_path: Path, podman_stub_body: str) -> "subprocess.CompletedProcess[str]":
         assert _SH is not None  # sh is a POSIX baseline binary, always present
