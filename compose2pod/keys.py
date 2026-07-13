@@ -38,10 +38,11 @@ def _key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class KeySpec:
-    """A service-key spec: how one Compose service key is validated and emitted."""
+    """A service-key spec: how one Compose service key is validated, emitted, and merged across extends."""
 
     validate: Callable[[str, str, Any], None]
     emit: Callable[[Any], list[Token]]
+    merge: Callable[[str, str, Any, Any], Any] | None = None
 
 
 def _validate_scalar(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
@@ -78,6 +79,40 @@ def _validate_map(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Co
         raise UnsupportedComposeError(msg)
 
 
+def _as_list(name: str, key: str, value: Any) -> list[Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Normalize list-or-scalar-string form to a list, for merging across extends."""
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, str):
+        return [value]
+    msg = f"service {name!r}: cannot merge {key!r} across incompatible forms"
+    raise UnsupportedComposeError(msg)
+
+
+def _concat_list(name: str, key: str, base: Any, local: Any) -> list[Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Merge policy for list-shaped keys: concatenate base then local."""
+    return _as_list(name, key, base) + _as_list(name, key, local)
+
+
+def _pairs_to_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Normalize list-or-dict key-value form to a mapping; inverse of _key_value_pairs."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        result: dict[str, Any] = {}
+        for item in value:
+            pair_key, sep, pair_value = str(item).partition("=")
+            result[pair_key] = pair_value if sep else None
+        return result
+    msg = f"service {name!r}: cannot merge {key!r} across incompatible forms"
+    raise UnsupportedComposeError(msg)
+
+
+def _merge_map(name: str, key: str, base: Any, local: Any) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Merge policy for map-shaped keys: key-by-key merge, local wins."""
+    return {**_pairs_to_mapping(name, key, base), **_pairs_to_mapping(name, key, local)}
+
+
 def _scalar(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
         return [flag, _Expand(value=str(value))]
@@ -106,7 +141,7 @@ def _list(flag: str) -> KeySpec:
             tokens += [flag, _Expand(value=str(item))]
         return tokens
 
-    return KeySpec(validate=_validate_list, emit=emit)
+    return KeySpec(validate=_validate_list, emit=emit, merge=_concat_list)
 
 
 def _map(flag: str) -> KeySpec:
@@ -116,7 +151,7 @@ def _map(flag: str) -> KeySpec:
             tokens += [flag, _Expand(value=str(pair))]
         return tokens
 
-    return KeySpec(validate=_validate_map, emit=emit)
+    return KeySpec(validate=_validate_map, emit=emit, merge=_merge_map)
 
 
 def _extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
@@ -188,7 +223,7 @@ SERVICE_KEYS: dict[str, KeySpec] = {
     "labels": _map("--label"),
     "annotations": _map("--annotation"),
     "pull_policy": KeySpec(validate=_validate_pull_policy, emit=_emit_pull_policy),
-    "ulimits": KeySpec(validate=_validate_ulimits, emit=_emit_ulimits),
+    "ulimits": KeySpec(validate=_validate_ulimits, emit=_emit_ulimits, merge=_merge_map),
     "mem_limit": _number_scalar("--memory"),
     "memswap_limit": _number_scalar("--memory-swap"),
     "mem_reservation": _number_scalar("--memory-reservation"),
