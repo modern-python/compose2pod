@@ -60,6 +60,19 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         # volume implicitly on first reference.
 
 
+def _validate_image(name: str, svc: dict[str, Any]) -> None:
+    """Check the service has a usable image (image_for reads svc['image'] verbatim when there's no 'build')."""
+    if "build" in svc:
+        return
+    image = svc.get("image")
+    if image is None:
+        msg = f"service {name!r}: must set 'image' or 'build'"
+        raise UnsupportedComposeError(msg)
+    if not isinstance(image, str):
+        msg = f"service {name!r}: 'image' must be a string"
+        raise UnsupportedComposeError(msg)
+
+
 def _validate_entrypoint(name: str, svc: dict[str, Any]) -> None:
     """Check the structural entrypoint key's form (it is not a registry key)."""
     if "entrypoint" in svc and not isinstance(svc["entrypoint"], str | list):
@@ -112,6 +125,7 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
             raise UnsupportedComposeError(msg)
     if isinstance(svc.get("entrypoint"), str) and svc.get("command") is not None:
         warnings.append(f"service {name!r}: string entrypoint runs via shell; 'command' is ignored")
+    _validate_image(name, svc)
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
     _validate_entrypoint(name, svc)

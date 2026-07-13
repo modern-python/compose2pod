@@ -393,3 +393,22 @@ class TestValidate:
         # Used to reach emit and crash with TypeError: argument should be a str or an os.PathLike object.
         with pytest.raises(UnsupportedComposeError, match=r"'env_file' entry must be a string"):
             validate({"services": {"app": {"image": "x", "env_file": [5]}}})
+
+    def test_service_with_neither_image_nor_build_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with KeyError: 'image' (image_for).
+        with pytest.raises(UnsupportedComposeError, match=r"must set 'image' or 'build'"):
+            validate({"services": {"app": {}}})
+
+    def test_service_with_build_and_no_image_is_accepted(self) -> None:
+        # The normal CI case: --image replaces a build section's own image.
+        assert validate({"services": {"app": {"build": {"context": "."}}}}) == []
+
+    def test_non_string_image_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError: expected string or bytes-like object, got 'int'.
+        with pytest.raises(UnsupportedComposeError, match=r"'image' must be a string"):
+            validate({"services": {"app": {"image": 5}}})
+
+    def test_non_string_image_with_build_present_is_accepted(self) -> None:
+        # image_for never reads svc['image'] when 'build' is present, so a
+        # malformed image alongside 'build' cannot crash emit.
+        assert validate({"services": {"app": {"image": 5, "build": {"context": "."}}}}) == []
