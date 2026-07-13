@@ -156,6 +156,11 @@ class TestElementLevelShapeChecks:
     def test_validate_map_accepts_string_list_elements(self) -> None:
         validate_map("web", "labels", ["team=core", "BARE"])
 
+    def test_validate_map_accepts_boolean_value(self) -> None:
+        # docker compose config normalizes `DEBUG: true` to the string "true";
+        # a bool map value is valid Compose, not a shape to reject.
+        validate_map("web", "environment", {"DEBUG": True})
+
 
 class TestMergeCallables:
     """Direct tests of the merge policy functions, independent of any caller.

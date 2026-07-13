@@ -124,6 +124,12 @@ class TestAddHostFlags:
         services = {"a": {"extra_hosts": {"db": "10.0.0.5"}}}
         assert pod_create_flags(services, ["a"], []) == ["--add-host", Expand(value="db:10.0.0.5")]
 
+    def test_extra_hosts_boolean_value_normalizes_like_docker(self) -> None:
+        # Same boolean-map-value normalization as environment/labels/annotations,
+        # applied uniformly since extra_hosts is also a validate_map-shaped key.
+        services = {"a": {"extra_hosts": {"db": True}}}
+        assert pod_create_flags(services, ["a"], []) == ["--add-host", Expand(value="db:true")]
+
     def test_extra_hosts_ipv6_value_keeps_colons(self) -> None:
         services = {"a": {"extra_hosts": {"myhost": "2001:db8::1"}}}
         assert pod_create_flags(services, ["a"], []) == [

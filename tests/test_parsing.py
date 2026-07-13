@@ -490,6 +490,11 @@ class TestValidate:
         assert validate({"services": {"app": {"image": "x", "environment": ["KEY=value", "BARE"]}}}) == []
         assert validate({"services": {"app": {"image": "x", "environment": {"KEY": "value", "BARE": None}}}}) == []
 
+    def test_environment_boolean_map_value_accepted(self) -> None:
+        # docker compose config normalizes `DEBUG: true` to the string "true";
+        # rejecting a bool value here would be an over-rejection, not a fix.
+        assert validate({"services": {"app": {"image": "x", "environment": {"DEBUG": True}}}}) == []
+
     def test_labels_annotations_list_of_mapping_rejected_at_gate(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="'labels' entries must be strings"):
             validate({"services": {"app": {"image": "x", "labels": [{"team": "core"}]}}})

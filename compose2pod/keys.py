@@ -43,6 +43,18 @@ class Expand:
 Token = str | Expand
 
 
+def _render_scalar(value: Any) -> str:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Render a map scalar value the way `docker compose config` does.
+
+    A bool renders lowercase ('true'/'false'), matching Docker's own
+    normalization -- Python's str(True) == 'True' would otherwise leak into
+    the emitted flag value verbatim.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
 def key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     """Compose list/map key-value section as 'KEY=value' / 'KEY' entries.
 
@@ -51,7 +63,7 @@ def key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     """
     if isinstance(value, list):
         return value
-    return [key if val is None else f"{key}={val}" for key, val in value.items()]
+    return [key if val is None else f"{key}={_render_scalar(val)}" for key, val in value.items()]
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -112,8 +124,8 @@ def _validate_list_elements(name: str, key: str, value: list[Any]) -> None:
 def _validate_map_values(name: str, key: str, value: dict[str, Any]) -> None:
     """Check every map value is a scalar or null, so emit can't repr() a dict/list into the script."""
     for val in value.values():
-        if val is not None and not is_number(val):
-            msg = f"service {name!r}: '{key}' values must be a string, number, or null"
+        if val is not None and not is_number(val) and not isinstance(val, bool):
+            msg = f"service {name!r}: '{key}' values must be a string, number, boolean, or null"
             raise UnsupportedComposeError(msg)
 
 
@@ -217,7 +229,7 @@ def extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     """Compose extra_hosts as 'host:ip' entries; map values keep their colons (IPv6-safe)."""
     if isinstance(value, list):
         return value
-    return [f"{host}:{ip}" for host, ip in value.items()]
+    return [f"{host}:{_render_scalar(ip)}" for host, ip in value.items()]
 
 
 def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped

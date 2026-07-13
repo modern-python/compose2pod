@@ -50,6 +50,16 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", "/builds/x")
         assert flags[4:8] == ["-e", Expand(value="PASSTHRU"), "-e", Expand(value="SET=v")]
 
+    def test_env_map_boolean_value_normalizes_like_docker(self) -> None:
+        # `environment: {DEBUG: true}` is valid Compose; `docker compose config`
+        # normalizes it to the string "true". Before this fix, this either
+        # emitted the raw Python repr "-e DEBUG=True" (silent corruption) or,
+        # after list/map hardening, was rejected outright (an over-rejection
+        # regression) -- the maintainer's ruling is to normalize, like Docker.
+        svc = {"image": "x", "environment": {"DEBUG": True, "VERBOSE": False}}
+        flags = run_flags("app", svc, "p", "/builds/x")
+        assert flags[4:8] == ["-e", Expand(value="DEBUG=true"), "-e", Expand(value="VERBOSE=false")]
+
     def test_env_file_and_volume_resolved_against_project_dir(self) -> None:
         svc = {"image": "x", "env_file": "tests.env", "volumes": [".:/srv/www/"]}
         flags = run_flags("app", svc, "p", "/builds/chats")
@@ -162,6 +172,10 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "labels": {"empty": None}}, "p", "/b")
         assert flags[4:6] == ["--label", Expand(value="empty")]
 
+    def test_labels_boolean_value_normalizes_like_docker(self) -> None:
+        flags = run_flags("app", {"image": "x", "labels": {"enabled": True}}, "p", "/b")
+        assert flags[4:6] == ["--label", Expand(value="enabled=true")]
+
     def test_platform_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "platform": "linux/amd64"}, "p", "/b")
         assert flags[4:6] == ["--platform", Expand(value="linux/amd64")]
@@ -177,6 +191,10 @@ class TestRunFlags:
     def test_annotations_null_value_is_bare_key(self) -> None:
         flags = run_flags("app", {"image": "x", "annotations": {"marker": None}}, "p", "/b")
         assert flags[4:6] == ["--annotation", Expand(value="marker")]
+
+    def test_annotations_boolean_value_normalizes_like_docker(self) -> None:
+        flags = run_flags("app", {"image": "x", "annotations": {"enabled": False}}, "p", "/b")
+        assert flags[4:6] == ["--annotation", Expand(value="enabled=false")]
 
     def test_labels_still_emit_after_map_flags_refactor(self) -> None:
         flags = run_flags("app", {"image": "x", "labels": {"team": "api"}}, "p", "/b")
