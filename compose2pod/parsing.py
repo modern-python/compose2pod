@@ -6,7 +6,7 @@ from compose2pod import stores
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, interval_seconds
-from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS
+from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS, validate_map
 from compose2pod.pod import uses_pod_options, validate_pod_options
 from compose2pod.resources import validate_deploy
 
@@ -68,6 +68,12 @@ def _validate_tmpfs(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
+def _validate_environment(name: str, svc: dict[str, Any]) -> None:
+    """Check environment is a list or mapping (a bare string would be walked as .items())."""
+    if svc.get("environment") is not None:
+        validate_map(name, "environment", svc["environment"])
+
+
 def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compose values are untyped
     """Validate one service; returns warnings, raises UnsupportedComposeError."""
     if not isinstance(svc, dict):
@@ -88,6 +94,7 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     _validate_service_volumes(name, svc)
     _validate_entrypoint(name, svc)
     _validate_tmpfs(name, svc)
+    _validate_environment(name, svc)
     validate_deploy(name, svc)
     validate_pod_options(name, svc)
     for key, spec in SERVICE_KEYS.items():

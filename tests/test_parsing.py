@@ -356,3 +356,12 @@ class TestValidate:
         svc = {"image": "x", "deploy": {"resources": {"reservations": {"cpus": "0.5"}}}}
         with pytest.raises(UnsupportedComposeError, match=r"reservations.cpus is not supported"):
             validate({"services": {"app": svc}})
+
+    def test_string_environment_rejected_at_gate(self) -> None:
+        # Structural key with no KeySpec: used to reach emit and crash with
+        # AttributeError: 'str' object has no attribute 'items'.
+        with pytest.raises(UnsupportedComposeError, match=r"'environment' must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "environment": "FOO=bar"}}})
+
+    def test_null_environment_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "environment": None}}}) == []
