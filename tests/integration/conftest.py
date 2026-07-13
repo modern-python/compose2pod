@@ -12,6 +12,7 @@ import subprocess
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -56,7 +57,6 @@ def run_pod(tmp_path: Path) -> Iterator[Callable[..., PodRun]]:
     case the script's own EXIT trap did not fire (timeout kill or early crash).
     """
     created: list[str] = []
-    counter = 0
 
     def _run(
         compose: dict,
@@ -66,9 +66,7 @@ def run_pod(tmp_path: Path) -> Iterator[Callable[..., PodRun]]:
         project_dir: "str | Path | None" = None,
         timeout: int = 180,
     ) -> PodRun:
-        nonlocal counter
-        counter += 1
-        pod = f"c2p-it-{counter}"
+        pod = f"c2p-it-{uuid4().hex[:8]}"
         created.append(pod)
         options = EmitOptions(
             target=target,
