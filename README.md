@@ -26,6 +26,16 @@ Built for CI and test environments where you can't use `docker compose` or `podm
 - **No systemd.** Podman healthchecks are normally scheduled by systemd timers. compose2pod gates startup by polling `podman healthcheck run` directly, so `depends_on: service_healthy` works without systemd.
 - **No heavy runtime.** The core is stdlib-only — no dependencies, no compiled wheels — so it installs and runs in minimal Python images.
 
+## Requirements
+
+**Podman >= 6.0.0.** Earlier releases have a bug where a container stopping
+inside a multi-container pod wipes `/etc/hosts` for every container in that
+pod, not just the one that stopped — fixed in 6.0.0. compose2pod's generated
+scripts rely on one shared `--add-host`-populated `/etc/hosts` for the whole
+pod (see `architecture/supported-subset.md`), so a `service_completed_successfully`
+dependency (a container that runs and exits, e.g. a migration step) can wipe
+name resolution for everything started after it on a pre-6.0.0 Podman.
+
 ## Install
 
 ```bash
