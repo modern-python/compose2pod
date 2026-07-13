@@ -44,6 +44,13 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   (`KEY: value`, `KEY:`). A null mapping value (`KEY:`) means "pass `KEY`
   through from the host", emitted as a bare `-e KEY` exactly like the list
   form `- KEY`.
+  The key itself must be a list or mapping; any other shape (e.g. a bare
+  string) raises at the gate.
+- **`env_file`:** a string or a list. Any other shape raises
+  (`_validate_env_file`, `compose2pod/parsing.py`). Each list element must
+  itself be a string; a non-string element (e.g. `env_file: [5]`) raises the
+  same way. Each resolved path is passed through `--project-dir` when
+  relative, then emitted as a `--env-file` flag (`compose2pod/emit.py`).
 - **`entrypoint`:** string or list. List form is exec form; string form is
   shell form (`/bin/sh -c <string>`), mirroring `command`. Emitted as
   `--entrypoint <first-token>` with the remaining tokens placed ahead of the
@@ -304,8 +311,10 @@ honors both, refusing loudly on overlap rather than picking a precedence.
 
 ## Volumes
 
-Short syntax only; the long mapping form raises. A `source:target` entry is
-one of two kinds, told apart by whether `source` starts with `.` or `/`:
+Short syntax only; the long mapping form raises. The `volumes` key itself
+must be a list — a bare string raises, rather than being destructured one
+character at a time. A `source:target` entry is one of two kinds, told
+apart by whether `source` starts with `.` or `/`:
 
 - **Bind mount** (`source` starts with `.` or `/`): the host path, resolved
   against `--project-dir` when relative.
@@ -500,7 +509,11 @@ check. A braced reference whose text after the name is not one of these
 operators (e.g. `${FOO!bar}`) is malformed and raises
 `UnsupportedComposeError` rather than silently dropping the trailing text.
 Tool/CLI-supplied values (`--project-dir`, `--image`, the pod name,
-the `--command` override) are literal and never interpolated. The pod
+the `--command` override) are literal and never interpolated.
+`--artifact` must be in `SRC:DST` form; a value with no `:` raises
+`UnsupportedComposeError` (`_validate_options`, `compose2pod/emit.py`),
+guarding library callers of both `emit_script` and `referenced_variables`
+as well as the CLI. The pod
 name is embedded into the pod-create line, the single-quoted `EXIT`
 trap, and the `<pod>-<name>` store names (some of them unquoted), so it
 must be a shell-inert identifier — `emit_script` validates it against
