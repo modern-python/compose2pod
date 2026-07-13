@@ -5,8 +5,9 @@ capability pages share. One term, what it *is* (not what it does), and the
 synonyms to reject.
 
 **Service-key spec**:
-The `(validate, emit)` pair for one Compose service key — how that key is checked
-and how it renders to `podman run` flags. In code, `KeySpec` in `keys.py`.
+The `(validate, emit, merge)` triple for one Compose service key — how that key
+is checked, how it renders to `podman run` flags, and (for list/map-shaped keys)
+how it merges across `extends`. In code, `KeySpec` in `keys.py`.
 _Avoid_: handler, plugin, rule.
 
 **Service-key registry**:
