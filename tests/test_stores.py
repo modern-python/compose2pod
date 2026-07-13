@@ -60,6 +60,13 @@ class TestValidateSecretKind:
         with pytest.raises(UnsupportedComposeError, match="top-level 'secrets' must be a mapping"):
             stores.validate({"services": {"app": {"image": "x"}}, "secrets": ["a"]})
 
+    def test_non_string_secret_name_raises_instead_of_crashing_raw(self) -> None:
+        # PyYAML can produce a non-string mapping key (e.g. an unquoted `1:`).
+        # Used to crash raw: TypeError: expected string or bytes-like object,
+        # got 'int', from _NAME.fullmatch(name).
+        with pytest.raises(UnsupportedComposeError, match="key 1 must be a string"):
+            stores.validate(_doc("secrets", {1: {"file": "./s"}}))
+
     def test_non_string_or_mapping_reference_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="entry must be a string or mapping"):
             stores.validate(_doc("secrets", {"a": {"file": "./a"}}, [123]))

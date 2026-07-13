@@ -79,6 +79,22 @@ def is_number(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped 
     return not isinstance(value, bool) and isinstance(value, int | float | str)
 
 
+def require_string_keys(where: str, mapping: dict[Any, Any]) -> None:
+    """Check every key of a raw YAML/JSON mapping is a string.
+
+    PyYAML routinely produces non-string keys (a bare `3:` is an int; under
+    YAML 1.1, a bare `on:`/`off:` is a bool). Every mapping-key consumer
+    downstream (`sorted()`, `str.startswith`, a compiled regex) assumes
+    `str` and crashes raw otherwise. This is the one shared check the gate
+    runs before it reads any of `mapping`'s keys, so a non-string key fails
+    clean regardless of which mapping it turned up in.
+    """
+    for key in mapping:
+        if not isinstance(key, str):
+            msg = f"{where}: key {key!r} must be a string"
+            raise UnsupportedComposeError(msg)
+
+
 def _validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     if not is_number(value):
         msg = f"service {name!r}: '{key}' must be a number or string"

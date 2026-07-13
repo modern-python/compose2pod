@@ -10,6 +10,7 @@ from compose2pod.keys import (
     _validate_list,
     _validate_ulimits,
     pairs_to_mapping,
+    require_string_keys,
     validate_map,
 )
 from compose2pod.parsing import SUPPORTED_SERVICE_KEYS
@@ -32,6 +33,20 @@ class TestExpand:
         # class in one place, regardless of which key leaked it.
         with pytest.raises(UnsupportedComposeError, match="must be a string"):
             Expand(value=123)  # ty: ignore[invalid-argument-type]
+
+
+class TestRequireStringKeys:
+    """Shared guard against PyYAML's non-string mapping keys (int, or a YAML-1.1 bool)."""
+
+    def test_all_string_keys_pass(self) -> None:
+        require_string_keys("compose document", {"a": 1, "b": 2})
+
+    def test_empty_mapping_passes(self) -> None:
+        require_string_keys("compose document", {})
+
+    def test_non_string_key_raises_naming_the_key_and_location(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"compose document: key 3 must be a string"):
+            require_string_keys("compose document", {3: "x"})
 
 
 def test_supported_service_keys_snapshot() -> None:

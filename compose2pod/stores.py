@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Token
+from compose2pod.keys import Token, require_string_keys
 from compose2pod.shell import to_shell, variable_names
 
 
@@ -128,6 +128,7 @@ def _validate_kind(compose: dict[str, Any], kind: StoreKind) -> None:
         msg = f"top-level {kind.top_key!r} must be a mapping"
         raise UnsupportedComposeError(msg)
     defs = defs or {}
+    require_string_keys(f"top-level {kind.top_key!r}", defs)
     for name, definition in defs.items():
         _validate_def(name, definition, kind)
     for name, svc in (compose.get("services") or {}).items():

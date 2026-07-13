@@ -113,6 +113,27 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="foo"):
             validate({"services": {"app": {"image": "x"}}, "foo": {}})
 
+    def test_non_string_top_level_key_raises_instead_of_crashing_raw(self) -> None:
+        # PyYAML routinely produces non-string keys (int, or a YAML-1.1 bool
+        # from a bare `on:`). Used to crash raw: AttributeError: 'int' object
+        # has no attribute 'startswith', from k.startswith("x-").
+        with pytest.raises(UnsupportedComposeError, match="key 3 must be a string"):
+            validate({3: "x", "services": {"app": {"image": "x"}}})  # ty: ignore[invalid-argument-type]
+
+    def test_non_string_service_key_raises_instead_of_crashing_raw(self) -> None:
+        # A non-string key *inside* a service mapping (an indent slip) used
+        # to crash raw: TypeError: '<' not supported between instances of
+        # 'int' and 'str', from sorted(svc).
+        with pytest.raises(UnsupportedComposeError, match="key 8080 must be a string"):
+            validate({"services": {"app": {"image": "x", 8080: 8080}}})
+
+    def test_non_string_healthcheck_key_raises_instead_of_crashing_raw(self) -> None:
+        # Same class as the service-key case, one level deeper: used to crash
+        # raw via sorted(healthcheck).
+        compose = {"services": {"app": {"image": "x", "healthcheck": {1: "x", "test": "true"}}}}
+        with pytest.raises(UnsupportedComposeError, match="key 1 must be a string"):
+            validate(compose)
+
     def test_top_level_networks_is_ignored_with_warning(self) -> None:
         warnings = validate({"services": {"app": {"image": "x"}}, "networks": {"default": None}})
         assert any("networks" in w for w in warnings)

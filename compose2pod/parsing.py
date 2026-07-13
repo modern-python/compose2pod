@@ -6,7 +6,7 @@ from compose2pod import stores
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, health_cmd, interval_seconds
-from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS, is_number, validate_map
+from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS, is_number, require_string_keys, validate_map
 from compose2pod.pod import uses_pod_options, validate_pod_options
 from compose2pod.resources import validate_deploy
 
@@ -27,6 +27,7 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
     if not isinstance(healthcheck, dict):
         msg = f"service {name!r}: healthcheck must be a mapping"
         raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: healthcheck", healthcheck)
     for key in sorted(healthcheck):
         if key.startswith("x-"):
             continue
@@ -155,6 +156,7 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     if not isinstance(svc, dict):
         msg = f"service {name!r} must be a mapping"
         raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}", svc)
     warnings: list[str] = []
     for key in sorted(svc):
         if key.startswith("x-"):
@@ -203,6 +205,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
     if not isinstance(compose, dict):
         msg = f"compose document must be a mapping, got {type(compose).__name__}"
         raise UnsupportedComposeError(msg)
+    require_string_keys("compose document", compose)
     warnings: list[str] = []
     unknown_top = {k for k in compose if k not in SUPPORTED_TOP_LEVEL_KEYS and not k.startswith("x-")}
     if unknown_top:
