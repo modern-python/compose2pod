@@ -17,9 +17,27 @@ PULL_POLICY_MAP: dict[str, str] = {
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class Expand:
-    """A token whose Compose variable references expand at script-run time."""
+    """A token whose Compose variable references expand at script-run time.
+
+    Every emitted `Expand` eventually reaches `shell.to_shell`/`variable_names`,
+    both of which assume `value` is a `str` (they run a compiled regex over
+    it) and crash raw (a `TypeError`, not `UnsupportedComposeError`) otherwise.
+    Rather than trust every call site across keys.py/emit.py/pod.py/
+    resources.py to have cast or validated first, this is the one chokepoint:
+    a non-str value is rejected right here, so any per-key validator gap
+    becomes a clean error instead of a raw crash downstream, no matter which
+    key leaked it. This is defense-in-depth, not a substitute for validating
+    shape at the gate -- it only turns an otherwise-unhandled crash into a
+    clean one; it can't catch a non-str value that a caller has already
+    coerced to str() (see the silent str()/repr() corruption class instead).
+    """
 
     value: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, str):
+            msg = f"internal: Expand.value must be a string, got {type(self.value).__name__}: {self.value!r}"
+            raise UnsupportedComposeError(msg)
 
 
 Token = str | Expand

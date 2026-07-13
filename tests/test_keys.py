@@ -4,6 +4,7 @@ from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.keys import (
     SERVICE_KEYS,
     STRUCTURAL_KEYS,
+    Expand,
     _concat_list,
     _merge_map,
     _validate_list,
@@ -15,6 +16,21 @@ from compose2pod.parsing import SUPPORTED_SERVICE_KEYS
 
 def test_registry_and_structural_keys_are_disjoint() -> None:
     assert not (set(SERVICE_KEYS) & STRUCTURAL_KEYS)
+
+
+class TestExpand:
+    """Expand is the chokepoint every emitted token flows through on its way to to_shell/variable_names."""
+
+    def test_string_value_is_accepted(self) -> None:
+        assert Expand(value="ok").value == "ok"
+
+    def test_non_string_value_raises_instead_of_reaching_shell_py_raw(self) -> None:
+        # Any per-key validator gap that lets a non-str leak into emit used to
+        # crash raw inside shell.py's re.finditer (a TypeError, not a clean
+        # UnsupportedComposeError). Guarding construction closes that whole
+        # class in one place, regardless of which key leaked it.
+        with pytest.raises(UnsupportedComposeError, match="must be a string"):
+            Expand(value=123)  # ty: ignore[invalid-argument-type]
 
 
 def test_supported_service_keys_snapshot() -> None:
