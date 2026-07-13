@@ -87,7 +87,10 @@ def _validate_entrypoint(name: str, svc: dict[str, Any]) -> None:
 
 def _validate_command(name: str, svc: dict[str, Any]) -> None:
     """Check the structural command key's form (it is not a registry key)."""
-    if "command" in svc and not isinstance(svc["command"], str | list):
+    command = svc.get("command")
+    if command is None:
+        return
+    if not isinstance(command, str | list):
         msg = f"service {name!r}: 'command' must be a string or list"
         raise UnsupportedComposeError(msg)
 

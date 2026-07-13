@@ -477,3 +477,6 @@ class TestValidate:
         # ('run') reached podman run, the value ('tests') was dropped.
         with pytest.raises(UnsupportedComposeError, match=r"'command' must be a string or list"):
             validate({"services": {"app": {"image": "x", "command": {"run": "tests"}}}})
+
+    def test_null_command_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "command": None}}}) == []
