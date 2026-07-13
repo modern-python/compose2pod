@@ -73,6 +73,34 @@ class TestResolveExtends:
         }
         assert _services(doc)["web"]["labels"] == {"team": "core", "tier": "web"}
 
+    def test_labels_list_form_normalized_and_merged(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "labels": ["team=core", "BARE"]},
+                "web": {"extends": {"service": "base"}, "labels": ["team=web"]},
+            }
+        }
+        assert _services(doc)["web"]["labels"] == {"team": "web", "BARE": None}
+
+    def test_incompatible_labels_form_is_refused(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "labels": {"team": "core"}},
+                "web": {"extends": {"service": "base"}, "labels": 5},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="cannot merge 'labels' across incompatible forms"):
+            resolve_extends(doc)
+
+    def test_cap_add_scalar_normalized_before_concat(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "cap_add": "NET_ADMIN"},
+                "web": {"extends": {"service": "base"}, "cap_add": ["SYS_TIME"]},
+            }
+        }
+        assert _services(doc)["web"]["cap_add"] == ["NET_ADMIN", "SYS_TIME"]
+
     def test_depends_on_list_and_map_forms_merge(self) -> None:
         doc = {
             "services": {
@@ -186,3 +214,13 @@ class TestResolveExtends:
         result = resolve_extends(doc)
         assert "extends" not in result["services"]["web"]
         assert result["services"]["base"] is None
+
+    def test_incompatible_structural_concat_form_is_refused(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "env_file": ["base.env"]},
+                "web": {"extends": {"service": "base"}, "env_file": {"bad": "shape"}},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="cannot merge 'env_file' across incompatible forms"):
+            resolve_extends(doc)

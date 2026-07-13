@@ -3,21 +3,15 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
+from compose2pod.keys import SERVICE_KEYS, _pairs_to_mapping
 
 
-_MERGE_KEYS = {"environment", "labels", "annotations", "extra_hosts", "ulimits", "healthcheck", "depends_on"}
-_CONCAT_KEYS = {
-    "cap_add",
-    "cap_drop",
-    "security_opt",
-    "devices",
-    "group_add",
-    "secrets",
-    "configs",
-    "volumes",
-    "tmpfs",
-    "env_file",
-}
+# Merge policy for keys with a SERVICE_KEYS KeySpec comes from spec.merge (see
+# _merge below); these two sets cover only the remaining structural keys, which
+# have no KeySpec. Unifying structural-key merge policy is deferred — see
+# decisions/2026-07-12-reject-structural-key-registry.md's revisit trigger.
+_STRUCTURAL_MERGE_KEYS = {"environment", "extra_hosts", "healthcheck", "depends_on"}
+_STRUCTURAL_CONCAT_KEYS = {"secrets", "configs", "volumes", "tmpfs", "env_file"}
 
 
 def _extends_target(name: str, ext: Any) -> str:  # noqa: ANN401 - Compose values are untyped
@@ -39,21 +33,12 @@ def _extends_target(name: str, ext: Any) -> str:  # noqa: ANN401 - Compose value
     return service
 
 
-def _env_list_to_map(items: list[Any]) -> dict[str, Any]:
-    """Normalize a `[KEY=value, BARE]` environment list to a mapping (bare -> None)."""
-    result: dict[str, Any] = {}
-    for item in items:
-        key, sep, value = str(item).partition("=")
-        result[key] = value if sep else None
-    return result
-
-
 def _as_mapping(key: str, name: str, value: Any) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped
     if isinstance(value, dict):
         return value
     if isinstance(value, list):
         if key == "environment":
-            return _env_list_to_map(value)
+            return _pairs_to_mapping(name, key, value)
         if key == "depends_on":
             return {dep: {} for dep in value}
     msg = f"service {name!r}: cannot merge {key!r} across incompatible forms"
@@ -73,9 +58,12 @@ def _merge(base: dict[str, Any], local: dict[str, Any], name: str) -> dict[str, 
     """Merge `local` onto `base` per key category: mapping-merge, sequence-concat, else override."""
     merged: dict[str, Any] = dict(base)
     for key, local_val in local.items():
-        if key in base and key in _MERGE_KEYS:
+        spec = SERVICE_KEYS.get(key)
+        if key in base and spec is not None and spec.merge is not None:
+            merged[key] = spec.merge(name, key, base[key], local_val)
+        elif key in base and key in _STRUCTURAL_MERGE_KEYS:
             merged[key] = {**_as_mapping(key, name, base[key]), **_as_mapping(key, name, local_val)}
-        elif key in base and key in _CONCAT_KEYS:
+        elif key in base and key in _STRUCTURAL_CONCAT_KEYS:
             merged[key] = _as_list(key, name, base[key]) + _as_list(key, name, local_val)
         else:
             merged[key] = local_val
