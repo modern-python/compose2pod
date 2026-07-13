@@ -215,6 +215,22 @@ class TestResolveExtends:
         assert "extends" not in result["services"]["web"]
         assert result["services"]["base"] is None
 
+    def test_depends_on_list_with_mapping_entry_raises_instead_of_crashing_raw(self) -> None:
+        # Without extends, graph.depends_on's own element check catches this
+        # cleanly. extends.py has its own merge-time normalization
+        # (_as_mapping) that runs ahead of that check and, before this fix,
+        # crashed raw building `{dep: {} for dep in value}` -- a dict list
+        # element isn't hashable.
+        doc = {
+            "services": {
+                "db": {"image": "pg"},
+                "base": {"image": "a", "depends_on": [{"db": {"condition": "service_healthy"}}]},
+                "web": {"extends": {"service": "base"}, "depends_on": ["db"]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry .* must be a string"):
+            resolve_extends(doc)
+
     def test_incompatible_structural_concat_form_is_refused(self) -> None:
         doc = {
             "services": {

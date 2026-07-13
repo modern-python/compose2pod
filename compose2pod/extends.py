@@ -40,6 +40,10 @@ def _as_mapping(key: str, name: str, value: Any) -> dict[str, Any]:  # noqa: ANN
         if key == "environment":
             return pairs_to_mapping(name, key, value)
         if key == "depends_on":
+            for dep in value:
+                if not isinstance(dep, str):
+                    msg = f"service {name!r}: depends_on entry {dep!r} must be a string"
+                    raise UnsupportedComposeError(msg)
             return {dep: {} for dep in value}
     msg = f"service {name!r}: cannot merge {key!r} across incompatible forms"
     raise UnsupportedComposeError(msg)
