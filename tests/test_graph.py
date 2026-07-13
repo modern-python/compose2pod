@@ -65,6 +65,25 @@ class TestHostnames:
         assert hostnames({"app": {"image": "x", "networks": ["n1"]}}) == ["app"]
         assert hostnames({"app": {"image": "x", "networks": {"default": None}}}) == ["app"]
 
+    def test_string_aliases_rejected_instead_of_iterated_character_wise(self) -> None:
+        # Used to be destructured one character at a time, emitting
+        # --add-host a:127.0.0.1 --add-host b:127.0.0.1 --add-host c:127.0.0.1
+        # for aliases: "abc" -- the same bug already fixed for volumes.
+        with pytest.raises(UnsupportedComposeError, match="'app': aliases must be a list of strings"):
+            hostnames({"app": {"image": "x", "networks": {"default": {"aliases": "abc"}}}})
+
+    def test_non_string_alias_entry_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'app': aliases must be a list of strings"):
+            hostnames({"app": {"image": "x", "networks": {"default": {"aliases": [5]}}}})
+
+    def test_list_aliases_still_accepted(self) -> None:
+        services = {"app": {"image": "x", "networks": {"default": {"aliases": ["app-alias"]}}}}
+        assert hostnames(services) == ["app", "app-alias"]
+
+    def test_network_mapping_with_no_aliases_key_contributes_nothing(self) -> None:
+        services = {"app": {"image": "x", "networks": {"default": {"driver": "bridge"}}}}
+        assert hostnames(services) == ["app"]
+
 
 class TestStartupOrder:
     def test_chats_order(self, chats_compose: dict) -> None:

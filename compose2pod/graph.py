@@ -39,7 +39,14 @@ def _host_names(name: str, svc: dict[str, Any]) -> list[str]:
     if isinstance(networks, dict):
         for network in networks.values():
             if isinstance(network, dict):
-                result.extend(network.get("aliases") or [])
+                aliases = network.get("aliases")
+                if aliases is None:
+                    continue
+                # A string would be iterated character-wise by extend() below.
+                if not isinstance(aliases, list) or not all(isinstance(alias, str) for alias in aliases):
+                    msg = f"service {name!r}: aliases must be a list of strings"
+                    raise UnsupportedComposeError(msg)
+                result.extend(aliases)
     return result
 
 
