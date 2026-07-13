@@ -18,7 +18,8 @@ def test_pod_level_options_land_on_the_pod(run_pod: Callable[..., PodRun]) -> No
                     "-c",
                     "grep 9.9.9.9 /etc/resolv.conf "
                     "&& grep 1024 /proc/sys/net/core/somaxconn "
-                    "&& grep external-svc:10.0.0.9 /etc/hosts",
+                    "&& grep 10.0.0.9 /etc/hosts "
+                    "&& grep external-svc /etc/hosts",
                 ],
             },
         },
@@ -26,4 +27,8 @@ def test_pod_level_options_land_on_the_pod(run_pod: Callable[..., PodRun]) -> No
     run = run_pod(compose, target="app")
     # Exit 0 proves all three landed on the pod (podman pod create), not the
     # container -- exactly the merge that regressed in the add-host bug.
+    # /etc/hosts is "ip<whitespace>hostname" (podman's --add-host FLAG syntax
+    # is "host:ip", but the file it writes is the other order, unquoted) --
+    # checked as two independent substrings rather than one combined pattern
+    # to stay robust to the exact separator.
     assert run.returncode == 0, run.stderr
