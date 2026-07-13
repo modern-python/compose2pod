@@ -37,8 +37,15 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
 
 
 def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
-    """Check volumes use short bind-mount syntax only."""
-    for volume in svc.get("volumes") or []:
+    """Check volumes is a list of short bind-mount entries."""
+    volumes = svc.get("volumes")
+    if volumes is None:
+        return
+    if not isinstance(volumes, list):
+        # A string would be iterated character-wise by the loop below.
+        msg = f"service {name!r}: 'volumes' must be a list"
+        raise UnsupportedComposeError(msg)
+    for volume in volumes:
         if not isinstance(volume, str):
             msg = f"service {name!r}: only short volume syntax is supported"
             raise UnsupportedComposeError(msg)

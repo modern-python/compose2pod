@@ -84,6 +84,19 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="absolute"):
             validate({"services": {"app": {"image": "x", "volumes": ["./cache"]}}})
 
+    def test_string_volumes_rejected_at_gate(self) -> None:
+        # Used to be iterated character-wise: "/data:/data" reported the nonsense
+        # "anonymous volume 'd'", and "/" was silently accepted as -v "/".
+        with pytest.raises(UnsupportedComposeError, match=r"'volumes' must be a list"):
+            validate({"services": {"app": {"image": "x", "volumes": "/data:/data"}}})
+
+    def test_single_slash_string_volumes_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'volumes' must be a list"):
+            validate({"services": {"app": {"image": "x", "volumes": "/"}}})
+
+    def test_null_volumes_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "volumes": None}}}) == []
+
     def test_no_services_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="no services"):
             validate({"services": {}})
