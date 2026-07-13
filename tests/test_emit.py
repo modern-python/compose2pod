@@ -8,7 +8,7 @@ import pytest
 from compose2pod.emit import (
     _SCRIPT_HEADER,
     EmitOptions,
-    _Expand,
+    Expand,
     command_tokens,
     emit_script,
     entrypoint_tokens,
@@ -27,8 +27,8 @@ class TestRunFlags:
     def test_db_flags(self, chats_compose: dict) -> None:
         flags = run_flags("db", chats_compose["services"]["db"], "test-pod", "/builds/chats")
         assert flags[:4] == ["--pod", "test-pod", "--name", "test-pod-db"]
-        assert flags[4:6] == ["-e", _Expand(value="POSTGRES_PASSWORD=password")]
-        assert flags[6:8] == ["--health-cmd", _Expand(value="pg_isready -U database -d database")]
+        assert flags[4:6] == ["-e", Expand(value="POSTGRES_PASSWORD=password")]
+        assert flags[6:8] == ["--health-cmd", Expand(value="pg_isready -U database -d database")]
         assert flags[8:10] == ["--health-timeout", "5s"]
         assert flags[10:12] == ["--health-retries", "15"]  # fix #2
 
@@ -41,53 +41,53 @@ class TestRunFlags:
     def test_env_map_form(self) -> None:
         svc = {"image": "x", "environment": {"A": "1", "B": "two words"}}
         flags = run_flags("app", svc, "p", "/builds/x")
-        assert flags[4:8] == ["-e", _Expand(value="A=1"), "-e", _Expand(value="B=two words")]
+        assert flags[4:8] == ["-e", Expand(value="A=1"), "-e", Expand(value="B=two words")]
 
     def test_env_map_null_value_is_host_passthrough(self) -> None:
         # A null mapping value means "pass KEY through from the host", like `- KEY`.
         svc = {"image": "x", "environment": {"PASSTHRU": None, "SET": "v"}}
         flags = run_flags("app", svc, "p", "/builds/x")
-        assert flags[4:8] == ["-e", _Expand(value="PASSTHRU"), "-e", _Expand(value="SET=v")]
+        assert flags[4:8] == ["-e", Expand(value="PASSTHRU"), "-e", Expand(value="SET=v")]
 
     def test_env_file_and_volume_resolved_against_project_dir(self) -> None:
         svc = {"image": "x", "env_file": "tests.env", "volumes": [".:/srv/www/"]}
         flags = run_flags("app", svc, "p", "/builds/chats")
-        assert flags[4:6] == ["--env-file", _Expand(value="/builds/chats/tests.env")]
-        assert flags[6:8] == ["-v", _Expand(value="/builds/chats:/srv/www/")]
+        assert flags[4:6] == ["--env-file", Expand(value="/builds/chats/tests.env")]
+        assert flags[6:8] == ["-v", Expand(value="/builds/chats:/srv/www/")]
 
     def test_env_file_list_form(self) -> None:
         svc = {"image": "x", "env_file": ["a.env", "b.env"]}
         flags = run_flags("app", svc, "p", "/builds/x")
         assert flags[4:8] == [
             "--env-file",
-            _Expand(value="/builds/x/a.env"),
+            Expand(value="/builds/x/a.env"),
             "--env-file",
-            _Expand(value="/builds/x/b.env"),
+            Expand(value="/builds/x/b.env"),
         ]
 
     def test_tmpfs_string_form(self) -> None:
         # S108 flags "/tmp" as an insecure hardcoded temp path; this is a
         # pass-through string being tested, not a file write.
         flags = run_flags("app", {"image": "x", "tmpfs": "/tmp:mode=1777"}, "p", "/builds/x")  # noqa: S108
-        assert flags[4:6] == ["--tmpfs", _Expand(value="/tmp:mode=1777")]  # noqa: S108
+        assert flags[4:6] == ["--tmpfs", Expand(value="/tmp:mode=1777")]  # noqa: S108
 
     def test_tmpfs_list_form(self) -> None:
         svc = {"image": "x", "tmpfs": ["/tmp:mode=1777", "/run"]}  # noqa: S108
         flags = run_flags("app", svc, "p", "/builds/x")
-        assert flags[4:8] == ["--tmpfs", _Expand(value="/tmp:mode=1777"), "--tmpfs", _Expand(value="/run")]  # noqa: S108
+        assert flags[4:8] == ["--tmpfs", Expand(value="/tmp:mode=1777"), "--tmpfs", Expand(value="/run")]  # noqa: S108
 
     def test_absolute_volume_source_is_kept_as_is(self) -> None:
         flags = run_flags("app", {"image": "x", "volumes": ["/data/app:/srv/www/"]}, "p", "/builds/x")
-        assert flags[4:6] == ["-v", _Expand(value="/data/app:/srv/www/")]
+        assert flags[4:6] == ["-v", Expand(value="/data/app:/srv/www/")]
 
     def test_anonymous_volume_emitted_as_single_path(self) -> None:
         flags = run_flags("app", {"image": "x", "volumes": ["/var/cache/models"]}, "p", "/builds/x")
-        assert flags[4:6] == ["-v", _Expand(value="/var/cache/models")]
+        assert flags[4:6] == ["-v", Expand(value="/var/cache/models")]
 
     def test_named_volume_emitted_without_project_dir_translation(self) -> None:
         svc = {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}
         flags = run_flags("db", svc, "p", "/builds/x")
-        assert flags[4:6] == ["-v", _Expand(value="pgdata:/var/lib/postgresql/data")]
+        assert flags[4:6] == ["-v", Expand(value="pgdata:/var/lib/postgresql/data")]
 
     def test_secret_flag_emitted(self) -> None:
         flags = run_flags("app", {"image": "x", "secrets": ["db"]}, "test-pod", "/b")
@@ -95,38 +95,38 @@ class TestRunFlags:
 
     def test_healthcheck_without_timeout_omits_health_timeout_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "healthcheck": {"test": "true"}}, "p", "/builds/x")
-        assert flags[4:6] == ["--health-cmd", _Expand(value="true")]
+        assert flags[4:6] == ["--health-cmd", Expand(value="true")]
         assert "--health-timeout" not in flags
 
     def test_user_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "user": "1000:1000"}, "p", "/b")
-        assert flags[4:6] == ["--user", _Expand(value="1000:1000")]
+        assert flags[4:6] == ["--user", Expand(value="1000:1000")]
 
     def test_working_dir_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "working_dir": "/srv/app"}, "p", "/b")
-        assert flags[4:6] == ["--workdir", _Expand(value="/srv/app")]
+        assert flags[4:6] == ["--workdir", Expand(value="/srv/app")]
 
     def test_user_and_working_dir_order(self) -> None:
         svc = {"image": "x", "user": "root", "working_dir": "/app"}
         flags = run_flags("app", svc, "p", "/b")
-        assert flags[4:8] == ["--user", _Expand(value="root"), "--workdir", _Expand(value="/app")]
+        assert flags[4:8] == ["--user", Expand(value="root"), "--workdir", Expand(value="/app")]
 
     def test_mem_limit_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "mem_limit": "512m"}, "p", "/b")
-        assert flags[4:6] == ["--memory", _Expand(value="512m")]
+        assert flags[4:6] == ["--memory", Expand(value="512m")]
 
     def test_cpus_numeric_value_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "cpus": 0.5}, "p", "/b")
-        assert flags[4:6] == ["--cpus", _Expand(value="0.5")]
+        assert flags[4:6] == ["--cpus", Expand(value="0.5")]
 
     def test_pids_limit_int_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "pids_limit": 100}, "p", "/b")
-        assert flags[4:6] == ["--pids-limit", _Expand(value="100")]
+        assert flags[4:6] == ["--pids-limit", Expand(value="100")]
 
     def test_cpuset_and_shm_size_flags(self) -> None:
         svc = {"image": "x", "cpuset": "0-3", "shm_size": "64m"}
         flags = run_flags("app", svc, "p", "/b")
-        assert flags[4:8] == ["--cpuset-cpus", _Expand(value="0-3"), "--shm-size", _Expand(value="64m")]
+        assert flags[4:8] == ["--cpuset-cpus", Expand(value="0-3"), "--shm-size", Expand(value="64m")]
 
     def test_oom_kill_disable_bool_flag(self) -> None:
         assert run_flags("app", {"image": "x", "oom_kill_disable": True}, "p", "/b")[4:5] == ["--oom-kill-disable"]
@@ -134,52 +134,52 @@ class TestRunFlags:
 
     def test_group_add_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "group_add": ["docker", 1000]}, "p", "/b")
-        assert flags[4:8] == ["--group-add", _Expand(value="docker"), "--group-add", _Expand(value="1000")]
+        assert flags[4:8] == ["--group-add", Expand(value="docker"), "--group-add", Expand(value="1000")]
 
     def test_cap_add_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "cap_add": ["NET_ADMIN", "SYS_TIME"]}, "p", "/b")
-        assert flags[4:8] == ["--cap-add", _Expand(value="NET_ADMIN"), "--cap-add", _Expand(value="SYS_TIME")]
+        assert flags[4:8] == ["--cap-add", Expand(value="NET_ADMIN"), "--cap-add", Expand(value="SYS_TIME")]
 
     def test_cap_drop_and_security_opt_flags(self) -> None:
         svc = {"image": "x", "cap_drop": ["ALL"], "security_opt": ["label=disable"]}
         flags = run_flags("app", svc, "p", "/b")
-        assert flags[4:8] == ["--cap-drop", _Expand(value="ALL"), "--security-opt", _Expand(value="label=disable")]
+        assert flags[4:8] == ["--cap-drop", Expand(value="ALL"), "--security-opt", Expand(value="label=disable")]
 
     def test_labels_map_form(self) -> None:
         svc = {"image": "x", "labels": {"team": "api", "tier": "backend"}}
         flags = run_flags("app", svc, "p", "/b")
-        assert flags[4:8] == ["--label", _Expand(value="team=api"), "--label", _Expand(value="tier=backend")]
+        assert flags[4:8] == ["--label", Expand(value="team=api"), "--label", Expand(value="tier=backend")]
 
     def test_labels_list_form(self) -> None:
         svc = {"image": "x", "labels": ["team=api", "standalone"]}
         flags = run_flags("app", svc, "p", "/b")
-        assert flags[4:8] == ["--label", _Expand(value="team=api"), "--label", _Expand(value="standalone")]
+        assert flags[4:8] == ["--label", Expand(value="team=api"), "--label", Expand(value="standalone")]
 
     def test_labels_null_value_is_empty_label(self) -> None:
         # A null map value is an empty label here, NOT the host-passthrough that
         # `environment`'s null means -- same emitted shape, distinct meaning.
         flags = run_flags("app", {"image": "x", "labels": {"empty": None}}, "p", "/b")
-        assert flags[4:6] == ["--label", _Expand(value="empty")]
+        assert flags[4:6] == ["--label", Expand(value="empty")]
 
     def test_platform_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "platform": "linux/amd64"}, "p", "/b")
-        assert flags[4:6] == ["--platform", _Expand(value="linux/amd64")]
+        assert flags[4:6] == ["--platform", Expand(value="linux/amd64")]
 
     def test_devices_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "devices": ["/dev/fuse", "/dev/net/tun"]}, "p", "/b")
-        assert flags[4:8] == ["--device", _Expand(value="/dev/fuse"), "--device", _Expand(value="/dev/net/tun")]
+        assert flags[4:8] == ["--device", Expand(value="/dev/fuse"), "--device", Expand(value="/dev/net/tun")]
 
     def test_annotations_map_form(self) -> None:
         flags = run_flags("app", {"image": "x", "annotations": {"com.example/team": "api"}}, "p", "/b")
-        assert flags[4:6] == ["--annotation", _Expand(value="com.example/team=api")]
+        assert flags[4:6] == ["--annotation", Expand(value="com.example/team=api")]
 
     def test_annotations_null_value_is_bare_key(self) -> None:
         flags = run_flags("app", {"image": "x", "annotations": {"marker": None}}, "p", "/b")
-        assert flags[4:6] == ["--annotation", _Expand(value="marker")]
+        assert flags[4:6] == ["--annotation", Expand(value="marker")]
 
     def test_labels_still_emit_after_map_flags_refactor(self) -> None:
         flags = run_flags("app", {"image": "x", "labels": {"team": "api"}}, "p", "/b")
-        assert flags[4:6] == ["--label", _Expand(value="team=api")]
+        assert flags[4:6] == ["--label", Expand(value="team=api")]
 
     def test_read_only_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "read_only": True}, "p", "/b")
@@ -207,16 +207,16 @@ class TestRunFlags:
     def test_ulimits_mapping_form(self) -> None:
         svc = {"image": "x", "ulimits": {"nofile": {"soft": 20000, "hard": 40000}}}
         flags = run_flags("app", svc, "p", "/b")
-        assert flags[4:6] == ["--ulimit", _Expand(value="nofile=20000:40000")]
+        assert flags[4:6] == ["--ulimit", Expand(value="nofile=20000:40000")]
 
     def test_ulimits_scalar_form(self) -> None:
         flags = run_flags("app", {"image": "x", "ulimits": {"nproc": 65535}}, "p", "/b")
-        assert flags[4:6] == ["--ulimit", _Expand(value="nproc=65535")]
+        assert flags[4:6] == ["--ulimit", Expand(value="nproc=65535")]
 
     def test_ulimits_mixed_forms(self) -> None:
         svc = {"image": "x", "ulimits": {"nproc": 65535, "nofile": {"soft": 1024, "hard": 2048}}}
         flags = run_flags("app", svc, "p", "/b")
-        assert flags[4:8] == ["--ulimit", _Expand(value="nproc=65535"), "--ulimit", _Expand(value="nofile=1024:2048")]
+        assert flags[4:8] == ["--ulimit", Expand(value="nproc=65535"), "--ulimit", Expand(value="nofile=1024:2048")]
 
     def test_null_pull_policy_and_ulimits_emit_nothing(self) -> None:
         flags = run_flags("app", {"image": "x", "pull_policy": None, "ulimits": None}, "p", "/b")
@@ -237,16 +237,16 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", "/b")
         assert flags[4:] == [
             "--user",
-            _Expand(value="root"),
+            Expand(value="root"),
             "--init",
             "--cap-add",
-            _Expand(value="NET_ADMIN"),
+            Expand(value="NET_ADMIN"),
             "--label",
-            _Expand(value="team=api"),
+            Expand(value="team=api"),
             "--pull",
             "always",
             "--ulimit",
-            _Expand(value="nofile=1024"),
+            Expand(value="nofile=1024"),
         ]
 
     def test_deploy_resource_flags_emitted(self) -> None:
@@ -255,7 +255,7 @@ class TestRunFlags:
             "deploy": {"resources": {"limits": {"memory": "256m"}, "reservations": {"memory": "128m"}}},
         }
         flags = run_flags("app", svc, "p", "/b")
-        assert flags[4:8] == ["--memory", _Expand(value="256m"), "--memory-reservation", _Expand(value="128m")]
+        assert flags[4:8] == ["--memory", Expand(value="256m"), "--memory-reservation", Expand(value="128m")]
 
 
 class TestImageAndCommand:
@@ -263,17 +263,17 @@ class TestImageAndCommand:
         assert image_for(chats_compose["services"]["application"], "reg/ci:abc") == "reg/ci:abc"
 
     def test_plain_service_keeps_image(self, chats_compose: dict) -> None:
-        assert image_for(chats_compose["services"]["db"], "reg/ci:abc") == _Expand(value="postgres:13.5-alpine")
+        assert image_for(chats_compose["services"]["db"], "reg/ci:abc") == Expand(value="postgres:13.5-alpine")
 
     def test_command_list_passes_through(self, chats_compose: dict) -> None:
         assert command_tokens(chats_compose["services"]["migrations"]) == [
-            _Expand(value="alembic"),
-            _Expand(value="upgrade"),
-            _Expand(value="head"),
+            Expand(value="alembic"),
+            Expand(value="upgrade"),
+            Expand(value="head"),
         ]
 
     def test_command_string_becomes_shell(self) -> None:
-        assert command_tokens({"command": "echo hi"}) == ["/bin/sh", "-c", _Expand(value="echo hi")]
+        assert command_tokens({"command": "echo hi"}) == ["/bin/sh", "-c", Expand(value="echo hi")]
 
     def test_missing_command_is_empty(self) -> None:
         assert command_tokens({"image": "x"}) == []
@@ -281,10 +281,10 @@ class TestImageAndCommand:
 
 class TestEntrypoint:
     def test_list_form_passes_through(self) -> None:
-        assert entrypoint_tokens({"entrypoint": ["sleep", "600"]}) == [_Expand(value="sleep"), _Expand(value="600")]
+        assert entrypoint_tokens({"entrypoint": ["sleep", "600"]}) == [Expand(value="sleep"), Expand(value="600")]
 
     def test_string_form_becomes_shell(self) -> None:
-        assert entrypoint_tokens({"entrypoint": "serve now"}) == ["/bin/sh", "-c", _Expand(value="serve now")]
+        assert entrypoint_tokens({"entrypoint": "serve now"}) == ["/bin/sh", "-c", Expand(value="serve now")]
 
     def test_missing_entrypoint_is_empty(self) -> None:
         assert entrypoint_tokens({"image": "x"}) == []

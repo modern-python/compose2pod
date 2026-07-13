@@ -37,3 +37,16 @@ module-private so the store interface (`validate`, `flags`, `create_lines`,
 `teardown_line`, `referenced_variables`) hides the kinds from callers — the same
 single-source shape as the service-key registry.
 _Avoid_: store list, kinds table.
+
+**Token**:
+The result of rendering one Compose value into a `podman run`/`pod create`
+argument — either a literal `str` (already shell-safe) or an `Expand` (a
+value carrying `${VAR}` references that expand at script-run time, not at
+generation time). `Token = str | Expand` in `keys.py`.
+_Avoid_: arg, flag value.
+
+**Expand**:
+A token whose Compose variable references must expand when the generated
+script runs, not when compose2pod generates it. In code, `Expand` in
+`keys.py`.
+_Avoid_: variable, placeholder.

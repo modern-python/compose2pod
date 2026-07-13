@@ -10,7 +10,7 @@ from compose2pod import stores
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
-from compose2pod.keys import SERVICE_KEYS, Token, _Expand, _key_value_pairs
+from compose2pod.keys import SERVICE_KEYS, Expand, Token, key_value_pairs
 from compose2pod.pod import pod_create_flags
 from compose2pod.resources import deploy_resource_flags
 from compose2pod.shell import to_shell, variable_names
@@ -24,7 +24,7 @@ def image_for(svc: dict[str, Any], ci_image: str) -> Token:
     """Services with a build section run the freshly built CI image."""
     if "build" in svc:
         return ci_image
-    return _Expand(value=svc["image"])
+    return Expand(value=svc["image"])
 
 
 def command_tokens(svc: dict[str, Any]) -> list[Token]:
@@ -33,8 +33,8 @@ def command_tokens(svc: dict[str, Any]) -> list[Token]:
     if command is None:
         return []
     if isinstance(command, str):
-        return ["/bin/sh", "-c", _Expand(value=command)]
-    return [_Expand(value=str(token)) for token in command]
+        return ["/bin/sh", "-c", Expand(value=command)]
+    return [Expand(value=str(token)) for token in command]
 
 
 def entrypoint_tokens(svc: dict[str, Any]) -> list[Token]:
@@ -43,15 +43,15 @@ def entrypoint_tokens(svc: dict[str, Any]) -> list[Token]:
     if entrypoint is None:
         return []
     if isinstance(entrypoint, str):
-        return ["/bin/sh", "-c", _Expand(value=entrypoint)]
-    return [_Expand(value=str(token)) for token in entrypoint]
+        return ["/bin/sh", "-c", Expand(value=entrypoint)]
+    return [Expand(value=str(token)) for token in entrypoint]
 
 
 def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
     """Add healthcheck flags to the flags list."""
     cmd = health_cmd(healthcheck.get("test"))
     if cmd is not None:
-        flags += ["--health-cmd", _Expand(value=cmd)]
+        flags += ["--health-cmd", Expand(value=cmd)]
         if "timeout" in healthcheck:
             flags += ["--health-timeout", str(healthcheck["timeout"])]
         if "start_period" in healthcheck:
@@ -63,13 +63,13 @@ def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
 def _add_env_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
     """Add -e and --env-file flags to the flags list."""
     # A null environment value means "pass KEY through from the host" (bare `-e KEY`).
-    for pair in _key_value_pairs(svc.get("environment") or {}):
-        flags += ["-e", _Expand(value=str(pair))]
+    for pair in key_value_pairs(svc.get("environment") or {}):
+        flags += ["-e", Expand(value=str(pair))]
     env_files = svc.get("env_file") or []
     if isinstance(env_files, str):
         env_files = [env_files]
     for env_file in env_files:
-        flags += ["--env-file", _Expand(value=str(Path(project_dir, env_file)))]
+        flags += ["--env-file", Expand(value=str(Path(project_dir, env_file)))]
 
 
 def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
@@ -77,7 +77,7 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
     for volume in svc.get("volumes") or []:
         if ":" not in volume:
             # Anonymous volume: a bare container path, no host source to translate.
-            flags += ["-v", _Expand(value=volume)]
+            flags += ["-v", Expand(value=volume)]
             continue
         source, destination = volume.split(":", 1)
         if source.startswith("."):
@@ -85,12 +85,12 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
             source = str(Path(project_dir, source))
         # Absolute bind mount (starts with "/") and named volume (bare
         # identifier) are both kept as-is — neither is a path to translate.
-        flags += ["-v", _Expand(value=f"{source}:{destination}")]
+        flags += ["-v", Expand(value=f"{source}:{destination}")]
     tmpfs = svc.get("tmpfs") or []
     if isinstance(tmpfs, str):
         tmpfs = [tmpfs]
     for mount in tmpfs:
-        flags += ["--tmpfs", _Expand(value=mount)]
+        flags += ["--tmpfs", Expand(value=mount)]
 
 
 def run_flags(name: str, svc: dict[str, Any], pod: str, project_dir: str) -> list[Token]:
@@ -168,13 +168,13 @@ class PlannedScript:
 
 
 def _render(tokens: list[Token]) -> str:
-    return " ".join(to_shell(token.value) if isinstance(token, _Expand) else shlex.quote(token) for token in tokens)
+    return " ".join(to_shell(token.value) if isinstance(token, Expand) else shlex.quote(token) for token in tokens)
 
 
 def _collect_vars(tokens: list[Token], names: set[str]) -> None:
-    """Add the run-time variables any `_Expand` tokens expand to `names`."""
+    """Add the run-time variables any `Expand` tokens expand to `names`."""
     for token in tokens:
-        if isinstance(token, _Expand):
+        if isinstance(token, Expand):
             names.update(variable_names(token.value))
 
 
@@ -220,7 +220,7 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
 
     Every token source is visited a single time and feeds both outputs: each
     service's `_run_tokens` and the `pod_create_flags` render into lines *and*
-    have their `_Expand` variables collected, so the script and the variable
+    have their `Expand` variables collected, so the script and the variable
     list cannot disagree about what the script expands at run time.
     """
     services = compose["services"]

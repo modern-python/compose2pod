@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Token, _Expand, _extra_host_pairs, _validate_map
+from compose2pod.keys import Expand, Token, extra_host_pairs, validate_map
 
 
 _DNS_KEYS = {"dns": "--dns", "dns_search": "--dns-search", "dns_opt": "--dns-option"}
@@ -48,7 +48,7 @@ def validate_pod_options(name: str, svc: dict[str, Any]) -> None:
     if "sysctls" in svc:
         _sysctl_pairs(name, svc["sysctls"])
     if "extra_hosts" in svc:
-        _validate_map(name, "extra_hosts", svc["extra_hosts"])
+        validate_map(name, "extra_hosts", svc["extra_hosts"])
 
 
 def uses_pod_options(services: dict[str, Any]) -> bool:
@@ -66,7 +66,7 @@ def _dns_flags(services: dict[str, Any], order: list[str]) -> list[Token]:
                 for value in _as_str_list(name, key, svc[key]):
                     seen[value] = None
         for value in seen:
-            tokens += [flag, _Expand(value=value)]
+            tokens += [flag, Expand(value=value)]
     return tokens
 
 
@@ -83,7 +83,7 @@ def _sysctl_flags(services: dict[str, Any], order: list[str]) -> list[Token]:
             merged[key] = val
     tokens: list[Token] = []
     for key, val in merged.items():
-        tokens += ["--sysctl", _Expand(value=f"{key}={val}")]
+        tokens += ["--sysctl", Expand(value=f"{key}={val}")]
     return tokens
 
 
@@ -93,7 +93,7 @@ def _add_host_flags(services: dict[str, Any], order: list[str], hosts: list[str]
     A host name landing on two different addresses -- across services' extra_hosts,
     or against an alias's fixed 127.0.0.1 -- is refused rather than guessed at, matching
     the sysctls conflict rule below. Alias entries render as plain tokens (unquoted, as
-    before this move); extra_hosts entries render via `_Expand` (as before, quoted/interpolated)
+    before this move); extra_hosts entries render via `Expand` (as before, quoted/interpolated)
     -- relocating the flags changes nothing else observable about either source.
     """
     merged: dict[str, str] = {}
@@ -104,7 +104,7 @@ def _add_host_flags(services: dict[str, Any], order: list[str], hosts: list[str]
         svc = services[name]
         if "extra_hosts" not in svc:
             continue
-        for entry in _extra_host_pairs(svc["extra_hosts"]):
+        for entry in extra_host_pairs(svc["extra_hosts"]):
             host, _sep, addr = str(entry).partition(":")
             if merged.get(host, addr) != addr:
                 msg = f"service {name!r}: conflicting host {host!r} ({merged[host]!r} vs {addr!r})"
@@ -113,7 +113,7 @@ def _add_host_flags(services: dict[str, Any], order: list[str], hosts: list[str]
             from_extra_hosts.add(host)
     tokens: list[Token] = []
     for host, addr in merged.items():
-        value = _Expand(value=f"{host}:{addr}") if host in from_extra_hosts else f"{host}:{addr}"
+        value = Expand(value=f"{host}:{addr}") if host in from_extra_hosts else f"{host}:{addr}"
         tokens += ["--add-host", value]
     return tokens
 

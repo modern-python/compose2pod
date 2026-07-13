@@ -207,12 +207,12 @@ compose2pod hoists them onto `podman pod create` instead
 - **Value shapes:** `dns` / `dns_search` / `dns_opt` accept a string or a list
   of strings; `sysctls` accepts a mapping (`key: value`) or a list of
   `"key=value"` strings, each value a string or number. A `${VAR}` inside a
-  value is wrapped in `_Expand` like other interpolated fields, so it stays
+  value is wrapped in `Expand` like other interpolated fields, so it stays
   live at run time and counts toward `referenced_variables` — the generated
   script's own shell expands it when it runs, not compose2pod at generation
   time. `--add-host` entries render differently by source: an alias/hostname
   entry stays a plain unquoted token (pre-existing behavior, unchanged by
-  this move), while an `extra_hosts` entry goes through `_Expand` (quoted,
+  this move), while an `extra_hosts` entry goes through `Expand` (quoted,
   `${VAR}`-live) — same as before it was per-service.
 - **Pod-wide divergence:** unlike every other service key, these apply to
   every container in the pod once emitted — including services that never
@@ -461,18 +461,18 @@ interpolated string leaf into a double-quoted POSIX-shell fragment with the
 variable references left live, so the generated script's own shell expands
 them against its runtime environment when the script runs.
 
-The interpolated set is exactly what `_Expand(...)` wraps in
+The interpolated set is exactly what `Expand(...)` wraps in
 `compose2pod/emit.py` and `compose2pod/keys.py` — there is no separate list
 to maintain by hand, so treat the **service-key registry**
 (`SERVICE_KEYS` in `compose2pod/keys.py`; see `architecture/glossary.md`)
-and the `_Expand(...)` call sites in `emit.py` as the source of truth if this
+and the `Expand(...)` call sites in `emit.py` as the source of truth if this
 enumeration ever appears to drift:
 
 - **Structural fields:** `image` (only when the service has no `build`
   override — otherwise the CI image is used, not the compose value),
   `command`, `entrypoint`, `environment`, `env_file`, `volumes`, `tmpfs`, and
   the healthcheck `test` command.
-- **Service-key registry fields** whose spec wraps its value in `_Expand` —
+- **Service-key registry fields** whose spec wraps its value in `Expand` —
   e.g. `user`, `working_dir`, `platform`, `group_add`, `cap_add`, `cap_drop`,
   `security_opt`, `devices`, `labels`, `annotations`, `ulimits`, and every
   numeric resource-limit key (`mem_limit`, `cpus`, `pids_limit`, ...). The

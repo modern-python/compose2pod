@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import SERVICE_KEYS, _pairs_to_mapping
+from compose2pod.keys import SERVICE_KEYS, pairs_to_mapping
 
 
 # Merge policy for keys with a SERVICE_KEYS KeySpec comes from spec.merge (see
@@ -38,7 +38,7 @@ def _as_mapping(key: str, name: str, value: Any) -> dict[str, Any]:  # noqa: ANN
         return value
     if isinstance(value, list):
         if key == "environment":
-            return _pairs_to_mapping(name, key, value)
+            return pairs_to_mapping(name, key, value)
         if key == "depends_on":
             return {dep: {} for dep in value}
     msg = f"service {name!r}: cannot merge {key!r} across incompatible forms"

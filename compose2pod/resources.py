@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Token, _Expand, _is_number
+from compose2pod.keys import Expand, Token, is_number
 
 
 # deploy.resources.limits.<field> -> (podman flag, conflicting legacy key)
@@ -11,7 +11,7 @@ _LIMITS = {"cpus": ("--cpus", "cpus"), "memory": ("--memory", "mem_limit"), "pid
 
 
 def _check_number(name: str, field: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
-    if not _is_number(value):
+    if not is_number(value):
         msg = f"service {name!r}: {field} must be a number or string"
         raise UnsupportedComposeError(msg)
 
@@ -91,7 +91,7 @@ def deploy_resource_flags(svc: dict[str, Any]) -> list[Token]:
     tokens: list[Token] = []
     for field, (flag, _legacy) in _LIMITS.items():
         if field in limits:
-            tokens += [flag, _Expand(value=str(limits[field]))]
+            tokens += [flag, Expand(value=str(limits[field]))]
     if "memory" in reservations:
-        tokens += ["--memory-reservation", _Expand(value=str(reservations["memory"]))]
+        tokens += ["--memory-reservation", Expand(value=str(reservations["memory"]))]
     return tokens

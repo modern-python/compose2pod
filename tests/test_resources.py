@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import _Expand
+from compose2pod.keys import Expand
 from compose2pod.resources import deploy_resource_flags, validate_deploy
 
 
@@ -104,13 +104,13 @@ class TestDeployResourceFlags:
         deploy = {"resources": {"limits": {"cpus": "0.5", "memory": "256m", "pids": 100}}}
         assert deploy_resource_flags(_svc(deploy)) == [
             "--cpus",
-            _Expand(value="0.5"),
+            Expand(value="0.5"),
             "--memory",
-            _Expand(value="256m"),
+            Expand(value="256m"),
             "--pids-limit",
-            _Expand(value="100"),
+            Expand(value="100"),
         ]
 
     def test_reservation_memory_emitted(self) -> None:
         deploy = {"resources": {"reservations": {"memory": "128m"}}}
-        assert deploy_resource_flags(_svc(deploy)) == ["--memory-reservation", _Expand(value="128m")]
+        assert deploy_resource_flags(_svc(deploy)) == ["--memory-reservation", Expand(value="128m")]
