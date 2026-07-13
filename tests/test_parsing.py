@@ -444,6 +444,33 @@ class TestValidate:
     def test_null_environment_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "environment": None}}}) == []
 
+    def test_environment_list_of_mapping_rejected_at_gate(self) -> None:
+        # The commonest Compose YAML slip: `- KEY: value` (list + mapping)
+        # instead of `- KEY=value`. Used to be silently accepted and emit the
+        # literal `-e "{'POSTGRES_PASSWORD': 'password'}"` -- exit 0, garbage.
+        compose = {"services": {"app": {"image": "x", "environment": [{"POSTGRES_PASSWORD": "password"}]}}}
+        with pytest.raises(UnsupportedComposeError, match="'environment' entries must be strings"):
+            validate(compose)
+
+    def test_environment_list_and_map_forms_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "environment": ["KEY=value", "BARE"]}}}) == []
+        assert validate({"services": {"app": {"image": "x", "environment": {"KEY": "value", "BARE": None}}}}) == []
+
+    def test_labels_annotations_list_of_mapping_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'labels' entries must be strings"):
+            validate({"services": {"app": {"image": "x", "labels": [{"team": "core"}]}}})
+
+    def test_labels_map_non_scalar_value_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'labels' values must be"):
+            validate({"services": {"app": {"image": "x", "labels": {"team": {"nested": "dict"}}}}})
+
+    def test_labels_null_and_numeric_map_values_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "labels": {"empty": None, "version": 2}}}}) == []
+
+    def test_cap_add_list_of_mapping_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'cap_add' entries must be strings"):
+            validate({"services": {"app": {"image": "x", "cap_add": [{"NET_ADMIN": True}]}}})
+
     def test_non_string_non_list_env_file_rejected_at_gate(self) -> None:
         # Used to reach emit and crash with TypeError: 'int' object is not iterable.
         with pytest.raises(UnsupportedComposeError, match=r"'env_file' must be a string or list"):
@@ -498,3 +525,17 @@ class TestValidate:
 
     def test_null_command_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "command": None}}}) == []
+
+    def test_command_list_with_mapping_entry_rejected_at_gate(self) -> None:
+        # Used to be silently accepted: str({'run': 'tests'}) reached podman
+        # run as a single mangled argv token, e.g. "{'run': 'tests'}".
+        with pytest.raises(UnsupportedComposeError, match="'command' entries must be strings"):
+            validate({"services": {"app": {"image": "x", "command": [{"run": "tests"}]}}})
+
+    def test_entrypoint_list_with_non_string_entry_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'entrypoint' entries must be strings"):
+            validate({"services": {"app": {"image": "x", "entrypoint": [{"run": "tests"}]}}})
+
+    def test_command_and_entrypoint_list_of_strings_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "command": ["run", "me"]}}}) == []
+        assert validate({"services": {"app": {"image": "x", "entrypoint": ["run", "me"]}}}) == []

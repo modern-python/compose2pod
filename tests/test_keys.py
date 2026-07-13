@@ -100,6 +100,47 @@ def test_merge_present_iff_list_or_map_shaped(key: str) -> None:
     assert (spec.merge is not None) == is_list_or_map_shaped
 
 
+class TestElementLevelShapeChecks:
+    """_validate_list/validate_map used to only check the outer list/dict shape.
+
+    A non-string list element or non-scalar map value slipped through and got
+    str()'d/repr()'d straight into the emitted script -- exit 0, garbage
+    output, no error anywhere. The commonest trigger is the classic YAML slip
+    of mixing list and map form (`- KEY: value` instead of `- KEY=value`).
+    """
+
+    def test_validate_list_rejects_non_string_element(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'cap_add' entries must be strings"):
+            _validate_list("web", "cap_add", [{"NET_ADMIN": True}])
+
+    def test_validate_list_accepts_string_elements(self) -> None:
+        _validate_list("web", "cap_add", ["NET_ADMIN", "SYS_TIME"])
+
+    def test_validate_map_rejects_non_string_list_element(self) -> None:
+        # The realistic trigger: `environment: [{KEY: value}]` instead of `- KEY=value`.
+        with pytest.raises(UnsupportedComposeError, match="'environment' entries must be strings"):
+            validate_map("web", "environment", [{"POSTGRES_PASSWORD": "password"}])
+
+    def test_validate_map_rejects_non_scalar_map_value(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'labels' values must be"):
+            validate_map("web", "labels", {"team": {"nested": "dict"}})
+
+    def test_validate_map_rejects_list_valued_map_entry(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'labels' values must be"):
+            validate_map("web", "labels", {"team": ["a", "b"]})
+
+    def test_validate_map_accepts_null_value(self) -> None:
+        # environment: {KEY: null} -> host-passthrough; labels: {KEY: null} -> empty label.
+        validate_map("web", "environment", {"KEY": None})
+        validate_map("web", "labels", {"KEY": None})
+
+    def test_validate_map_accepts_numeric_value(self) -> None:
+        validate_map("web", "labels", {"version": 2})
+
+    def test_validate_map_accepts_string_list_elements(self) -> None:
+        validate_map("web", "labels", ["team=core", "BARE"])
+
+
 class TestMergeCallables:
     """Direct tests of the merge policy functions, independent of any caller.
 

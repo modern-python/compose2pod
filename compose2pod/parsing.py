@@ -83,11 +83,29 @@ def _validate_image(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
+def _validate_argv_list(name: str, key: str, value: list[Any]) -> None:
+    """Check every command/entrypoint list element is a string.
+
+    Without this, a list-of-mapping form (e.g. `command: [{run: tests}]` --
+    the same list/map YAML slip as `environment`) was silently accepted and
+    str()'d into a single mangled podman-run argv token.
+    """
+    for token in value:
+        if not isinstance(token, str):
+            msg = f"service {name!r}: '{key}' entries must be strings"
+            raise UnsupportedComposeError(msg)
+
+
 def _validate_entrypoint(name: str, svc: dict[str, Any]) -> None:
     """Check the structural entrypoint key's form (it is not a registry key)."""
-    if "entrypoint" in svc and not isinstance(svc["entrypoint"], str | list):
+    if "entrypoint" not in svc:
+        return
+    entrypoint = svc["entrypoint"]
+    if not isinstance(entrypoint, str | list):
         msg = f"service {name!r}: 'entrypoint' must be a string or list"
         raise UnsupportedComposeError(msg)
+    if isinstance(entrypoint, list):
+        _validate_argv_list(name, "entrypoint", entrypoint)
 
 
 def _validate_command(name: str, svc: dict[str, Any]) -> None:
@@ -98,6 +116,8 @@ def _validate_command(name: str, svc: dict[str, Any]) -> None:
     if not isinstance(command, str | list):
         msg = f"service {name!r}: 'command' must be a string or list"
         raise UnsupportedComposeError(msg)
+    if isinstance(command, list):
+        _validate_argv_list(name, "command", command)
 
 
 def _validate_tmpfs(name: str, svc: dict[str, Any]) -> None:

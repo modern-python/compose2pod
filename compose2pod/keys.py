@@ -85,16 +85,38 @@ def _validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 -
         raise UnsupportedComposeError(msg)
 
 
+def _validate_list_elements(name: str, key: str, value: list[Any]) -> None:
+    """Check every list element is a string, so emit can't str() a non-string into the script."""
+    for item in value:
+        if not isinstance(item, str):
+            msg = f"service {name!r}: '{key}' entries must be strings"
+            raise UnsupportedComposeError(msg)
+
+
+def _validate_map_values(name: str, key: str, value: dict[str, Any]) -> None:
+    """Check every map value is a scalar or null, so emit can't repr() a dict/list into the script."""
+    for val in value.values():
+        if val is not None and not is_number(val):
+            msg = f"service {name!r}: '{key}' values must be a string, number, or null"
+            raise UnsupportedComposeError(msg)
+
+
 def _validate_list(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     if not isinstance(value, list):
         msg = f"service {name!r}: '{key}' must be a list"
         raise UnsupportedComposeError(msg)
+    _validate_list_elements(name, key, value)
 
 
 def validate_map(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    if not isinstance(value, list | dict):
-        msg = f"service {name!r}: '{key}' must be a list or mapping"
-        raise UnsupportedComposeError(msg)
+    if isinstance(value, list):
+        _validate_list_elements(name, key, value)
+        return
+    if isinstance(value, dict):
+        _validate_map_values(name, key, value)
+        return
+    msg = f"service {name!r}: '{key}' must be a list or mapping"
+    raise UnsupportedComposeError(msg)
 
 
 def _as_list(name: str, key: str, value: Any) -> list[Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
