@@ -412,3 +412,21 @@ class TestValidate:
         # image_for never reads svc['image'] when 'build' is present, so a
         # malformed image alongside 'build' cannot crash emit.
         assert validate({"services": {"app": {"image": 5, "build": {"context": "."}}}}) == []
+
+    def test_command_string_or_list_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "command": "run me"}}}) == []
+        assert validate({"services": {"app": {"image": "x", "command": ["run", "me"]}}}) == []
+
+    def test_missing_command_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x"}}}) == []
+
+    def test_non_string_or_list_command_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError: 'int' object is not iterable.
+        with pytest.raises(UnsupportedComposeError, match=r"'command' must be a string or list"):
+            validate({"services": {"app": {"image": "x", "command": 5}}})
+
+    def test_mapping_command_rejected_at_gate(self) -> None:
+        # Used to be silently accepted and mis-emitted: only the mapping's key
+        # ('run') reached podman run, the value ('tests') was dropped.
+        with pytest.raises(UnsupportedComposeError, match=r"'command' must be a string or list"):
+            validate({"services": {"app": {"image": "x", "command": {"run": "tests"}}}})

@@ -80,6 +80,13 @@ def _validate_entrypoint(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
+def _validate_command(name: str, svc: dict[str, Any]) -> None:
+    """Check the structural command key's form (it is not a registry key)."""
+    if "command" in svc and not isinstance(svc["command"], str | list):
+        msg = f"service {name!r}: 'command' must be a string or list"
+        raise UnsupportedComposeError(msg)
+
+
 def _validate_tmpfs(name: str, svc: dict[str, Any]) -> None:
     """Check tmpfs is a string or list."""
     tmpfs = svc.get("tmpfs")
@@ -129,6 +136,7 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
     _validate_entrypoint(name, svc)
+    _validate_command(name, svc)
     _validate_tmpfs(name, svc)
     _validate_environment(name, svc)
     _validate_env_file(name, svc)
