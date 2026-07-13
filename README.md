@@ -1,4 +1,10 @@
-# compose2pod
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/modern-python/.github/main/brand/projects/compose2pod/lockup-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/modern-python/.github/main/brand/projects/compose2pod/lockup-light.svg">
+    <img alt="compose2pod" src="https://raw.githubusercontent.com/modern-python/.github/main/brand/projects/compose2pod/lockup.png" width="420">
+  </picture>
+</p>
 
 [![PyPI version](https://img.shields.io/pypi/v/compose2pod.svg)](https://pypi.org/project/compose2pod/)
 [![Supported Python versions](https://img.shields.io/pypi/pyversions/compose2pod.svg)](https://pypi.org/project/compose2pod/)
