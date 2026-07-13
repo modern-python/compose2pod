@@ -47,8 +47,9 @@ def entrypoint_tokens(svc: dict[str, Any]) -> list[Token]:
     return [Expand(value=str(token)) for token in entrypoint]
 
 
-def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
-    """Add healthcheck flags to the flags list."""
+def _health_flags(healthcheck: dict[str, Any]) -> list[Token]:
+    """Healthcheck flag tokens."""
+    flags: list[Token] = []
     cmd = health_cmd(healthcheck.get("test"))
     if cmd is not None:
         flags += ["--health-cmd", Expand(value=cmd)]
@@ -58,10 +59,12 @@ def _add_health_flags(flags: list[Token], healthcheck: dict[str, Any]) -> None:
             flags += ["--health-start-period", str(healthcheck["start_period"])]
         if "retries" in healthcheck:
             flags += ["--health-retries", str(healthcheck["retries"])]
+    return flags
 
 
-def _add_env_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
-    """Add -e and --env-file flags to the flags list."""
+def _env_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
+    """-e and --env-file flag tokens."""
+    flags: list[Token] = []
     # A null environment value means "pass KEY through from the host" (bare `-e KEY`).
     for pair in key_value_pairs(svc.get("environment") or {}):
         flags += ["-e", Expand(value=str(pair))]
@@ -70,10 +73,12 @@ def _add_env_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) ->
         env_files = [env_files]
     for env_file in env_files:
         flags += ["--env-file", Expand(value=str(Path(project_dir, env_file)))]
+    return flags
 
 
-def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str) -> None:
-    """Add -v and --tmpfs flags to the flags list."""
+def _volume_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
+    """-v and --tmpfs flag tokens."""
+    flags: list[Token] = []
     for volume in svc.get("volumes") or []:
         if ":" not in volume:
             # Anonymous volume: a bare container path, no host source to translate.
@@ -91,14 +96,15 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
         tmpfs = [tmpfs]
     for mount in tmpfs:
         flags += ["--tmpfs", Expand(value=mount)]
+    return flags
 
 
 def run_flags(name: str, svc: dict[str, Any], pod: str, project_dir: str) -> list[Token]:
     """Flag tokens (unquoted) for `podman run` of one service."""
     flags: list[Token] = ["--pod", pod, "--name", f"{pod}-{name}"]
-    _add_env_flags(flags, svc, project_dir)
-    _add_volume_flags(flags, svc, project_dir)
-    _add_health_flags(flags, svc.get("healthcheck") or {})
+    flags += _env_flags(svc, project_dir)
+    flags += _volume_flags(svc, project_dir)
+    flags += _health_flags(svc.get("healthcheck") or {})
     for key, spec in SERVICE_KEYS.items():
         if key in svc:
             flags += spec.emit(svc[key])
