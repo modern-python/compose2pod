@@ -8,8 +8,10 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 
 ## Top-level keys
 
-- **Supported:** `services` (required, non-empty), `version`, `name`,
-  `networks`, `volumes`, `secrets`, `configs`.
+- **Supported:** `services` (required, non-empty mapping of service name to
+  service definition — a non-mapping `services` value, e.g. a bare string or
+  list, raises inside `validate()` itself), `version`, `name`, `networks`,
+  `volumes`, `secrets`, `configs`.
 - **Ignored (warns):** `networks` — all services share the pod's single
   network namespace, so top-level network definitions have no effect.
 - **Extension fields:** any key prefixed `x-` is accepted and ignored
@@ -40,6 +42,17 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   The remaining keys documented below are **structural keys**, handled
   outside the registry because their `emit` needs `project_dir`, spans
   multiple keys, or occupies the image/command slot.
+- **`image`:** a string; `image_for` (`compose2pod/emit.py`) reads it verbatim
+  when the service has no `build`. A service must set at least one of `image`
+  or `build`; a service with neither, or a non-string `image` while `build` is
+  absent, raises at the gate (`_validate_image`, `compose2pod/parsing.py`). A
+  non-string `image` alongside `build` is accepted, since `image_for` never
+  reads it in that case — the CI image always wins.
+- **`command`:** string or list, exactly like `entrypoint`. List form is argv
+  tokens; string form runs via `/bin/sh -c`. Any other shape (e.g. a mapping)
+  raises at the gate (`_validate_command`, `compose2pod/parsing.py`) — a
+  mapping is rejected outright rather than reaching `podman run` with only
+  its keys emitted as bare tokens and its values silently discarded.
 - **`environment`:** list form (`- KEY=value`, `- KEY`) or mapping form
   (`KEY: value`, `KEY:`). A null mapping value (`KEY:`) means "pass `KEY`
   through from the host", emitted as a bare `-e KEY` exactly like the list
@@ -101,9 +114,11 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   `podman run --tmpfs <value>` — Compose's short syntax maps directly onto
   podman's own `--tmpfs CONTAINER-DIR[:OPTIONS]` flag, so no translation is
   needed. The key itself must be a string or list — a non-string/non-list
-  value (e.g. a mapping) raises; no format validation beyond that, so a
-  malformed option string inside an accepted string/list surfaces as a podman
-  error at run time.
+  value (e.g. a mapping) raises; each list element must itself be a string, a
+  non-string element (e.g. `tmpfs: [5]`) raises the same way
+  (`_validate_tmpfs`, `compose2pod/parsing.py`). No format validation beyond
+  shape, so a malformed option string inside an accepted string/list surfaces
+  as a podman error at run time.
 - **`hostname` and `container_name`:** both are made resolvable to
   `127.0.0.1` like a network alias (added to the shared `--add-host` set), so
   other services can reach the service by either name. The pod shares the UTS
@@ -120,8 +135,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   contribute). The key must be a list or mapping — anything else raises. A
   long-form *value* that isn't itself a mapping (e.g. `networks: {default:
   true}`) is lenient, not rejected: it simply contributes no aliases, since
-  only a mapping value can carry an `aliases` list (`_host_names`,
-  `compose2pod/graph.py`).
+  only a mapping value can carry an `aliases` list. When present, `aliases`
+  itself must be a list of strings — a non-list value (e.g. a bare string)
+  would otherwise be destructured character-wise into the resolvable-name
+  set, and a non-string element crashes downstream the same way a malformed
+  `volumes`/`tmpfs` element does; both raise at the gate instead
+  (`_host_names`, `compose2pod/graph.py`).
 - **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty`, `stop_signal`,
   `stop_grace_period`, `profiles` — meaningless or irrelevant inside a single
   shared-namespace pod. `stop_signal`/`stop_grace_period` are inert because the
@@ -305,6 +324,13 @@ honors both, refusing loudly on overlap rather than picking a precedence.
   Compound durations (`"1h30m"`) and hour suffixes (`"1h"`) are not parsed —
   each is rejected with an `UnsupportedComposeError` rather than silently
   truncated or misinterpreted.
+- **`timeout`, `retries`, `start_period`:** each must be a number (int or
+  float) or string when present — the same shape `keys.is_number` enforces
+  for the legacy resource-limit keys. Each is passed straight through
+  `str(value)` into its `--health-*` flag with no further parsing, so a
+  mapping or list (e.g. `retries: {a: 1}`) raises at the gate
+  (`_validate_service_healthcheck`, `compose2pod/parsing.py`) instead of
+  emitting a literal Python `repr()` as the flag value.
 - **Extension fields:** any `x-`-prefixed healthcheck key is accepted and
   ignored silently.
 - Everything else raises.
