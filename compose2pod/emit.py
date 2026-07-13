@@ -238,6 +238,9 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     list cannot disagree about what the script expands at run time.
     """
     _validate_options(options)
+    if not POD_NAME_PATTERN.fullmatch(options.pod):
+        msg = f"invalid pod name {options.pod!r}"
+        raise UnsupportedComposeError(msg)
     services = compose["services"]
     hosts = hostnames(services)
     order = startup_order(services, options.target)
@@ -284,9 +287,6 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
 
 def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
     """Render the full pod test script for `target` and its dependency closure."""
-    if not POD_NAME_PATTERN.fullmatch(options.pod):
-        msg = f"invalid pod name {options.pod!r}"
-        raise UnsupportedComposeError(msg)
     return _plan(compose, options).script
 
 

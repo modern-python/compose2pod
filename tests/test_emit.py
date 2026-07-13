@@ -799,6 +799,13 @@ class TestPodNameValidation:
         script = emit_script(compose=doc, options=self._options("test-pod.1"))
         assert "podman pod create --name test-pod.1" in script
 
+    def test_referenced_variables_also_rejects_invalid_pod_names(self) -> None:
+        # Used to only be checked by emit_script; referenced_variables projects
+        # the same _plan traversal and skipped the check entirely.
+        doc = {"services": {"app": {"image": "x"}}}
+        with pytest.raises(UnsupportedComposeError, match="invalid pod name"):
+            referenced_variables(doc, self._options("bad name"))
+
 
 class TestArtifactValidation:
     def _options(self, artifacts: list[str]) -> EmitOptions:
