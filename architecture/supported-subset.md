@@ -227,6 +227,20 @@ compose2pod hoists them onto `podman pod create` instead
   time a `dns` / `sysctls` / `extra_hosts` declaration on a service outside
   the target's closure is silently ignored by `pod_create_flags` — no flag
   is emitted for it, since that service is never run.
+- **Requires Podman >= 6.0.0.** Before 6.0.0, Podman had a bug where a
+  container stopping inside a multi-container pod wiped `/etc/hosts` for
+  every container in the pod, not just the one that stopped. Because
+  `--add-host` here is the pod's *only* source of `/etc/hosts` entries (moved
+  off per-service `podman run` for exactly this pod-wide reason), a
+  `service_completed_successfully` dependency — a container that runs to
+  completion and exits, e.g. a migration step run via `podman run --rm` —
+  triggers the bug and erases name resolution for every service started
+  after it. Confirmed present on 5.8.1, fixed on 6.0.0/6.0.1 (verified by
+  reproducing the exact failure end-to-end against real Podman). See
+  `README.md`'s Requirements section. The generated script itself checks
+  `podman version` at startup and warns on stderr (without blocking) when
+  it detects a major version below 6, so the requirement is visible at the
+  point of failure, not only in the docs.
 - **Non-goals:** per-service DNS/sysctls — impossible inside a
   shared-namespace pod, not a compose2pod limitation; last-writer-wins on a
   sysctl key conflict — refused instead, matching the refuse-on-conflict

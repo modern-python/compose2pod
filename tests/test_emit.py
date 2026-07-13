@@ -1,6 +1,12 @@
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from compose2pod.emit import (
+    _SCRIPT_HEADER,
     EmitOptions,
     _Expand,
     command_tokens,
@@ -12,6 +18,9 @@ from compose2pod.emit import (
 )
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.parsing import validate
+
+
+_SH = shutil.which("sh")
 
 
 class TestRunFlags:
@@ -406,6 +415,15 @@ class TestEmitScript:
         assert "podman healthcheck run" in script
         assert "wait_healthy()" in script
 
+    def test_podman_version_guard_present_in_header(self, chats_compose: dict) -> None:
+        script = self.make_script(chats_compose)
+        assert "podman version --format '{{.Client.Version}}'" in script
+        assert "requires podman >= 6.0.0" in script
+        version_guard_index = script.index("podman_version=")
+        wait_healthy_index = script.index("wait_healthy()")
+        set_eu_index = script.index("set -eu")
+        assert set_eu_index < version_guard_index < wait_healthy_index
+
     def test_hostname_becomes_add_host_entry(self) -> None:
         compose = {
             "services": {
@@ -733,3 +751,41 @@ class TestPodNameValidation:
         doc = {"services": {"app": {"image": "x"}}}
         script = emit_script(compose=doc, options=self._options("test-pod.1"))
         assert "podman pod create --name test-pod.1" in script
+
+
+class TestPodmanVersionGuard:
+    def _run_header(self, tmp_path: Path, podman_stub_body: str) -> "subprocess.CompletedProcess[str]":
+        assert _SH is not None  # sh is a POSIX baseline binary, always present
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        podman_stub = bin_dir / "podman"
+        podman_stub.write_text(f"#!/bin/sh\n{podman_stub_body}\n")
+        podman_stub.chmod(0o755)
+        header_path = tmp_path / "header.sh"
+        header_path.write_text(_SCRIPT_HEADER)
+        env = dict(os.environ)
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        return subprocess.run(  # noqa: S603 - _SH is an absolute path from shutil.which, not untrusted input
+            [_SH, str(header_path)],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=10,
+        )
+
+    def test_warns_when_podman_major_below_six(self, tmp_path: Path) -> None:
+        result = self._run_header(tmp_path, 'echo "5.8.1"')
+        assert result.returncode == 0
+        assert "podman 5.8.1 detected; compose2pod requires podman >= 6.0.0" in result.stderr
+        assert "/etc/hosts" in result.stderr
+
+    def test_silent_when_podman_major_six_or_above(self, tmp_path: Path) -> None:
+        result = self._run_header(tmp_path, 'echo "6.0.1"')
+        assert result.returncode == 0
+        assert result.stderr == ""
+
+    def test_silent_when_podman_version_unparseable(self, tmp_path: Path) -> None:
+        result = self._run_header(tmp_path, "exit 1")
+        assert result.returncode == 0
+        assert result.stderr == ""
