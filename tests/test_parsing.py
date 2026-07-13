@@ -101,6 +101,14 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="no services"):
             validate({"services": {}})
 
+    def test_non_mapping_services_rejected_at_gate(self) -> None:
+        # Used to reach services.items() inside validate() itself and crash raw
+        # with AttributeError: 'str'/'list' object has no attribute 'items'.
+        with pytest.raises(UnsupportedComposeError, match="'services' must be a mapping"):
+            validate({"services": "app"})
+        with pytest.raises(UnsupportedComposeError, match="'services' must be a mapping"):
+            validate({"services": ["app"]})
+
     def test_unknown_top_level_key_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="foo"):
             validate({"services": {"app": {"image": "x"}}, "foo": {}})

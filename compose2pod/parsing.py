@@ -186,6 +186,9 @@ def validate(compose: dict[str, Any]) -> list[str]:
     if "volumes" in compose:
         warnings.append("ignoring top-level 'volumes' (podman creates named volumes on first reference)")
     services = compose.get("services") or {}
+    if not isinstance(services, dict):
+        msg = f"'services' must be a mapping, got {type(services).__name__}"
+        raise UnsupportedComposeError(msg)
     if not services:
         msg = "no services defined"
         raise UnsupportedComposeError(msg)
