@@ -224,7 +224,9 @@ class TestValidate:
             validate({"services": {"app": {"image": "x", "annotations": "k=v"}}})
 
     def test_extra_hosts_accepted(self) -> None:
-        assert validate({"services": {"app": {"image": "x", "extra_hosts": {"db.local": "10.0.0.5"}}}}) == []
+        # extra_hosts is pod-level like dns/sysctls, so it carries the pod-wide warning.
+        warnings = validate({"services": {"app": {"image": "x", "extra_hosts": {"db.local": "10.0.0.5"}}}})
+        assert any("pod-wide" in w for w in warnings)
 
     def test_extra_hosts_non_list_or_map_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'extra_hosts' must be a list or mapping"):

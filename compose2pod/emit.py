@@ -93,11 +93,9 @@ def _add_volume_flags(flags: list[Token], svc: dict[str, Any], project_dir: str)
         flags += ["--tmpfs", _Expand(value=mount)]
 
 
-def run_flags(name: str, svc: dict[str, Any], pod: str, hosts: list[str], project_dir: str) -> list[Token]:
+def run_flags(name: str, svc: dict[str, Any], pod: str, project_dir: str) -> list[Token]:
     """Flag tokens (unquoted) for `podman run` of one service."""
     flags: list[Token] = ["--pod", pod, "--name", f"{pod}-{name}"]
-    for host in hosts:
-        flags += ["--add-host", f"{host}:127.0.0.1"]
     _add_env_flags(flags, svc, project_dir)
     _add_volume_flags(flags, svc, project_dir)
     _add_health_flags(flags, svc.get("healthcheck") or {})
@@ -168,9 +166,9 @@ def _collect_vars(tokens: list[Token], names: set[str]) -> None:
             names.update(variable_names(token.value))
 
 
-def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions, hosts: list[str]) -> list[Token]:
+def _run_tokens(name: str, services: dict[str, Any], options: EmitOptions) -> list[Token]:
     svc = services[name]
-    tokens = run_flags(name, svc, options.pod, hosts, options.project_dir)
+    tokens = run_flags(name, svc, options.pod, options.project_dir)
     entrypoint = entrypoint_tokens(svc)
     if entrypoint:
         tokens += ["--entrypoint", entrypoint[0]]
@@ -230,7 +228,7 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     if store_teardown:
         teardown += f"; {store_teardown}"
     lines.append(f"trap '{teardown}' EXIT")
-    pod_flags = pod_create_flags(services, order)
+    pod_flags = pod_create_flags(services, order, hosts)
     _collect_vars(pod_flags, names)
     pod_create = f"podman pod create --name {shlex.quote(options.pod)}"
     if pod_flags:
@@ -246,7 +244,7 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
                 attempts = max(HEALTHY_WAIT_BUDGET_SECONDS // interval, 1)
                 lines.append(f"wait_healthy {shlex.quote(f'{options.pod}-{dep}')} {attempts} {interval}")
                 waited.add(dep)
-        run_tokens = _run_tokens(name, services, options, hosts)
+        run_tokens = _run_tokens(name, services, options)
         _collect_vars(run_tokens, names)
         if name == options.target:
             _emit_target(lines, run_tokens, options)
