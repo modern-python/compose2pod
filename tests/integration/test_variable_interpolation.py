@@ -24,7 +24,11 @@ def test_variable_interpolation_resolves_at_run_time(
             "app": {
                 "image": "busybox:1.36",
                 "environment": ["TOKEN=${C2P_IT_TOKEN}"],
-                "command": ["sh", "-c", 'echo "$TOKEN"'],
+                # `$$` escapes to a literal `$` (Compose syntax): a bare `$TOKEN` here
+                # would instead be compose2pod's OWN interpolation, resolved by the
+                # OUTER script against ITS environment (which has C2P_IT_TOKEN, not
+                # TOKEN) -- we want the CONTAINER's shell to read its own $TOKEN.
+                "command": ["sh", "-c", 'echo "$$TOKEN"'],
             },
         },
     }

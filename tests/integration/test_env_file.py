@@ -13,7 +13,11 @@ def test_env_file_is_loaded(run_pod: Callable[..., PodRun], tmp_path: Path) -> N
             "app": {
                 "image": "busybox:1.36",
                 "env_file": "app.env",
-                "command": ["sh", "-c", 'echo "$COLOR"'],
+                # `$$` escapes to a literal `$` (Compose syntax): a bare `$COLOR` here
+                # would instead be compose2pod's OWN interpolation, resolved by the
+                # OUTER script against ITS environment -- not what we want, since COLOR
+                # only exists inside the container via --env-file.
+                "command": ["sh", "-c", 'echo "$$COLOR"'],
             },
         },
     }
