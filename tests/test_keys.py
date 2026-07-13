@@ -9,6 +9,7 @@ from compose2pod.keys import (
     _merge_map,
     _validate_list,
     _validate_ulimits,
+    pairs_to_mapping,
     validate_map,
 )
 from compose2pod.parsing import SUPPORTED_SERVICE_KEYS
@@ -169,3 +170,14 @@ class TestMergeCallables:
     def test_merge_map_refuses_incompatible_form(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="cannot merge 'labels' across incompatible forms"):
             _merge_map("web", "labels", {"team": "core"}, 5)
+
+    def test_pairs_to_mapping_rejects_non_string_list_element(self) -> None:
+        # Before this fix, a non-string element was str()'d into a mapping
+        # *key* instead of rejected -- laundering a malformed list-of-mapping
+        # value into a well-formed-looking mapping that validate() then
+        # accepted and emit rendered as a literal Python repr.
+        with pytest.raises(UnsupportedComposeError, match="'labels' entries must be strings"):
+            pairs_to_mapping("web", "labels", [{"BAD": "x"}])
+
+    def test_pairs_to_mapping_accepts_string_list_elements(self) -> None:
+        assert pairs_to_mapping("web", "labels", ["team=core", "BARE"]) == {"team": "core", "BARE": None}

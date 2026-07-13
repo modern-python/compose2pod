@@ -231,6 +231,21 @@ class TestResolveExtends:
         with pytest.raises(UnsupportedComposeError, match=r"depends_on entry .* must be a string"):
             resolve_extends(doc)
 
+    def test_labels_list_with_mapping_entry_raises_instead_of_laundering(self) -> None:
+        # Before this fix, a non-string labels list element on the extending
+        # (child) side survived the merge: pairs_to_mapping str()'d the dict
+        # element into a mapping *key* instead of rejecting it, so the merged
+        # service came out well-formed enough for validate() to accept and
+        # emit to render the literal --label "{'BAD': 'x'}".
+        doc = {
+            "services": {
+                "base": {"image": "a", "labels": {"OK": "1"}},
+                "web": {"extends": {"service": "base"}, "labels": [{"BAD": "x"}]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="'labels' entries must be strings"):
+            resolve_extends(doc)
+
     def test_incompatible_structural_concat_form_is_refused(self) -> None:
         doc = {
             "services": {

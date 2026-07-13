@@ -141,7 +141,10 @@ def pairs_to_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa
     if isinstance(value, list):
         result: dict[str, Any] = {}
         for item in value:
-            pair_key, sep, pair_value = str(item).partition("=")
+            if not isinstance(item, str):
+                msg = f"service {name!r}: '{key}' entries must be strings"
+                raise UnsupportedComposeError(msg)
+            pair_key, sep, pair_value = item.partition("=")
             result[pair_key] = pair_value if sep else None
         return result
     msg = f"service {name!r}: cannot merge {key!r} across incompatible forms"
