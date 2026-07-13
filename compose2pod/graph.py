@@ -9,6 +9,10 @@ def depends_on(svc: dict[str, Any]) -> dict[str, str]:
     """Normalize dependencies of a service to a name -> condition mapping."""
     deps = svc.get("depends_on") or {}
     if isinstance(deps, list):
+        for dep in deps:
+            if not isinstance(dep, str):
+                msg = f"depends_on entry {dep!r} must be a string"
+                raise UnsupportedComposeError(msg)
         return cast(dict[str, str], dict.fromkeys(deps, "service_started"))
     if not isinstance(deps, dict):
         msg = "'depends_on' must be a list or mapping"

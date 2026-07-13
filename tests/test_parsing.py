@@ -391,6 +391,19 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="'depends_on' must be a list or mapping"):
             validate({"services": {"app": {"image": "x", "depends_on": "db"}}})
 
+    def test_depends_on_list_with_mapping_entry_raises_at_gate(self) -> None:
+        # Same list/map YAML slip as `environment`/`command`. Used to crash
+        # raw (TypeError: unhashable type: 'dict') from inside validate()
+        # itself, via graph.depends_on's dict.fromkeys.
+        compose = {
+            "services": {
+                "app": {"image": "x", "depends_on": [{"db": {"condition": "service_healthy"}}]},
+                "db": {"image": "x"},
+            },
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry .* must be a string"):
+            validate(compose)
+
     def test_valid_networks_forms_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "networks": ["n1"]}}}) == []
         assert validate({"services": {"app": {"image": "x", "networks": {"default": None}}}}) == []

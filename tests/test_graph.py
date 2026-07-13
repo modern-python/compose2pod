@@ -22,6 +22,20 @@ class TestDependsOn:
         with pytest.raises(UnsupportedComposeError, match="depends_on entry 'db' must be a mapping"):
             depends_on({"depends_on": {"db": "service_healthy"}})
 
+    def test_list_entry_not_a_string_raises(self) -> None:
+        # Same YAML slip as `environment`/`command`: `- db: {condition: ...}`
+        # is a hyphen + mapping, not a bare service name. Used to crash raw
+        # (TypeError: unhashable type: 'dict') from dict.fromkeys inside
+        # validate() itself, instead of a clean UnsupportedComposeError.
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry .* must be a string"):
+            depends_on({"depends_on": [{"db": {"condition": "service_healthy"}}]})
+
+    def test_list_form_string_entries_still_accepted(self) -> None:
+        assert depends_on({"depends_on": ["db", "keydb"]}) == {
+            "db": "service_started",
+            "keydb": "service_started",
+        }
+
 
 class TestHostnames:
     def test_collects_service_names_and_aliases(self, chats_compose: dict) -> None:
