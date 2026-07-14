@@ -27,6 +27,13 @@ from compose2pod.parsing import validate
 _DOCKER = shutil.which("docker")
 _CONFORMANCE_DIR = Path(__file__).parent
 
+# Every `over-reject` verdict this run, as `<test-id>` labels -- the test id already
+# carries the probed key and shape (matrix) or the corpus filename (corpus), so no
+# extra bookkeeping is needed to make an entry diffable against planning/deferred.md.
+# Stashed on `Config` (pytest's documented cross-hook slot) rather than a plain module
+# global so it is unambiguously one collector per pytest run, not one per import.
+_OVER_REJECTIONS: pytest.StashKey[list[str]] = pytest.StashKey()
+
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: "list[pytest.Item]") -> None:
@@ -34,6 +41,33 @@ def pytest_collection_modifyitems(items: "list[pytest.Item]") -> None:
     for item in items:
         if _CONFORMANCE_DIR in item.path.parents:
             item.add_marker(pytest.mark.conformance)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Create this run's over-rejection collector before any conformance test executes."""
+    config.stash[_OVER_REJECTIONS] = []
+
+
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    """Print every over-reject verdict collected this run.
+
+    Over-rejections never fail the build (see `assert_rule`); this is the harness's
+    only way of keeping them visible, per the promise in `planning/deferred.md` --
+    "The conformance harness reports these as `over-reject`, so they stay visible
+    rather than forgotten." Silent when nothing was collected, which is the normal
+    case for `just test-ci` (the conformance suite is deselected there and this hook
+    never runs a probe, so the list stays empty).
+    """
+    over_rejections = terminalreporter.config.stash.get(_OVER_REJECTIONS, [])
+    if not over_rejections:
+        return
+    terminalreporter.section("conformance: over-rejections (docker accepts, compose2pod refuses)")
+    for label in over_rejections:
+        terminalreporter.write_line(label)
+    terminalreporter.write_line(
+        f"{len(over_rejections)} over-rejection(s) -- catalogued limitations, not failures; "
+        "cross-check against planning/deferred.md"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -86,13 +120,15 @@ def _compose2pod_accepts(text: str, workdir: Path) -> bool:
 
 
 @pytest.fixture
-def assert_rule(tmp_path: Path) -> Callable[[dict[str, Any]], str]:
+def assert_rule(tmp_path: Path, request: pytest.FixtureRequest) -> Callable[[dict[str, Any]], str]:
     """Assert the one-way rule for one document; return its verdict as a label.
 
     Returns 'both-accept', 'both-reject', or 'over-reject' (Docker accepts, we
     refuse -- allowed, but only when catalogued as a known limitation in
-    planning/deferred.md). Raises AssertionError on the one forbidden
-    combination: Docker refuses and we accept.
+    planning/deferred.md; every 'over-reject' verdict is also recorded under the
+    calling test's id for `pytest_terminal_summary` to print at the end of the run).
+    Raises AssertionError on the one forbidden combination: Docker refuses and we
+    accept.
     """
 
     def _assert(compose: dict[str, Any]) -> str:
@@ -106,6 +142,7 @@ def assert_rule(tmp_path: Path) -> Callable[[dict[str, Any]], str]:
             return "both-accept"
         if not docker_ok:
             return "both-reject"
+        request.config.stash[_OVER_REJECTIONS].append(request.node.nodeid)
         return "over-reject"
 
     return _assert

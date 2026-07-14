@@ -29,6 +29,16 @@ SHAPES: dict[str, Any] = {
     "list-of-map": [{"a": 1}],
     "map-str": {"a": "b"},
     "nested-map": {"a": {"b": 1}},
+    # Reaches the quoted-boolean limitation (planning/deferred.md): Docker casts a
+    # YAML-1.1-style *string* on a boolean field ("true", "yes", "on", bare `yes`) but
+    # compose2pod's `_validate_bool` requires a real YAML boolean regardless of spelling.
+    # One spelling is enough to surface every boolean key as an over-reject -- the other
+    # accepted spellings ("yes", "on") would only repeat the identical compose2pod-side
+    # verdict (any non-bool is refused, independent of what the string says), so adding
+    # them would inflate the report without adding signal. The generic "str" shape above
+    # ("somevalue") does *not* reach this: Docker refuses an arbitrary string on a boolean
+    # key just as compose2pod does, so it never revealed the gap.
+    "quoted-bool": "true",
 }
 
 # `env_file` is the decision's carve-out: `docker compose config` rejects a
