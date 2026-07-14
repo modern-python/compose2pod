@@ -997,3 +997,54 @@ class TestNullContentBlocks:
     def test_absent_blocks_are_not_null_blocks(self) -> None:
         assert validate({"services": {"app": {"image": "x", "deploy": {"resources": {}}}}}) == []
         assert validate({"services": {"app": {"image": "x", "healthcheck": {"test": ["CMD", "true"]}}}}) == []
+
+
+def _doc(**svc: object) -> dict:
+    return {"services": {"app": {"image": "nginx", **svc}}}
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("restart", {"a": {"b": 1}}),
+        ("restart", 3),
+        ("restart", ["a"]),
+        ("tty", "yes-please"),
+        ("tty", 3),
+        ("stdin_open", []),
+        ("stop_signal", 3),
+        ("stop_signal", ["SIGTERM"]),
+        ("profiles", "dev"),
+        ("profiles", 3),
+        ("ports", 3),
+        ("ports", "8080:80"),
+        ("ports", ["abc"]),
+        ("stop_grace_period", 90),
+        ("stop_grace_period", "90"),
+        ("stop_grace_period", "abc"),
+    ],
+)
+def test_ignored_keys_are_still_shape_checked(key: str, value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match=key):
+        validate(_doc(**{key: value}))
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        # Docker validates none of these contents -- neither do we, or we would
+        # over-reject a file it runs.
+        ("restart", "banana"),
+        ("restart", "unless-stopped"),
+        ("stop_signal", "SIGKILL"),
+        ("tty", True),
+        ("stdin_open", False),
+        ("profiles", ["dev"]),
+        ("ports", ["8080:80/tcp"]),
+        ("ports", [{"target": 80, "published": "8080"}]),
+        ("stop_grace_period", "1m30s"),
+    ],
+)
+def test_ignored_keys_accept_valid_shapes(key: str, value: object) -> None:
+    warnings = validate(_doc(**{key: value}))
+    assert any(key in warning for warning in warnings)

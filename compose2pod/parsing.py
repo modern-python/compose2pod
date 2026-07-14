@@ -1,8 +1,9 @@
 """Validate a compose document against the supported subset."""
 
+from collections.abc import Callable
 from typing import Any
 
-from compose2pod import stores
+from compose2pod import stores, values
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, health_cmd, interval_seconds
@@ -12,7 +13,36 @@ from compose2pod.resources import validate_deploy
 
 
 SUPPORTED_SERVICE_KEYS = set(SERVICE_KEYS) | STRUCTURAL_KEYS
-IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty", "stop_signal", "stop_grace_period", "profiles"}
+
+
+def _validate_bool(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    if not isinstance(value, bool):
+        msg = f"service {name!r}: {key!r} must be a boolean"
+        raise UnsupportedComposeError(msg)
+
+
+def _validate_string_list(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        msg = f"service {name!r}: {key!r} must be a list of strings"
+        raise UnsupportedComposeError(msg)
+
+
+# Accepted but never emitted -- meaningless inside a single shared-namespace pod
+# (see architecture/supported-subset.md). Ignored at *emit* is not unchecked at
+# the *gate*: a key compose2pod does not use is still one Docker validates, and a
+# document carrying a malformed one is a document Docker will not run. Each value
+# is the shape validator; the content rules are Docker's own, measured -- it
+# accepts `restart: banana` and any `stop_signal` string, so neither is enumerated
+# here, or we would refuse a file it runs.
+IGNORED_SERVICE_KEYS: dict[str, Callable[[str, str, Any], None]] = {
+    "ports": values.validate_ports,
+    "restart": values.validate_string,
+    "stdin_open": _validate_bool,
+    "tty": _validate_bool,
+    "stop_signal": values.validate_string,
+    "stop_grace_period": values.validate_duration,
+    "profiles": _validate_string_list,
+}
 # The only service keys Docker tolerates an explicit null on, where it means
 # "not specified" (measured against `docker compose config`). Every other key
 # with a bare `key:` is refused -- see `_reject_null_values`.
@@ -213,6 +243,7 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
         if key.startswith("x-"):
             continue
         if key in IGNORED_SERVICE_KEYS:
+            IGNORED_SERVICE_KEYS[key](name, key, svc[key])
             warnings.append(f"service {name!r}: ignoring '{key}'")
         elif key not in SUPPORTED_SERVICE_KEYS:
             msg = f"service {name!r}: unsupported key '{key}'"
