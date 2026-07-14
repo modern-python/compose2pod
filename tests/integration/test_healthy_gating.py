@@ -12,7 +12,12 @@ def test_healthy_gating_reaches_postgres(run_pod: Callable[..., PodRun]) -> None
                 "image": "postgres:16-alpine",
                 "environment": ["POSTGRES_PASSWORD=pw"],
                 "healthcheck": {
-                    "test": ["CMD-SHELL", "pg_isready -U postgres"],
+                    # Probe TCP, not the Unix socket. The postgres image runs initdb, then a
+                    # temporary server with listen_addresses='' (socket only) for its init
+                    # scripts, and only then restarts on TCP -- so a bare `pg_isready -U postgres`
+                    # reports ready for ~0.5s before 127.0.0.1:5432 accepts anything, opening the
+                    # gate before `app` (which connects over TCP) can reach it.
+                    "test": ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1 -p 5432"],
                     "interval": "1s",
                     "timeout": "5s",
                     "retries": 30,
