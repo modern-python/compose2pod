@@ -252,9 +252,9 @@ slot (`architecture/glossary.md`).
     forms are declared in `extends.py` (`_STRUCTURAL_*`, `_SCALAR_FORM_KEYS`)
     and kept honest by a test asserting, for every mergeable key, that a form
     the gate refuses standalone is refused through `extends` too.
-    `extra_hosts`' list form is `host:ip` — colon-separated, split on the
-    *first* colon so an IPv6 address survives (`myhost:::1` →
-    `{myhost: ::1}`).
+    `extra_hosts`' list form divides on `=` or `:` (`keys.split_extra_host`,
+    the one reader the gate, the emitter and the merge all share), so an IPv6
+    address survives either way.
 - **Refused loudly:** cross-file `extends: {file: ..., service: ...}`; a
   bare-string (or any other non-mapping) `extends`; an unrecognized key
   under `extends` other than `service`; a non-string `service`; a `service`
@@ -287,8 +287,16 @@ flags. compose2pod hoists them onto `podman pod create` instead
 - **Value shapes:** `dns`/`dns_search`/`dns_opt` accept a string or list of
   strings; `sysctls` accepts a mapping (`key: value`) or a list of
   `"key=value"` strings, each value a string or number; `extra_hosts`
-  accepts a list (`- host:ip`) or mapping (`host: ip`) — an IPv6 address
-  value keeps its colons, unlike a plain host:ip pair. A `${VAR}` inside a
+  accepts a list or a mapping (`host: ip`). A list entry divides on `=`
+  (Compose's documented separator, `- somehost=162.242.195.82`) or on the
+  legacy `:` (`- somehost:162.242.195.82`) — `=` wins when both appear,
+  because an IPv6 address is itself full of colons and splitting on the first
+  one would tear it apart (`myhostv6=::1`); the colon form splits on the
+  *first* colon only, so `myhost:::1` works too. Every reader — the gate, the
+  emitter, and the `extends` merge — goes through the one shared
+  `keys.split_extra_host`, so they cannot disagree about where an entry
+  divides. An entry with neither separator has no address and raises, rather
+  than emitting a malformed `--add-host`. A `${VAR}` inside a
   value stays live at run time (see Variable interpolation, below) and
   counts toward `referenced_variables`.
 - **Aggregation is closure-scoped:** computed over the target's dependency

@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Expand, Token, extra_host_pairs, validate_map
+from compose2pod.keys import Expand, Token, extra_host_pairs, split_extra_host, validate_map
 
 
 _DNS_KEYS = {"dns": "--dns", "dns_search": "--dns-search", "dns_opt": "--dns-option"}
@@ -40,6 +40,21 @@ def _sysctl_pairs(name: str, value: Any) -> list[tuple[str, str]]:  # noqa: ANN4
     raise UnsupportedComposeError(msg)
 
 
+def _check_extra_host_separators(name: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    """Check each list-form entry actually divides into a host and an address.
+
+    An entry with neither separator has no address to emit, and would render as
+    a malformed `--add-host "no-separator:"`. The mapping form cannot have this
+    problem: its key and value are already separate.
+    """
+    if not isinstance(value, list):
+        return
+    for entry in value:
+        if "=" not in entry and ":" not in entry:
+            msg = f"service {name!r}: extra_hosts entries must be 'host=ip' or 'host:ip' (got {entry!r})"
+            raise UnsupportedComposeError(msg)
+
+
 def validate_pod_options(name: str, svc: dict[str, Any]) -> None:
     """Shape-check a service's pod-level dns/sysctls declarations."""
     for key in _DNS_KEYS:
@@ -49,6 +64,7 @@ def validate_pod_options(name: str, svc: dict[str, Any]) -> None:
         _sysctl_pairs(name, svc["sysctls"])
     if "extra_hosts" in svc:
         validate_map(name, "extra_hosts", svc["extra_hosts"])
+        _check_extra_host_separators(name, svc["extra_hosts"])
 
 
 def uses_pod_options(services: dict[str, Any]) -> bool:
@@ -105,7 +121,7 @@ def _add_host_flags(services: dict[str, Any], order: list[str], hosts: list[str]
         if "extra_hosts" not in svc:
             continue
         for entry in extra_host_pairs(svc["extra_hosts"]):
-            host, _sep, addr = str(entry).partition(":")
+            host, addr = split_extra_host(str(entry))
             if merged.get(host, addr) != addr:
                 msg = f"service {name!r}: conflicting host {host!r} ({merged[host]!r} vs {addr!r})"
                 raise UnsupportedComposeError(msg)

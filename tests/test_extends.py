@@ -491,14 +491,35 @@ class TestExtraHostsListFormMerge:
         }
         assert resolve_extends(doc)["services"]["web"]["extra_hosts"] == {"a": "1.1.1.1", "myhost": "::1"}
 
-    def test_entry_without_a_colon_is_refused(self) -> None:
+    def test_equals_separator_form_merges(self) -> None:
+        # Compose's documented separator, through the merge path.
+        doc = {
+            "services": {
+                "base": {"image": "x", "extra_hosts": {"a": "1.1.1.1"}},
+                "web": {"extends": {"service": "base"}, "extra_hosts": ["somehost=162.242.195.82"]},
+            }
+        }
+        merged = resolve_extends(doc)["services"]["web"]["extra_hosts"]
+        assert merged == {"a": "1.1.1.1", "somehost": "162.242.195.82"}
+
+    def test_equals_separator_keeps_ipv6(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "extra_hosts": {"a": "1.1.1.1"}},
+                "web": {"extends": {"service": "base"}, "extra_hosts": ["myhostv6=::1"]},
+            }
+        }
+        merged = resolve_extends(doc)["services"]["web"]["extra_hosts"]
+        assert merged == {"a": "1.1.1.1", "myhostv6": "::1"}
+
+    def test_entry_without_a_separator_is_refused(self) -> None:
         doc = {
             "services": {
                 "base": {"image": "x", "extra_hosts": {"a": "1.1.1.1"}},
                 "web": {"extends": {"service": "base"}, "extra_hosts": ["no-colon-here"]},
             }
         }
-        with pytest.raises(UnsupportedComposeError, match="extra_hosts entries must be 'host:ip' strings"):
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts entries must be 'host=ip' or 'host:ip'"):
             resolve_extends(doc)
 
     def test_non_string_entry_is_refused(self) -> None:
@@ -508,7 +529,7 @@ class TestExtraHostsListFormMerge:
                 "web": {"extends": {"service": "base"}, "extra_hosts": [5]},
             }
         }
-        with pytest.raises(UnsupportedComposeError, match="extra_hosts entries must be 'host:ip' strings"):
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts entries must be 'host=ip' or 'host:ip'"):
             resolve_extends(doc)
 
 

@@ -163,3 +163,33 @@ class TestAddHostFlags:
     def test_non_closure_service_extra_hosts_ignored(self) -> None:
         services = {"a": {"image": "x"}, "extra": {"extra_hosts": {"db": "10.0.0.5"}}}
         assert pod_create_flags(services, ["a"], []) == []
+
+
+class TestExtraHostsSeparators:
+    """Compose documents 'host=ip'; the legacy 'host:ip' also works. Both must."""
+
+    def _flags(self, entries: object) -> list[str]:
+        services = {"a": {"image": "x", "extra_hosts": entries}}
+        return [t.value if isinstance(t, Expand) else t for t in pod_create_flags(services, ["a"], [])]
+
+    def test_equals_separator_is_split_correctly(self) -> None:
+        # Used to emit the whole string as the hostname: 'somehost=1.2.3.4:'
+        assert self._flags(["somehost=162.242.195.82"]) == ["--add-host", "somehost:162.242.195.82"]
+
+    def test_colon_separator_still_works(self) -> None:
+        assert self._flags(["somehost:162.242.195.82"]) == ["--add-host", "somehost:162.242.195.82"]
+
+    def test_equals_separator_keeps_ipv6(self) -> None:
+        # '=' wins over ':' precisely because an IPv6 address is full of colons.
+        assert self._flags(["myhostv6=::1"]) == ["--add-host", "myhostv6:::1"]
+
+    def test_colon_separator_keeps_ipv6(self) -> None:
+        assert self._flags(["myhost:::1"]) == ["--add-host", "myhost:::1"]
+
+    def test_mapping_form_is_unchanged(self) -> None:
+        assert self._flags({"somehost": "162.242.195.82"}) == ["--add-host", "somehost:162.242.195.82"]
+
+    def test_entry_with_no_separator_is_refused(self) -> None:
+        # Used to be accepted and emit the malformed '--add-host "no-separator:"'
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts entries must be 'host=ip' or 'host:ip'"):
+            validate_pod_options("a", {"image": "x", "extra_hosts": ["no-separator"]})
