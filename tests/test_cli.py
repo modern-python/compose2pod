@@ -245,22 +245,22 @@ class TestMain:
         yaml_text = (
             "services:\n"
             "  base:\n    image: j\n    environment:\n      A: '1'\n"
-            "  app:\n    extends: {service: base}\n    environment:\n      on: '2'\n"
+            "  app:\n    extends: {service: base}\n    environment:\n      3306: '2'\n"
         )
         rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
         assert rc == EXIT_USAGE_ERROR
-        assert "key True must be a string" in capsys.readouterr().err
+        assert "key 3306 must be a string" in capsys.readouterr().err
 
     def test_non_string_service_name_rejected_cleanly(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # F2: a non-string service name reached --add-host/--name verbatim
-        # (e.g. `podman run --name test-pod-True ...`) instead of being
-        # rejected at the gate.
-        yaml_text = "services:\n  app:\n    image: i\n  on:\n    image: j\n"
+        # A non-string service name reached --add-host/--name verbatim
+        # (e.g. `podman run --name test-pod-3306 ...`) instead of being
+        # rejected at the gate. Docker refuses a non-string key too.
+        yaml_text = "services:\n  app:\n    image: i\n  3306:\n    image: j\n"
         rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
         assert rc == EXIT_USAGE_ERROR
-        assert "compose document.services: key True must be a string" in capsys.readouterr().err
+        assert "compose document.services: key 3306 must be a string" in capsys.readouterr().err
 
     def test_yaml_anchor_extension_fields_convert(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
@@ -280,11 +280,11 @@ class TestMain:
         # *source* lived in a skipped x- block lands in the service body as
         # ordinary content once merged -- it must still be swept there.
         yaml_text = (
-            "x-common: &common\n  environment:\n    on: 1\nservices:\n  app:\n    image: alpine\n    <<: *common\n"
+            "x-common: &common\n  environment:\n    3306: 1\nservices:\n  app:\n    image: alpine\n    <<: *common\n"
         )
         rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
         assert rc == EXIT_USAGE_ERROR
-        assert "key True must be a string" in capsys.readouterr().err
+        assert "key 3306 must be a string" in capsys.readouterr().err
 
 
 class TestModuleEntrypoint:
@@ -299,3 +299,50 @@ class TestModuleEntrypoint:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.startswith("#!/bin/sh")
+
+
+class TestYaml12Booleans:
+    """`on`/`off`/`yes`/`no` are strings, as they are for `docker compose`.
+
+    PyYAML implements YAML 1.1, where each is a boolean. Docker parses YAML 1.2,
+    where each is an ordinary string -- so a bare `on` must survive as the string
+    it was written as, both as a key and as a value. `true`/`false` are booleans
+    in both schemas and stay so.
+    """
+
+    def test_yaml_11_booleans_load_as_strings(self) -> None:
+        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+            "k:\n  a: on\n  b: off\n  c: yes\n  d: no\n"
+        )
+        assert loaded["k"] == {"a": "on", "b": "off", "c": "yes", "d": "no"}
+
+    def test_real_booleans_still_load_as_booleans(self) -> None:
+        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+            "k:\n  t: true\n  f: false\n  T: True\n  F: FALSE\n"
+        )
+        assert loaded["k"] == {"t": True, "f": False, "T": True, "F": False}
+
+    def test_on_as_a_key_stays_a_string(self) -> None:
+        # PyYAML 1.1 resolves this key to the bool True, and the gate's
+        # string-key rule then refuses a document `docker compose` runs fine.
+        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+            "environment:\n  on: 1\n  off: 2\n"
+        )
+        assert list(loaded["environment"]) == ["on", "off"]
+
+    def test_value_on_reaches_the_script_as_on(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Used to emit -e "SSL=true": the app read "true" where its author wrote `on`.
+        compose = "services:\n  app:\n    image: alpine\n    environment:\n      SSL: on\n      DEBUG: yes\n"
+        assert run_main(compose, ["--target", "app", "--image", "ci:1", "--format", "yaml"], monkeypatch) == 0
+        script = capsys.readouterr().out
+        assert '-e "SSL=on"' in script
+        assert '-e "DEBUG=yes"' in script
+
+    def test_on_as_a_key_is_accepted_end_to_end(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        compose = "services:\n  app:\n    image: alpine\n    environment:\n      on: 1\n"
+        assert run_main(compose, ["--target", "app", "--image", "ci:1", "--format", "yaml"], monkeypatch) == 0
+        assert '-e "on=1"' in capsys.readouterr().out

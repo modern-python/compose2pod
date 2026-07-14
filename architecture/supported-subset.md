@@ -59,16 +59,22 @@ blocks (top-level and per-service — user payload by design, though the `x-`
 key itself is still checked); `build`'s own contents (never read — see
 `build`, below); and the ignored top-level `networks`/`volumes` blocks.
 
-Rejecting a non-string key is a deliberate divergence from Docker, for keys
-that *are* swept: `environment: {3306: db}` is valid Compose and Docker
-accepts it, but compose2pod refuses it. Docker parses Compose as YAML 1.2,
-where a bare `3306`/`on`/`off` stays the string it looks like, so Docker
-never observes a non-string key at all; a boolean or int *key* has no
-single correct string form to normalize to the way a boolean *value* does
-(`DEBUG: true` → `"true"`, matching Docker — see `_render_scalar`, below) —
-normalizing would give `true=1` where Docker gives `on=1`. Docker also
-accepts a non-string key in `build`'s `args` or a top-level `volumes`
-block's `driver_opts`; compose2pod, never reading either, accepts them too.
+Rejecting a non-string key **matches Docker**, which refuses one too
+(`non-string key in services.app.environment: 3306`). So `environment:
+{3306: db}` and `{true: x}` are refused by both.
+
+What Docker does *not* see is a bare `on:` / `off:` / `yes:` / `no:` as a
+non-string key, because it parses **YAML 1.2**, where each of those is an
+ordinary string. PyYAML implements YAML **1.1**, where each is a *boolean* —
+so the CLI loads YAML with a 1.2-style boolean resolver (`_build_yaml_loader`,
+`compose2pod/cli.py`), and only `true`/`false` resolve as booleans. Without it,
+`environment: {on: 1}` would arrive as the key `True` and be refused — a file
+Docker runs — and the *value* `SSL: on` would reach the container as `SSL=true`
+rather than `SSL=on`. The spelling cannot be recovered downstream: once the
+loader has resolved `on` to `True`, `"on"` is gone.
+
+A genuine boolean *value* still renders lowercase (`DEBUG: true` → `DEBUG=true`,
+see `_render_scalar`), which is what Docker renders too.
 
 The rejection runs up front, not key by key, because some downstream
 readers crash raw on a non-string key (`sorted()`, `str.startswith`, the
