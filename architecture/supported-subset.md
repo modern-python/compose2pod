@@ -17,6 +17,17 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 - **Extension fields:** any key prefixed `x-` is accepted and ignored
   silently, per the Compose spec. This is what lets a document hold shared
   config in a top-level `x-*` block for reuse via YAML anchors.
+- **Mapping keys must be strings.** PyYAML routinely produces a non-string
+  key — a bare `3:` parses as an int, and under YAML 1.1 a bare
+  `on:`/`off:`/`yes:`/`no:` parses as a bool. Every mapping-key consumer
+  downstream (`sorted()`, `str.startswith`, the secret/config name regex)
+  assumes `str` and crashes raw otherwise. `require_string_keys`
+  (`compose2pod/keys.py`) is the one shared check the gate runs before
+  reading any mapping's keys — applied to the top-level document itself,
+  each service, each service's `healthcheck`, and each top-level
+  `secrets`/`configs` definition block — so a non-string key raises
+  `UnsupportedComposeError` naming the offending key, regardless of which of
+  those four mappings it turned up in.
 - Everything else raises.
 
 ## Service keys
@@ -46,10 +57,15 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   `security_opt`, `devices`) share one validator, `keys._validate_list`; the
   map-shaped ones (`labels`, `annotations`) and the pod-level `extra_hosts`
   share `keys.validate_map`. Both require every list element to be a string
-  and every mapping value to be a string, number, or null — a non-string
-  element or a non-scalar value (e.g. `cap_add: [{NET_ADMIN: true}]`, a list
-  entry that is itself a mapping) used to be accepted and `str()`'d/`repr()`'d
-  straight into the flag value instead of being rejected.
+  and every mapping value to be a string, number, boolean, or null — a
+  non-string element or a non-scalar value (e.g. `cap_add: [{NET_ADMIN:
+  true}]`, a list entry that is itself a mapping) is rejected rather than
+  `str()`'d/`repr()`'d straight into the flag value. A boolean mapping value
+  (`labels: {enabled: true}`) is deliberately accepted, not rejected: it is
+  normalized the way `docker compose config` normalizes it, rendered as the
+  lowercase string `true`/`false` (`keys._render_scalar`, shared by
+  `key_value_pairs` and `extra_host_pairs`) rather than Python's
+  `str(True) == "True"`.
 - **`image`:** a string; `image_for` (`compose2pod/emit.py`) reads it verbatim
   when the service has no `build`. A service must set at least one of `image`
   or `build`; a service with neither, or a non-string `image` while `build` is
@@ -73,11 +89,14 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   form `- KEY`.
   The key itself must be a list or mapping; any other shape (e.g. a bare
   string) raises at the gate. List elements must themselves be strings, and
-  mapping values must be a string, number, or null; the commonest violation
-  is the classic YAML slip of mixing list and map form
-  (`environment: [{KEY: value}]` instead of `- KEY=value`), which used to be
-  accepted and emit the literal `-e "{'KEY': 'value'}"` — both rules are
-  enforced by the shared `keys.validate_map` (`compose2pod/keys.py`).
+  mapping values must be a string, number, boolean, or null; the commonest
+  violation is the classic YAML slip of mixing list and map form
+  (`environment: [{KEY: value}]` instead of `- KEY=value`), rejected rather
+  than emitting the literal `-e "{'KEY': 'value'}"` — both rules are
+  enforced by the shared `keys.validate_map` (`compose2pod/keys.py`). A
+  boolean mapping value (`DEBUG: true`) is valid Compose and is normalized
+  like Docker: emitted as `-e DEBUG=true` (lowercase), not the Python repr
+  `-e DEBUG=True`.
 - **`env_file`:** a string or a list. Any other shape raises
   (`_validate_env_file`, `compose2pod/parsing.py`). Each list element must
   itself be a string; a non-string element (e.g. `env_file: [5]`) raises the
@@ -126,7 +145,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   `--ulimit nproc=65535`, podman sets soft = hard) or a `{soft, hard}` mapping
   (`nofile: {soft, hard}` → `--ulimit nofile=soft:hard`). A mapping value must
   have exactly `soft` and `hard`, each an int or string; other shapes are
-  rejected. (`sysctls`, by
+  rejected. A boolean scalar or a boolean `soft`/`hard` bound is rejected too
+  — `bool` is technically an `int` in Python, so a naive `isinstance(spec,
+  int | str)` would otherwise let one through and emit the literal
+  `--ulimit nofile=True`. Unlike `environment`'s boolean (normalized to a
+  string, see above), a boolean ulimit has no sensible Docker-equivalent
+  normalization, so it is rejected rather than coerced. (`sysctls`, by
   contrast, is pod-level rather than per-container — see the
   Pod-level options section below.)
 - **`labels`:** list (`- KEY=value` / `- KEY`) or mapping (`KEY: value` / `KEY:`),
@@ -217,10 +241,19 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   list-form `environment`/`depends_on`, or a sequence-concatenate key that is
   neither a list nor a scalar string.
 - **Divergences from Compose:**
-  - Only `environment` and `depends_on` accept list form for the
-    mapping-merge; the other mapping-merge keys (`labels`, `annotations`,
-    `extra_hosts`, `ulimits`, `healthcheck`) in list form on a merged side are
-    refused as an incompatible form rather than silently coerced.
+  - `environment` and `depends_on` accept list form directly in extends.py's
+    own merge (`_as_mapping`, `compose2pod/extends.py`); `extra_hosts` and
+    `healthcheck` do not — list form on a merged side is refused as an
+    incompatible form for those two. `labels`, `annotations`, and `ulimits`
+    instead route through their own `SERVICE_KEYS` merge policy
+    (`_merge_map`, `compose2pod/keys.py`), which uses the same
+    list-accepting `pairs_to_mapping` normalizer that `environment` uses —
+    so list form on a merged side *is* coerced to a mapping for these three,
+    not refused. Every one of these normalizers rejects a non-string list
+    element (e.g. `labels: [{BAD: "x"}]`) rather than laundering it into a
+    mapping key via `str()`: `pairs_to_mapping` (`compose2pod/keys.py`) is
+    the single function both paths share, so this rule holds identically
+    whichever merge route a key takes.
   - Short-form `volumes` are concatenated rather than merged by target path;
     podman resolves duplicate mounts at run time rather than compose2pod
     deduplicating them at generation time.
@@ -614,7 +647,12 @@ short-form list element must itself be a string; a non-string element (e.g.
 `depends_on: [{db: {condition: service_healthy}}]`, the same list/map YAML
 slip that trips up `environment`/`command`) raises the same way, instead of
 crashing raw (`TypeError: unhashable type`) from inside `validate()` itself
-when the list was passed to `dict.fromkeys`.
+when the list was passed to `dict.fromkeys`. `extends.py`'s own
+list-to-mapping normalization (`_as_mapping`, used when merging a
+list-form `depends_on` across `extends`) enforces the identical
+element-must-be-a-string check before `validate()` ever runs — `extends`
+resolution happens ahead of the gate (see Extends, above), so without its
+own check this same malformed input crashed raw there instead.
 
 ## YAML anchors and merge keys
 
