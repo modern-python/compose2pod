@@ -104,8 +104,13 @@ def _as_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa: ANN
     raise UnsupportedComposeError(msg)
 
 
-def _merge(base: dict[str, Any], local: dict[str, Any], name: str) -> dict[str, Any]:
-    """Merge `local` onto `base` per key category: mapping-merge, sequence-concat, else override."""
+def _merge(base: dict[str, Any], local: dict[str, Any], name: str, base_name: str) -> dict[str, Any]:
+    """Merge `local` onto `base` per key category: mapping-merge, sequence-concat, else override.
+
+    `name` is the extending service, `base_name` the one it extends: each side's
+    failures are reported against the service the offending value actually
+    belongs to.
+    """
     merged: dict[str, Any] = dict(base)
     for key, local_val in local.items():
         spec = SERVICE_KEYS.get(key)
@@ -118,13 +123,13 @@ def _merge(base: dict[str, Any], local: dict[str, Any], name: str) -> dict[str, 
             # through the gate. Checking each side with the key's own validator
             # first derives the merge's accepted forms from the gate's, so the
             # two cannot drift apart.
-            spec.validate(name, key, base[key])
+            spec.validate(base_name, key, base[key])
             spec.validate(name, key, local_val)
             merged[key] = spec.merge(name, key, base[key], local_val)
         elif key in base and key in _STRUCTURAL_MERGE_KEYS:
-            merged[key] = {**_as_mapping(name, key, base[key]), **_as_mapping(name, key, local_val)}
+            merged[key] = {**_as_mapping(base_name, key, base[key]), **_as_mapping(name, key, local_val)}
         elif key in base and key in _STRUCTURAL_CONCAT_KEYS:
-            merged[key] = _as_concat_list(name, key, base[key]) + _as_concat_list(name, key, local_val)
+            merged[key] = _as_concat_list(base_name, key, base[key]) + _as_concat_list(name, key, local_val)
         else:
             merged[key] = local_val
     return merged
@@ -167,7 +172,7 @@ def resolve_extends(compose: Any) -> Any:  # noqa: ANN401 - Compose values are u
         if not isinstance(base, dict):
             resolved[name] = local
             return local
-        merged = _merge(base, local, name)
+        merged = _merge(base, local, name, base_name)
         resolved[name] = merged
         return merged
 

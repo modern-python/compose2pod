@@ -244,9 +244,13 @@ slot (`architecture/glossary.md`).
     refused standalone. So `ulimits` and `healthcheck` (no list form) refuse a
     list, and every list-only key (`cap_add`, `cap_drop`, `security_opt`,
     `devices`, `group_add`, `volumes`, `secrets`, `configs`) refuses a bare
-    scalar — exactly as each does outside `extends`. The accepted forms are
-    read from each key's own validator (`spec.validate` runs on both sides
-    before `spec.merge`), so the merge policy cannot drift from the gate.
+    scalar — exactly as each does outside `extends`. For a **registry** key the
+    accepted forms are read from the key's own validator (`spec.validate` runs
+    on both sides before `spec.merge`), so those cannot drift from the gate by
+    construction. The **structural** keys have no `KeySpec`, so their accepted
+    forms are declared in `extends.py` (`_STRUCTURAL_*`, `_SCALAR_FORM_KEYS`)
+    and kept honest by a test asserting, for every mergeable key, that a form
+    the gate refuses standalone is refused through `extends` too.
     `extra_hosts`' list form is `host:ip` — colon-separated, split on the
     *first* colon so an IPv6 address survives (`myhost:::1` →
     `{myhost: ::1}`).
@@ -254,9 +258,12 @@ slot (`architecture/glossary.md`).
   bare-string (or any other non-mapping) `extends`; an unrecognized key
   under `extends` other than `service`; a non-string `service`; a `service`
   naming one that doesn't exist; and a merge across incompatible forms — a
-  side whose form that key does not have, which raises with the key's own
-  validator message (`'cap_add' must be a list`), the same message the value
-  produces standalone.
+  side whose form that key does not have. A registry key raises with its own
+  validator's message (`'cap_add' must be a list`), the same message the value
+  produces standalone; a structural key raises `cannot merge '<key>' across
+  incompatible forms`. Either way the error names the service the offending
+  value belongs to — the base, when it is the base's value that is malformed,
+  not the service extending it.
 - **Divergences from Compose:** short-form `volumes` are concatenated rather
   than merged by target path; podman resolves duplicate mounts at run time.
   Referenced resources
