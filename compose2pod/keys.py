@@ -260,13 +260,20 @@ def extra_host_entries(value: list[Any] | dict[str, Any]) -> list[tuple[str, str
 
 
 def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
-    if value is not None and (not isinstance(value, str) or value not in PULL_POLICY_MAP):
+    # No `value is None` escape, matching `_validate_ulimits`: the gate refuses a
+    # null `pull_policy:` outright (`parsing._reject_null_values`), as Docker
+    # does, so a null reaching a *shape* validator is a wrong shape like any
+    # other. Null policy lives in one place -- the gate -- not in each validator.
+    if not isinstance(value, str) or value not in PULL_POLICY_MAP:
         allowed = "/".join(PULL_POLICY_MAP)
         msg = f"service {name!r}: unsupported {key} {value!r} (use {allowed})"
         raise UnsupportedComposeError(msg)
 
 
 def _emit_pull_policy(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped
+    # The emitters stay null-tolerant as defense-in-depth: they are reachable
+    # from `run_flags` without the gate, and `PULL_POLICY_MAP[None]` would be a
+    # raw KeyError rather than a clean refusal.
     return ["--pull", PULL_POLICY_MAP[value]] if value is not None else []
 
 

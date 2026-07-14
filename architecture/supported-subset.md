@@ -279,10 +279,11 @@ slot (`architecture/glossary.md`).
   null is a *reset*:** Docker erases the inherited value so the image's own
   default runs, and so does compose2pod. (`deploy` tolerates a null and
   inherits, so the reset set is not simply "the keys that allow a null".)
-  A null in the *base* cannot be observed in a document that passes the gate —
-  the base is itself a service, so `_reject_null_values` refuses its null
-  first, exactly as Docker does; the merge handles it only to report the error
-  against the base rather than the service extending it.
+  A null in the *base* means "not specified" the same way, so the extending
+  service's value wins. This is reachable for exactly the three keys the gate
+  allows a null on: a base with `command:` and a child that sets one gives the
+  child's, as Docker does. For every other key the base's null is refused by
+  the gate first (the base is a service too), so the merge never sees it.
 - **Divergences from Compose:** short-form `volumes` are concatenated rather
   than merged by target path; podman resolves duplicate mounts at run time.
   Referenced resources
