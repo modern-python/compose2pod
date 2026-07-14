@@ -3,6 +3,7 @@
 import argparse
 import contextlib
 import json
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -19,12 +20,41 @@ with contextlib.suppress(ImportError):  # the optional [yaml] extra is not insta
     import yaml as _yaml
 
 
+# YAML 1.2's boolean set: `true`/`false` only. PyYAML implements YAML *1.1*,
+# where a bare `on`/`off`/`yes`/`no` is also a boolean -- but Docker's parser is
+# YAML 1.2, so to `docker compose` each of those is an ordinary string. The
+# difference is not cosmetic: `SSL: on` reaches the container as `SSL=true`
+# instead of `SSL=on`, and `on:` used as a *key* resolves to the bool `True` and
+# is then refused by the string-key rule -- rejecting a file Docker runs.
+#
+# It can only be fixed here. Once PyYAML has resolved `on` to `True`, the
+# spelling is gone and no downstream pass can recover it.
+_YAML_12_BOOL = r"^(?:true|True|TRUE|false|False|FALSE)$"
+
+
+def _build_yaml_loader(yaml_module: ModuleType) -> type:
+    """Build a SafeLoader that resolves booleans the way YAML 1.2 (and so Docker) does."""
+
+    class Loader(yaml_module.SafeLoader):
+        pass
+
+    # Drop PyYAML's YAML 1.1 bool resolver, then install the 1.2 one. Rebuilding
+    # the table is what removes `on`/`off`/`yes`/`no` from the boolean set; they
+    # fall through to the plain-string resolver.
+    Loader.yaml_implicit_resolvers = {
+        first_char: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"]
+        for first_char, resolvers in yaml_module.SafeLoader.yaml_implicit_resolvers.items()
+    }
+    Loader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(_YAML_12_BOOL), list("tTfF"))
+    return Loader
+
+
 def _load_yaml(text: str) -> Any:  # noqa: ANN401 - returns arbitrary parsed compose data
     if _yaml is None:
         msg = "YAML input requires the 'yaml' extra: pip install compose2pod[yaml] (or pipe JSON via yq)"
         raise UnsupportedComposeError(msg)
     try:
-        return _yaml.safe_load(text)
+        return _yaml.load(text, Loader=_build_yaml_loader(_yaml))  # noqa: S506 - SafeLoader subclass, not full load
     except _yaml.YAMLError as error:
         msg = f"invalid YAML: {error}"
         raise UnsupportedComposeError(msg) from error
