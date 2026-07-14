@@ -165,6 +165,16 @@ class TestResolveExtends:
         with pytest.raises(UnsupportedComposeError, match="unsupported 'extends' keys"):
             resolve_extends(doc)
 
+    def test_unknown_extends_keys_with_mixed_types_do_not_crash_raw(self) -> None:
+        # `sorted(unknown)` used to crash raw -- TypeError: '<' not supported
+        # between instances of 'str' and 'int' -- once `unknown` held keys of
+        # more than one incomparable type (a non-string key mixed with a
+        # string one is exactly what a hostile/malformed 'extends' mapping
+        # can produce, since 'extends' is read ahead of validate()'s gate).
+        doc = {"services": {"web": {"extends": {"service": "base", 1: "x", "y": "z"}}, "base": {"image": "x"}}}
+        with pytest.raises(UnsupportedComposeError, match="unsupported 'extends' keys"):
+            resolve_extends(doc)
+
     def test_non_string_service_is_refused(self) -> None:
         doc = {"services": {"web": {"extends": {"service": 5}}}}
         with pytest.raises(UnsupportedComposeError, match="extends 'service' must be a string"):

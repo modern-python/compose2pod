@@ -24,7 +24,13 @@ def _extends_target(name: str, ext: Any) -> str:  # noqa: ANN401 - Compose value
         raise UnsupportedComposeError(msg)
     unknown = set(ext) - {"service"}
     if unknown:
-        msg = f"service {name!r}: unsupported 'extends' keys {sorted(unknown)}"
+        # sorted(unknown) would crash raw (TypeError: '<' not supported...)
+        # if unknown holds keys of more than one incomparable type -- e.g. an
+        # int key alongside a str key, which a hostile 'extends' mapping can
+        # freely produce since this runs ahead of validate()'s gate. Sorting
+        # by repr keeps the message deterministic without assuming key types
+        # are mutually comparable.
+        msg = f"service {name!r}: unsupported 'extends' keys {sorted(unknown, key=repr)}"
         raise UnsupportedComposeError(msg)
     service = ext.get("service")
     if not isinstance(service, str):
