@@ -260,11 +260,11 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     project this traversal, so a library caller can reach either one without
     ever calling `validate()` first. Validating `compose` here -- and nowhere
     else -- makes both safe by construction: this is the one place a caller
-    cannot route around. `cli.py` also calls `validate()` itself (to print
-    warnings before emitting), so this repeats that pass; `validate()` only
-    reads `compose` and returns warnings, so the repeat is side-effect-free.
-    The warnings from this pass have no channel to reach a caller here --
-    `cli.py` already printed its own copy -- so they are discarded on purpose.
+    cannot route around. `cli.py` also calls `validate()` itself (to surface
+    warnings), so this repeats that pass; `validate()` only reads `compose`
+    and returns warnings, so the repeat is side-effect-free. The warnings from
+    this pass have no channel to reach a caller here -- `cli.py` surfaces its
+    own copy from its own call -- so they are discarded on purpose.
     """
     _validate_options(options)
     _ = validate(compose)  # re-validate; warnings already surfaced by the caller, if any

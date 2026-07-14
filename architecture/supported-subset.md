@@ -6,12 +6,12 @@ loudly rather than silently dropping behavior. `validate()`
 warns (ignored, behavior-neutral inside a single pod) or raises
 `UnsupportedComposeError`.
 
-`emit_script()` and `referenced_variables()` (`compose2pod/emit.py`) are both
-public exports, and both project the same internal `_plan` traversal; `_plan`
-calls `validate()` itself, before reading anything else out of `compose`, and
-discards the returned warnings (the CLI already printed its own copy from its
-own `validate()` call — see Variable interpolation, below, for exactly which
-notes/warnings the CLI prints and when). A library caller therefore cannot
+`emit_script()` (exported from `compose2pod`) and `referenced_variables()`
+(public as `compose2pod.emit.referenced_variables`) both project the same
+internal `_plan` traversal; `_plan` calls `validate()` itself, before reading
+anything else out of `compose`, and discards the returned warnings (the CLI
+surfaces its own copy from its own `validate()` call). A library caller
+therefore cannot
 reach either public entry point with a document `validate()` would reject —
 calling `emit_script()`/`referenced_variables()` directly, without calling
 `validate()` first, is exactly as safe as the CLI path, by construction of

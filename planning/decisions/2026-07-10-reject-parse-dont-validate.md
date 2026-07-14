@@ -37,8 +37,10 @@ written, and stayed false through seven further review rounds that each
 hardened another shape-reading function and re-asserted it — because every
 round hardened callers reached *through* `validate()`, and none checked
 whether `validate()` itself was reachable from `emit_script`/
-`referenced_variables`'s own call graph. It was not: both are public
-exports (`compose2pod.__all__`) a library caller can call directly, and
+`referenced_variables`'s own call graph. It was not: `emit_script` is
+exported from `compose2pod`, `referenced_variables` is public as
+`compose2pod.emit.referenced_variables`, and a library caller can call
+either directly, and
 doing so on a malformed document reached a raw `KeyError`/`TypeError`, or
 worse, silently emitted a corrupted flag value (e.g. `--user "{'a': 1}"`
 for `user: {a: 1}`) — identical to what this decision assumed was already
