@@ -201,3 +201,57 @@ class TestMergeCallables:
 
     def test_pairs_to_mapping_accepts_string_list_elements(self) -> None:
         assert pairs_to_mapping("web", "labels", ["team=core", "BARE"]) == {"team": "core", "BARE": None}
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "mem_limit",
+        "memswap_limit",
+        "mem_reservation",
+        "shm_size",
+        "cpus",
+        "cpu_shares",
+        "cpu_quota",
+        "cpu_period",
+        "pids_limit",
+    ],
+)
+@pytest.mark.parametrize("value", ["", "somevalue"])
+def test_resource_keys_reject_non_numeric_strings(key: str, value: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match=key):
+        SERVICE_KEYS[key].validate("app", key, value)
+
+
+@pytest.mark.parametrize("key", ["mem_limit", "shm_size"])
+@pytest.mark.parametrize("value", [512, "512m", "1gb", "${MEM}"])
+def test_size_keys_accept(key: str, value: object) -> None:
+    SERVICE_KEYS[key].validate("app", key, value)
+
+
+def test_cpuset_requires_a_string() -> None:
+    SERVICE_KEYS["cpuset"].validate("app", "cpuset", "0-3")
+    for bad in (0, 2, 1.5):
+        with pytest.raises(UnsupportedComposeError, match="cpuset"):
+            SERVICE_KEYS["cpuset"].validate("app", "cpuset", bad)
+
+
+# Measured against `docker compose config` v5.1.2: mem_reservation is grouped with
+# mem_swappiness/oom_score_adj in the design as "reject a float", but a native float is
+# rejected while a size *string* (even "1.5" or "512m") is still accepted -- the
+# int-only rule binds the native-numeric branch only, which is exactly what
+# validate_size's allow_float=False already does (its string branch is ungated).
+@pytest.mark.parametrize("key", ["oom_score_adj", "mem_swappiness", "mem_reservation"])
+def test_int_only_keys_reject_float(key: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match=key):
+        SERVICE_KEYS[key].validate("app", key, 1.5)
+    SERVICE_KEYS[key].validate("app", key, 60)
+
+
+def test_ulimits_scalar_bound_rejects_non_integer() -> None:
+    with pytest.raises(UnsupportedComposeError, match="nofile"):
+        SERVICE_KEYS["ulimits"].validate("app", "ulimits", {"nofile": "abc"})
+    with pytest.raises(UnsupportedComposeError, match="nofile"):
+        SERVICE_KEYS["ulimits"].validate("app", "ulimits", {"nofile": 1.5})
+    SERVICE_KEYS["ulimits"].validate("app", "ulimits", {"nofile": 65535})
+    SERVICE_KEYS["ulimits"].validate("app", "ulimits", {"nofile": "65535"})

@@ -52,11 +52,13 @@ class TestValidate:
         assert validate({"services": {"app": {"image": "x"}}}) == []
 
     def test_mem_limit_bool_value_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match=r"'mem_limit' must be a number or string"):
+        # mem_limit now enforces the size grammar (Task 2), not "any number or
+        # string" -- the message changed, but a bool is still refused either way.
+        with pytest.raises(UnsupportedComposeError, match=r"'mem_limit' must be a size"):
             validate({"services": {"app": {"image": "x", "mem_limit": True}}})
 
     def test_cpus_list_value_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match=r"'cpus' must be a number or string"):
+        with pytest.raises(UnsupportedComposeError, match=r"'cpus' must be a number"):
             validate({"services": {"app": {"image": "x", "cpus": [1]}}})
 
     def test_unsupported_service_key_raises(self) -> None:
@@ -332,23 +334,23 @@ class TestValidate:
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": 1024}}}}})
 
     def test_ulimits_list_valued_limit_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="must be an int or a soft/hard mapping"):
+        # A scalar ulimit bound now goes through values.validate_integer (Task 2), so the
+        # message is "must be an integer" rather than the old "int or a soft/hard mapping".
+        with pytest.raises(UnsupportedComposeError, match=r"'nofile'.*must be an integer"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": [1, 2]}}}})
 
     def test_ulimits_non_scalar_soft_hard_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
+        with pytest.raises(UnsupportedComposeError, match=r"'soft'.*must be an integer"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": [1, 2], "hard": 3}}}}})
 
     def test_ulimits_boolean_scalar_raises(self) -> None:
-        # bool IS an int in Python, so isinstance(spec, int | str) let it
-        # through and emit rendered the literal --ulimit "nofile=True". A
-        # boolean ulimit is meaningless -- unlike environment's bool (which
-        # Docker normalizes), there is no sensible ulimit normalization.
-        with pytest.raises(UnsupportedComposeError, match="must be an int or a soft/hard mapping"):
+        # bool IS an int in Python; values.validate_integer's _is_int excludes it
+        # the same way the old isinstance(spec, int | str) guard used to.
+        with pytest.raises(UnsupportedComposeError, match=r"'nofile'.*must be an integer"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": True}}}})
 
     def test_ulimits_boolean_soft_hard_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
+        with pytest.raises(UnsupportedComposeError, match=r"'soft'.*must be an integer"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": True, "hard": 100}}}}})
 
     def test_non_mapping_healthcheck_raises(self) -> None:

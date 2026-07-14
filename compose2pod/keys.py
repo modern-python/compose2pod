@@ -4,6 +4,7 @@ import dataclasses
 from collections.abc import Callable
 from typing import Any
 
+from compose2pod import values
 from compose2pod.exceptions import UnsupportedComposeError  # module-level; keys must not import emit/parsing
 
 
@@ -107,12 +108,6 @@ def require_string_keys(where: str, mapping: dict[Any, Any]) -> None:
             raise UnsupportedComposeError(msg)
 
 
-def _validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    if not is_number(value):
-        msg = f"service {name!r}: '{key}' must be a number or string"
-        raise UnsupportedComposeError(msg)
-
-
 def _validate_list_elements(name: str, key: str, value: list[Any]) -> None:
     """Check every list element is a string, so emit can't str() a non-string into the script."""
     for item in value:
@@ -198,11 +193,20 @@ def _bool(flag: str) -> KeySpec:
     return KeySpec(validate=_validate_bool, emit=emit)
 
 
-def _number_scalar(flag: str) -> KeySpec:
+def _scalar_of(flag: str, validate: Callable[[str, str, Any], None]) -> KeySpec:
+    """Build a single-value flag whose accepted values are defined by `validate`."""
+
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
         return [flag, Expand(value=str(value))]
 
-    return KeySpec(validate=_validate_number, emit=emit)
+    return KeySpec(validate=validate, emit=emit)
+
+
+def _size(flag: str, *, allow_float: bool = True) -> KeySpec:
+    def validate(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+        values.validate_size(name, key, value, allow_float=allow_float)
+
+    return _scalar_of(flag, validate)
 
 
 def _list(flag: str) -> KeySpec:
@@ -289,19 +293,10 @@ def _validate_ulimits(name: str, key: str, value: Any) -> None:  # noqa: ANN401 
             if set(spec) != {"soft", "hard"}:
                 msg = f"service {name!r}: ulimit {limit!r} mapping must have exactly 'soft' and 'hard'"
                 raise UnsupportedComposeError(msg)
-            # bool IS an int in Python, so a plain `isinstance(..., int | str)`
-            # would silently let a boolean soft/hard value through.
-            if any(
-                isinstance(spec[bound], bool) or not isinstance(spec[bound], int | str) for bound in ("soft", "hard")
-            ):
-                msg = f"service {name!r}: ulimit {limit!r} 'soft' and 'hard' must be int or str"
-                raise UnsupportedComposeError(msg)
-        elif isinstance(spec, bool) or not isinstance(spec, int | str):
-            # A boolean ulimit is meaningless -- unlike environment's bool
-            # (which Docker normalizes to a string), there is no sensible
-            # normalization here, so it is rejected rather than coerced.
-            msg = f"service {name!r}: ulimit {limit!r} must be an int or a soft/hard mapping"
-            raise UnsupportedComposeError(msg)
+            for bound in ("soft", "hard"):
+                values.validate_integer(name, f"ulimit {limit!r} {bound!r}", spec[bound])
+        else:
+            values.validate_integer(name, f"ulimit {limit!r}", spec)
 
 
 def _ulimit_args(ulimits: dict[str, Any]) -> list[str]:
@@ -337,18 +332,21 @@ SERVICE_KEYS: dict[str, KeySpec] = {
     "annotations": _map("--annotation"),
     "pull_policy": KeySpec(validate=_validate_pull_policy, emit=_emit_pull_policy),
     "ulimits": KeySpec(validate=_validate_ulimits, emit=_emit_ulimits, merge=_merge_map),
-    "mem_limit": _number_scalar("--memory"),
-    "memswap_limit": _number_scalar("--memory-swap"),
-    "mem_reservation": _number_scalar("--memory-reservation"),
-    "mem_swappiness": _number_scalar("--memory-swappiness"),
-    "cpus": _number_scalar("--cpus"),
-    "cpu_shares": _number_scalar("--cpu-shares"),
-    "cpu_quota": _number_scalar("--cpu-quota"),
-    "cpu_period": _number_scalar("--cpu-period"),
-    "cpuset": _number_scalar("--cpuset-cpus"),
-    "pids_limit": _number_scalar("--pids-limit"),
-    "shm_size": _number_scalar("--shm-size"),
-    "oom_score_adj": _number_scalar("--oom-score-adj"),
+    "mem_limit": _size("--memory"),
+    "memswap_limit": _size("--memory-swap"),
+    # allow_float=False: measured against `docker compose config` v5.1.2 --
+    # mem_reservation rejects a native float, same as mem_swappiness/oom_score_adj
+    # (the design's own grammar table says so; the brief's code sample omitted it).
+    "mem_reservation": _size("--memory-reservation", allow_float=False),
+    "mem_swappiness": _size("--memory-swappiness", allow_float=False),
+    "cpus": _scalar_of("--cpus", values.validate_number),
+    "cpu_shares": _scalar_of("--cpu-shares", values.validate_number),
+    "cpu_quota": _scalar_of("--cpu-quota", values.validate_number),
+    "cpu_period": _scalar_of("--cpu-period", values.validate_number),
+    "cpuset": _scalar_of("--cpuset-cpus", values.validate_string),
+    "pids_limit": _scalar_of("--pids-limit", values.validate_number),
+    "shm_size": _size("--shm-size"),
+    "oom_score_adj": _scalar_of("--oom-score-adj", values.validate_integer),
     "oom_kill_disable": _bool("--oom-kill-disable"),
 }
 
