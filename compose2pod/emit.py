@@ -272,8 +272,11 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
         msg = f"invalid pod name {options.pod!r}"
         raise UnsupportedComposeError(msg)
     services = compose["services"]
-    hosts = hostnames(services)
     order = startup_order(services, options.target)
+    # Only the closure joins the pod, so only the closure is resolvable. A name
+    # pointing at 127.0.0.1 for a service that never runs would turn an honest
+    # resolution failure into a connection-refused.
+    hosts = hostnames({name: services[name] for name in order})
     completion_gated = {
         dep
         for svc in services.values()

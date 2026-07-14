@@ -995,3 +995,59 @@ class TestPublicEntryPointsValidateWithoutBeingToldTo:
         # and must reject malformed input identically.
         with pytest.raises(UnsupportedComposeError):
             referenced_variables({}, self._options())
+
+
+class TestAddHostClosureScope:
+    """--add-host covers the target's closure, like every other emit-path aggregate."""
+
+    def _options(self, target: str) -> EmitOptions:
+        return EmitOptions(
+            target=target,
+            ci_image="ci:latest",
+            command="",
+            pod="test-pod",
+            project_dir=".",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+
+    def test_service_outside_the_closure_is_not_resolvable(self) -> None:
+        # A never-run service pointed its name at 127.0.0.1, where nothing listens.
+        compose = {"services": {"app": {"image": "x"}, "never_run": {"image": "x"}}}
+        script = emit_script(compose=compose, options=self._options("app"))
+        assert "--add-host app:127.0.0.1" in script
+        assert "never_run" not in script
+
+    def test_out_of_closure_hostname_does_not_veto_extra_hosts(self) -> None:
+        # 'other' is not in app's closure, so its hostname cannot conflict with app's extra_hosts.
+        compose = {
+            "services": {
+                "app": {"image": "x", "extra_hosts": ["db:1.2.3.4"]},
+                "other": {"image": "x", "hostname": "db"},
+            }
+        }
+        script = emit_script(compose=compose, options=self._options("app"))
+        assert '--add-host "db:1.2.3.4"' in script
+
+    def test_in_closure_hostname_still_conflicts_with_extra_hosts(self) -> None:
+        # The conflict rule still holds for services that actually run.
+        compose = {
+            "services": {
+                "app": {"image": "x", "extra_hosts": ["db:1.2.3.4"], "depends_on": ["db_svc"]},
+                "db_svc": {"image": "x", "hostname": "db"},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="conflicting host"):
+            emit_script(compose=compose, options=self._options("app"))
+
+    def test_dependency_hostnames_and_aliases_still_resolve(self) -> None:
+        # Everything inside the closure keeps its add-host entry.
+        compose = {
+            "services": {
+                "app": {"image": "x", "depends_on": ["db"]},
+                "db": {"image": "x", "hostname": "db-host", "networks": {"default": {"aliases": ["db-alias"]}}},
+            }
+        }
+        script = emit_script(compose=compose, options=self._options("app"))
+        for host in ("app", "db", "db-host", "db-alias"):
+            assert f"--add-host {host}:127.0.0.1" in script

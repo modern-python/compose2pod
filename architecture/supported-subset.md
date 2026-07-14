@@ -281,12 +281,20 @@ flags. compose2pod hoists them onto `podman pod create` instead
   unioned by key, and two closure services setting the same key to
   different values is refused (`conflicting sysctl ...`) rather than
   resolved last-writer-wins. `--add-host` is seeded from the alias/hostname
-  set (document-wide, not closure-scoped — see `hostname`/`container_name`/
-  `networks`, above), then layered with each closure service's
+  set of the closure's services, then layered with each closure service's
   `extra_hosts`; a host name landing on two different addresses is refused
   the same way (`conflicting host ...`). An alias/hostname `--add-host`
   entry stays a plain unquoted token; an `extra_hosts` entry is
   `${VAR}`-live.
+
+  Only the closure joins the pod, so only the closure is resolvable: a
+  service outside it contributes no name and cannot conflict with an
+  `extra_hosts` entry. Resolving a never-run service's name to `127.0.0.1`
+  would point it at a port where nothing listens, turning an honest
+  resolution failure into a connection-refused. Shape validation of
+  `hostname`/`container_name`/`networks` stays document-wide at the gate
+  (`hostnames` in `parsing.py`), so a malformed value is still rejected on a
+  service the target never reaches.
 - **Pod-wide divergence:** unlike every other service key, these apply to
   every container in the pod once emitted — including services that never
   declared them — because the pod shares one `/etc/resolv.conf`, sysctl
