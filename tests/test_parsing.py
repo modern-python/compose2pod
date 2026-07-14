@@ -789,3 +789,25 @@ class TestSweepSkipsUnreadRegions:
         }
         with pytest.raises(UnsupportedComposeError):
             validate(compose)
+
+
+class TestSweepListRecursion:
+    """The sweep must recurse into a list of mappings, not just nested dicts.
+
+    Regression-proofing for a coverage gap: the sweep's
+    `elif isinstance(node, list)` branch was reachable but nothing asserted
+    on its effect, so removing it left all other tests green. This asserts
+    the sweep's own message specifically (produced only by the list branch
+    recursing into the ref dict before stores.py's independent,
+    differently-worded check gets a turn) -- deleting the list branch turns
+    this test red even though `validate()` still raises overall (via
+    stores.py), because the raised message no longer matches.
+    """
+
+    def test_non_string_key_nested_in_a_list_is_caught_by_the_sweep_itself(self) -> None:
+        compose = {
+            "services": {"app": {"image": "x", "secrets": [{"source": "mysecret", 1: "bogus"}]}},
+            "secrets": {"mysecret": {"file": "./a"}},
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app'\.secrets: key 1 must be a string"):
+            validate(compose)
