@@ -355,16 +355,25 @@ def _require_string_keys_deep(where: str, node: Any) -> None:  # noqa: ANN401 - 
     `ulimits`) before handing each identifier's own content to this
     function.
 
-    Rejecting a non-string key is a deliberate divergence from Docker for
-    map-typed *keys* specifically (Docker accepts `environment: {3306: db}`):
-    Compose is parsed as YAML 1.2, where a bare `on`/`off`/`3306` stays a
-    string, so Docker never observes a non-string key at all. Normalizing
-    Python's `bool`/`int` back to a string here would not reproduce that --
+    Rejecting a non-string key matches Docker, not diverges from it --
+    measured: `docker compose config` refuses `environment: {3306: db}` with
+    `non-string key in services.app.environment: 3306`, the identical verdict
+    this function reaches. Normalizing Python's `bool`/`int` back to a string
+    instead of rejecting it would not reproduce Docker's behavior either --
     `True` has no single correct string form (`"on"`? `"true"`? `"True"`?)
     the way a boolean *value* does (see `keys._render_scalar`, which mirrors
-    Docker's own `true`/`false` value normalization). A non-string key is a
-    YAML-1.1 accident, not intentional Compose; anyone who means the literal
-    string `on` writes `"on"`.
+    Docker's own `true`/`false` value normalization).
+
+    The bare `3:` case needs no further help: Docker rejects it too, so
+    PyYAML producing the int `3` and this function refusing it agree with
+    Docker by construction. The bare `on:`/`off:`/`yes:`/`no:` case is the one
+    that would otherwise disagree: PyYAML's default YAML 1.1 resolver turns
+    it into a bool, which Docker's YAML 1.2 parser reads as an ordinary
+    string -- refusing that bool here would reject a file Docker runs. The
+    CLI's YAML loader (`_build_yaml_loader`, `compose2pod/cli.py`) closes
+    that gap ahead of this function, not inside it: it resolves only
+    `true`/`false` as booleans, matching YAML 1.2, so a bare `on`/`off` never
+    arrives here as a non-string key at all.
     """
     if isinstance(node, dict):
         require_string_keys(where, node)
@@ -466,11 +475,20 @@ def _sweep_document(compose: dict[str, Any]) -> None:
       does not exclude one starting with `x-`, so a store's *name* must not
       be conflated with a content key either.
 
-    Skipped, because compose2pod never reads or emits from them, so a
-    non-string key there can never reach the generated script: `x-` blocks
-    (top-level and per-service), `build`'s contents, and the ignored
-    top-level `networks`/`volumes` blocks (accepted, but never read --
-    see architecture/supported-subset.md).
+    Skipped, because compose2pod never emits from them, so a non-string key
+    there can never reach the generated script: `x-` blocks (top-level and
+    per-service), `build`'s contents, and the ignored top-level `volumes`
+    block (accepted, but never read -- see architecture/supported-subset.md).
+    The top-level `networks` block is a narrower case: its *contents* are
+    still never read, but `_validate_network_references` does read its own
+    *keys*, to check a per-service `networks` reference names one that's
+    declared. That reader only ever hashes a key into a `set` for a `not in`
+    membership test against an already-string-checked per-service value --
+    never `sorted()`s, `startswith()`s, or f-string-interpolates it -- so a
+    non-string top-level network name cannot crash or leak a repr into the
+    script the way this sweep exists to prevent; it would just never match
+    any per-service reference, which is a separate, narrower correctness
+    question this function does not need to answer.
     """
     require_string_keys("compose document", compose)
     services = compose.get("services")

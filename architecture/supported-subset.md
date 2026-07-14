@@ -15,6 +15,33 @@ discards the returned warnings (the CLI surfaces its own copy from its own
 entry point with a document `validate()` would reject — by construction of
 the shared `_plan` call site, not by convention.
 
+## Docker-rejection parity
+
+The gate's governing rule
+(`planning/decisions/2026-07-14-docker-rejection-parity.md`) is two-way, one
+direction hard: a document `docker compose config` rejects, compose2pod
+rejects too, no exceptions — accepting it would emit a script for a file
+already broken upstream, a false-green CI run. A document Docker accepts,
+compose2pod accepts whenever podman can express it inside a shared-namespace
+pod; where it cannot yet, that is a tracked limitation, not a design
+position or a licence to refuse on taste — recorded in `planning/deferred.md`
+with a revisit trigger, not silently. Either way the rule binds only on what
+the *document* says: a rejection that is really a fact about the reading
+host (`env_file: app.env` when the file is missing locally, `${VAR:?msg}`
+when the shell hasn't exported it) does not bind, because the generated
+script runs somewhere else, later, where that precondition may hold.
+
+`tests/conformance/` enforces the hard direction mechanically rather than by
+a hand-maintained table: it runs both `docker compose config` and the real
+`_read_compose → resolve_extends → validate → emit_script` pipeline over a
+matrix generated from every key in `SERVICE_KEYS | STRUCTURAL_KEYS |
+IGNORED_SERVICE_KEYS` crossed with a set of hostile shapes, plus a
+hand-authored corpus (`tests/conformance/corpus/`) for what a single-key
+matrix can't reach — cross-key and cross-service invalidity, nested
+positions, top-level keys. A key added to the registry is probed the moment
+it exists; the rule cannot decay silently as the subset grows the way five
+consecutive hand-found divergences once did.
+
 ## Top-level keys
 
 - **Supported:** `services` (required — a non-mapping value raises, an empty
@@ -58,11 +85,16 @@ category name) — and get the same name-not-content treatment
 looks like (`x-dep` is a real identifier, not an extension field), and only
 its *value* is swept with the ordinary `x-`-skipping walk.
 
-**Skipped**, because compose2pod never reads or emits from these regions, so
-a non-string key inside one can never reach the generated script: `x-`
-blocks (top-level and per-service — user payload by design, though the `x-`
-key itself is still checked); `build`'s own contents (never read — see
-`build`, below); and the ignored top-level `networks`/`volumes` blocks.
+**Skipped**, because compose2pod never emits from these regions, so a
+non-string key inside one can never reach the generated script: `x-` blocks
+(top-level and per-service — user payload by design, though the `x-` key
+itself is still checked); `build`'s own contents (never read — see `build`,
+below); and the ignored top-level `volumes` block. The top-level `networks`
+block is narrower: its contents stay unread, but its own *keys* are read —
+see Per-service `networks`, below — to check that a service's `networks`
+reference names something declared; that check only ever hashes a key into
+a membership test, never sorts, `startswith`s, or emits it, so a non-string
+top-level network name still can't reach the script.
 
 Rejecting a non-string key **matches Docker**, which refuses one too
 (`non-string key in services.app.environment: 3306`). So `environment:
@@ -105,7 +137,7 @@ The rejection runs up front, not key by key, because some downstream
 readers crash raw on a non-string key (`sorted()`, `str.startswith`, the
 secret/config name regex) while others silently f-string it into a flag
 value, leaking a Python repr into the script (`key_value_pairs`,
-`extra_host_pairs`, `_ulimit_args`, `_sysctl_pairs`) — corruption, not a
+`extra_host_entries`, `_ulimit_args`, `_sysctl_pairs`) — corruption, not a
 crash. A handful of entry points reached directly, not only through
 `validate()`, keep their own `require_string_keys` call as boundary defense
 (`_validate_service`/`_validate_service_healthcheck` in `parsing.py`,
@@ -148,18 +180,27 @@ empty label.
   supplied via `--image` for any service that has one.
 - **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty`,
   `stop_signal`, `stop_grace_period`, `profiles` — meaningless or irrelevant
-  inside a single shared-namespace pod. `ports` is still shape-checked
+  inside a single shared-namespace pod. Ignoring one at *emit* does not mean
+  leaving it unchecked at the *gate*: each is still shape-validated against
+  the same grammar Docker itself validates it against
+  (`IGNORED_SERVICE_KEYS`, `compose2pod/parsing.py`) — `restart`/
+  `stop_signal` a string, `stdin_open`/`tty` a boolean, `stop_grace_period`
+  a duration with a unit (`values.validate_duration`), `profiles` a list of
+  strings, and `ports` the fuller port-mapping grammar
   (`values.validate_ports`): a long-form (mapping) entry must carry a
   `target` key — Docker refuses to omit one ("is missing a target port",
   measured against `docker compose config` v5.1.2) — but every other
   long-form field is left unchecked, since compose2pod never reads `ports`
-  at all. `stop_signal`/`stop_grace_period`
-  are inert because the script force-removes the pod (`podman pod rm -f`)
-  rather than gracefully stopping a container. `profiles` is inert because
-  the run set is fixed by `--target` plus its `depends_on` closure, not by
-  profile activation: targeting a service runs it regardless of profile (as
-  Compose does), and a service outside the closure never runs — so if the
-  target `depends_on` a member Compose would leave in a disabled profile,
+  at all. `restart`/`stop_signal` stop at the type check because that's all
+  Docker itself validates for either — measured, `restart: banana` and any
+  `stop_signal` string are both accepted — so enumerating an enum here would
+  refuse a file Docker runs. `stop_signal`/`stop_grace_period` are inert
+  because the script force-removes the pod (`podman pod rm -f`) rather than
+  gracefully stopping a container. `profiles` is inert because the run set
+  is fixed by `--target` plus its `depends_on` closure, not by profile
+  activation: targeting a service runs it regardless of profile (as Compose
+  does), and a service outside the closure never runs — so if the target
+  `depends_on` a member Compose would leave in a disabled profile,
   compose2pod runs it anyway (closure authoritative, more permissive than
   Compose, never a silent drop).
 - **Extension fields:** any `x-`-prefixed service key is accepted and
@@ -241,10 +282,10 @@ slot (`architecture/glossary.md`).
   runs via `/bin/sh -c`; list form is argv tokens. Any other shape (e.g. a
   mapping, or a list containing one — the classic YAML list/map slip)
   raises rather than reaching `podman run` mangled. `command: null` is
-  accepted, treated as absent — unlike `entrypoint: null`, below (a
-  narrower, pre-existing divergence between the two keys' validators).
+  accepted, treated as absent, matching Docker (`NULL_ALLOWED_KEYS`,
+  `parsing.py`).
 - **`entrypoint`:** string or list, each list element a string, mirroring
-  `command`; `entrypoint: null` raises rather than being treated as absent.
+  `command`; `entrypoint: null` is likewise accepted and treated as absent.
   List form is exec form; string form is shell form (`/bin/sh -c
   <string>`). Emitted as `--entrypoint <first-token>` with the remaining
   tokens placed ahead of the command after the image, so `podman run
@@ -445,35 +486,70 @@ Compose exposes container resource limits two ways — legacy scalar service
 keys and the Compose-spec `deploy.resources` block — and compose2pod honors
 both, refusing loudly on overlap rather than picking a precedence.
 
-| Legacy key | Podman flag | Shape |
+| Legacy key | Podman flag | Grammar |
 |---|---|---|
-| `mem_limit` | `--memory` | number or string |
-| `memswap_limit` | `--memory-swap` | number or string |
-| `mem_reservation` | `--memory-reservation` | number or string |
-| `mem_swappiness` | `--memory-swappiness` | number or string |
-| `cpus` | `--cpus` | number or string |
-| `cpu_shares` | `--cpu-shares` | number or string |
-| `cpu_quota` | `--cpu-quota` | number or string |
-| `cpu_period` | `--cpu-period` | number or string |
-| `cpuset` | `--cpuset-cpus` | number or string |
-| `pids_limit` | `--pids-limit` | number or string |
-| `shm_size` | `--shm-size` | number or string |
-| `oom_score_adj` | `--oom-score-adj` | number or string |
+| `mem_limit` | `--memory` | size |
+| `memswap_limit` | `--memory-swap` | size |
+| `mem_reservation` | `--memory-reservation` | size, whole-valued if native float |
+| `mem_swappiness` | `--memory-swappiness` | size, whole-valued if native float |
+| `cpus` | `--cpus` | number |
+| `cpu_shares` | `--cpu-shares` | count |
+| `cpu_quota` | `--cpu-quota` | count |
+| `cpu_period` | `--cpu-period` | count |
+| `cpuset` | `--cpuset-cpus` | string |
+| `pids_limit` | `--pids-limit` | count |
+| `shm_size` | `--shm-size` | size |
+| `oom_score_adj` | `--oom-score-adj` | integer, whole-valued float allowed |
 | `oom_kill_disable` | `--oom-kill-disable` (bare, only if true) | boolean |
 
-These twelve number-scalar keys pass their value through unchanged (a
-`${VAR}` inside stays live at run time); a non-number, non-string value —
-including a bool — is refused. `oom_kill_disable` is the one boolean-typed
-exception in this group, validated as an actual bool like
+Each grammar is a value shape measured against `docker compose config`
+v5.1.2, not a blanket "number or string" — `values.py` implements the five
+non-boolean ones:
+
+- **size** (`validate_size`): a number, or a string like `512m`/`1gb`/`1e3`
+  (Docker's byte-size grammar, an optional unit suffix on a float). Refused:
+  `''`, a non-finite float, a string with no unit Docker recognizes.
+  `mem_reservation`/`mem_swappiness` additionally refuse a *native* float
+  with a fractional part (`0.5` — Docker: "must be a integer"; `60.0` is
+  fine); the string branch (`"1.5"`) is unrestricted either way, since
+  Docker's size-string grammar has no such rule.
+- **number** (`validate_number`, `cpus` only): a number, or a string that
+  parses as one — Docker's `ParseFloat`, unrestricted.
+- **count** (`validate_count`; `cpu_shares`/`cpu_quota`/`cpu_period`/
+  `pids_limit`): a native number is cast leniently (`0.5` accepted), but a
+  *string* must be a strict integer — no decimal point, exponent, or
+  digit-grouping underscore — because Docker casts the string form through
+  Go's `ParseInt`. The identical native value the string form refuses is
+  accepted natively; this native/string asymmetry is Docker's, not
+  compose2pod's.
+- **string** (`validate_string`, `cpuset` only): any string, refusing only a
+  number — Docker validates no further content (`cpuset: abc` and `''` are
+  both accepted).
+- **integer** (`validate_integer`, `oom_score_adj` only, `allow_whole_float`):
+  an integer, or a string that parses as one; a native whole-valued float
+  (`1000.0`) is accepted the same way `mem_reservation`'s size grammar
+  accepts one, but a fractional float is refused.
+
+Every grammar short-circuits on a value carrying a `${VAR}` reference and
+passes it through unvalidated, live at run time — not merely because
+interpolation is deferred, but because Docker's own verdict on such a value
+is itself a fact about the *reading host's* environment: `mem_limit: ${MEM}`
+fails `docker compose config` with `invalid size: ''` only because the
+variable is unset in the checking shell, and passes once it's exported. A
+bool is refused by every grammar above; `oom_kill_disable` is the one
+boolean-typed exception in this group, validated as an actual bool like
 `read_only`/`init`/`privileged`.
 
 - **`deploy.resources`** (`compose2pod/resources.py`): under `deploy`, only
   `resources` is honored — any other subkey (`replicas`, `placement`,
   `restart_policy`, ...) raises, and unrecognized keys within `resources`,
   `limits`, or `reservations` raise the same way. `limits.cpus`/
-  `limits.memory`/`limits.pids` map to `--cpus`/`--memory`/`--pids-limit`,
-  each the same number-or-string shape as the legacy keys above;
-  `reservations.memory` maps to `--memory-reservation`. `reservations.cpus`
+  `limits.memory`/`limits.pids` map to `--cpus`/`--memory`/`--pids-limit`;
+  `reservations.memory` maps to `--memory-reservation`. These four fields
+  are not registry entries and are not measured against the grammars above —
+  each still accepts the older, looser "a number, or any string"
+  (`resources._check_number`, built on `keys.is_number`) that the legacy
+  keys' own registry entries were tightened away from. `reservations.cpus`
   and `reservations.devices` have no podman equivalent and are refused
   outright, regardless of value.
 - **Refuse on conflict:** when a legacy key and its `deploy.resources`
