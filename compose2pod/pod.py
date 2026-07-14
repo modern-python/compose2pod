@@ -7,6 +7,9 @@ from compose2pod.keys import Expand, Token, extra_host_entries, validate_map
 
 
 _DNS_KEYS = {"dns": "--dns", "dns_search": "--dns-search", "dns_opt": "--dns-option"}
+# Docker accepts a bare string for `dns` and `dns_search` but requires a list for
+# `dns_opt`. Measured, not inferred -- the asymmetry is Docker's, not ours.
+_DNS_LIST_ONLY = {"dns_opt"}
 _POD_OPTION_KEYS = (*_DNS_KEYS, "sysctls", "extra_hosts")
 
 
@@ -59,6 +62,9 @@ def validate_pod_options(name: str, svc: dict[str, Any]) -> None:
     """Shape-check a service's pod-level dns/sysctls declarations."""
     for key in _DNS_KEYS:
         if key in svc:
+            if key in _DNS_LIST_ONLY and not isinstance(svc[key], list):
+                msg = f"service {name!r}: {key!r} must be a list of strings"
+                raise UnsupportedComposeError(msg)
             _as_str_list(name, key, svc[key])
     if "sysctls" in svc:
         _sysctl_pairs(name, svc["sysctls"])

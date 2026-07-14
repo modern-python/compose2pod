@@ -448,8 +448,13 @@ class TestValidate:
             validate(compose)
 
     def test_valid_networks_forms_accepted(self) -> None:
-        assert validate({"services": {"app": {"image": "x", "networks": ["n1"]}}}) == []
-        assert validate({"services": {"app": {"image": "x", "networks": {"default": None}}}}) == []
+        # A declared top-level 'networks' block is now required (see
+        # test_service_network_must_be_declared_top_level), which itself
+        # carries the usual "ignoring top-level 'networks'" warning.
+        list_form = {"services": {"app": {"image": "x", "networks": ["n1"]}}, "networks": {"n1": None}}
+        assert any("networks" in w for w in validate(list_form))
+        map_form = {"services": {"app": {"image": "x", "networks": {"default": None}}}, "networks": {"default": None}}
+        assert any("networks" in w for w in validate(map_form))
 
     def test_secrets_top_level_and_service_ref_accepted(self) -> None:
         doc = {"services": {"app": {"image": "x", "secrets": ["db"]}}, "secrets": {"db": {"file": "./db.txt"}}}
@@ -1048,3 +1053,33 @@ def test_ignored_keys_are_still_shape_checked(key: str, value: object) -> None:
 def test_ignored_keys_accept_valid_shapes(key: str, value: object) -> None:
     warnings = validate(_doc(**{key: value}))
     assert any(key in warning for warning in warnings)
+
+
+def test_build_must_be_string_or_mapping() -> None:
+    for bad in (3, ["a"], True, 1.5):
+        with pytest.raises(UnsupportedComposeError, match="build"):
+            validate({"services": {"app": {"build": bad}}})
+    validate({"services": {"app": {"build": "."}}})
+    validate({"services": {"app": {"build": {"context": "."}}}})
+
+
+def test_image_rejects_empty_string() -> None:
+    with pytest.raises(UnsupportedComposeError, match="image"):
+        validate({"services": {"app": {"image": ""}}})
+
+
+def test_container_name_must_match_dockers_pattern() -> None:
+    with pytest.raises(UnsupportedComposeError, match="container_name"):
+        validate(_doc(container_name=""))
+    validate(_doc(container_name="my-app"))
+
+
+def test_empty_hostname_is_accepted() -> None:
+    # Docker accepts `hostname: ""` -- refusing it would be an over-rejection.
+    validate(_doc(hostname=""))
+
+
+def test_service_network_must_be_declared_top_level() -> None:
+    with pytest.raises(UnsupportedComposeError, match="undefined network"):
+        validate(_doc(networks=["backend"]))
+    validate({"services": {"app": {"image": "nginx", "networks": ["backend"]}}, "networks": {"backend": None}})

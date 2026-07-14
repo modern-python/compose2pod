@@ -188,10 +188,13 @@ Handled outside the registry because `emit(value)` alone can't express them
 slot (`architecture/glossary.md`).
 
 - **`image`:** a string; read verbatim when the service has no `build`. A
-  service must set at least one of `image` or `build`; neither, or a
-  non-string `image` with no `build`, raises. A non-string `image` alongside
-  `build` is accepted — the CI image always wins, so `image_for` never
-  reads it.
+  service must set at least one of `image` or `build`; neither, an empty
+  string, or a non-string `image` with no `build`, raises. A non-string
+  `image` alongside `build` is accepted — the CI image always wins, so
+  `image_for` never reads it.
+- **`build`:** a string or mapping — its contents are never read (see
+  `image`, above), only the shape, since a document `docker compose config`
+  refuses (e.g. `build: 3`) must still be refused here.
 - **`command`:** string or list, each list element a string. String form
   runs via `/bin/sh -c`; list form is argv tokens. Any other shape (e.g. a
   mapping, or a list containing one — the classic YAML list/map slip)
@@ -233,13 +236,23 @@ slot (`architecture/glossary.md`).
   `container_name` (used internally for `podman cp`, healthcheck polling,
   diagnostics) — only name *resolution* is meaningful to other services, no
   per-container `--hostname` or renamed `--name` is emitted. Each must be a
-  string when present.
+  string when present. `container_name`, when present, must additionally
+  match Docker's own pattern `[a-zA-Z0-9][a-zA-Z0-9_.-]+` (a search, not a
+  fullmatch) — an empty `container_name: ""` fails it and raises, unlike
+  `hostname`, which carries no such rule and accepts an empty string
+  (measured against `docker compose config`; refusing an empty `hostname`
+  would be an over-rejection).
 - **Per-service `networks`:** long (mapping) form contributes each entry's
   `aliases` to the same resolvable-name set as `hostname`/`container_name`;
   short (list) form carries none. Must be a list or mapping. A long-form
   *value* that isn't itself a mapping (e.g. `networks: {default: true}`) is
   lenient, not rejected — it just contributes no aliases. When present,
-  `aliases` must be a list of strings.
+  `aliases` must be a list of strings. Every network a service names must be
+  declared in the top-level `networks` block, or `validate()` raises
+  ("refers to undefined network") — the top-level block's *contents* are
+  still ignored (see Top-level keys, above), only the reference is checked,
+  because a document naming an undeclared network is one `docker compose
+  config` refuses.
 
 ## Extends
 
@@ -320,8 +333,11 @@ flags. compose2pod hoists them onto `podman pod create` instead
 - **Supported:** `dns`, `dns_search`, `dns_opt`, `sysctls`, `extra_hosts` —
   mapped to `--dns`, `--dns-search`, `--dns-option`, `--sysctl`, and (merged
   with the alias/hostname set) `--add-host` respectively.
-- **Value shapes:** `dns`/`dns_search`/`dns_opt` accept a string or list of
-  strings; `sysctls` accepts a mapping (`key: value`) or a list of
+- **Value shapes:** `dns`/`dns_search` accept a string or list of strings;
+  `dns_opt` accepts a list of strings only — Docker refuses a bare string
+  there (`dns_opt: "ndots:2"`) even though it accepts one for `dns` and
+  `dns_search`; the asymmetry is Docker's, measured, not compose2pod's.
+  `sysctls` accepts a mapping (`key: value`) or a list of
   `"key=value"` strings, each value a string or number; `extra_hosts`
   accepts a list or a mapping (`host: ip`). A list entry divides on `=`
   (Compose's documented separator, `- somehost=162.242.195.82`) or on the
@@ -631,9 +647,12 @@ All three conditions are honored: `service_started`, `service_healthy`,
 `depends_on` (`compose2pod/graph.py`) itself must be either a list of
 service names (short form, each defaulting to `service_started`) or a
 mapping of service name to a per-dependency mapping (long form, read for
-`condition`). Anything else — a bare string, a number, a mapping whose
-value isn't itself a mapping — raises at the gate instead of failing later
-with a raw `AttributeError`/`TypeError`. Each short-form list element must
+`condition`). Anything else — a bare string (including the empty string;
+`or {}`'s falsy default used to swallow it silently as "no dependencies"),
+a number, a mapping whose value isn't itself a mapping — raises at the gate
+instead of failing later with a raw `AttributeError`/`TypeError`. Only an
+*absent* `depends_on` (not merely a falsy one) yields no dependencies. Each
+short-form list element must
 itself be a string (the same list/map YAML slip that trips up
 `environment`/`command`), checked before the list would otherwise crash raw
 (`TypeError: unhashable type`) when passed to `dict.fromkeys`. `extends.py`'s

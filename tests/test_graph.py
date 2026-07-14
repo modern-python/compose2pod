@@ -2,6 +2,7 @@ import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
+from compose2pod.parsing import validate
 
 
 class TestDependsOn:
@@ -52,6 +53,10 @@ class TestDependsOn:
         # past this check only to fail confusingly deeper in.
         with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
             depends_on({"depends_on": {"db": {"condition": 1}}})
+
+    def test_depends_on_rejects_a_bare_string(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="depends_on"):
+            validate({"services": {"app": {"image": "nginx", "depends_on": ""}}})
 
 
 class TestHostnames:

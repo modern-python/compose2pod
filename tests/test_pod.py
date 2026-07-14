@@ -2,6 +2,7 @@ import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.keys import Expand
+from compose2pod.parsing import validate
 from compose2pod.pod import pod_create_flags, uses_pod_options, validate_pod_options
 
 
@@ -198,3 +199,12 @@ class TestExtraHostsSeparators:
         # The mapping form arrives already divided. Joining it into 'host:address'
         # and re-splitting would divide at the '=' instead.
         assert self._flags({"somehost": "weird=address"}) == ["--add-host", "somehost:weird=address"]
+
+
+def test_dns_opt_must_be_a_list() -> None:
+    # Docker requires a list for dns_opt specifically; dns and dns_search still take a string.
+    with pytest.raises(UnsupportedComposeError, match="dns_opt"):
+        validate({"services": {"app": {"image": "nginx", "dns_opt": "ndots:2"}}})
+    validate({"services": {"app": {"image": "nginx", "dns_opt": ["ndots:2"]}}})
+    validate({"services": {"app": {"image": "nginx", "dns": "8.8.8.8"}}})
+    validate({"services": {"app": {"image": "nginx", "dns_search": "example.com"}}})

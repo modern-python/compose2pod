@@ -1,5 +1,6 @@
 """Dependency graph: normalize depends_on, collect hostnames, compute startup order."""
 
+import re
 from typing import Any, cast
 
 from compose2pod.exceptions import UnsupportedComposeError
@@ -7,7 +8,13 @@ from compose2pod.exceptions import UnsupportedComposeError
 
 def depends_on(svc: dict[str, Any]) -> dict[str, str]:
     """Normalize dependencies of a service to a name -> condition mapping."""
-    deps = svc.get("depends_on") or {}
+    deps = svc.get("depends_on")
+    if deps is None:
+        # Explicitly absent, not merely falsy. `or {}` treated `depends_on: ""`
+        # as "no dependencies" and skipped every shape check below -- a document
+        # `docker compose config` refuses. An empty list/mapping still yields {},
+        # via the branches below, exactly as before.
+        return {}
     if isinstance(deps, list):
         for dep in deps:
             if not isinstance(dep, str):
@@ -39,16 +46,33 @@ def depends_on(svc: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+# Docker validates container_name against this exact pattern (measured:
+# `container_name '' does not match pattern '[a-zA-Z0-9][a-zA-Z0-9_.-]+'`).
+# It is a *search*, not a fullmatch -- JSON-schema `pattern` semantics, which is
+# what Compose uses. `hostname` carries no such rule: Docker accepts an empty one.
+_CONTAINER_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]+")
+
+
+def _validated_name(name: str, key: str, svc: dict[str, Any]) -> str | None:
+    """Check one of svc's hostname/container_name keys and return its value, if set."""
+    value = svc.get(key)
+    if value is not None and not isinstance(value, str):
+        msg = f"service {name!r}: {key} must be a string"
+        raise UnsupportedComposeError(msg)
+    # `key in svc` guards presence: an *absent* container_name is fine (value
+    # is None the same as an absent key), but an *explicit* one -- including
+    # an explicit "" -- must match Docker's pattern. A null is already refused
+    # upstream (parsing._reject_null_values), so a present key's value is
+    # always a string here.
+    if key == "container_name" and key in svc and not _CONTAINER_NAME.search(value or ""):
+        msg = f"service {name!r}: container_name {value!r} is not a valid container name"
+        raise UnsupportedComposeError(msg)
+    return value
+
+
 def _host_names(name: str, svc: dict[str, Any]) -> list[str]:
     """Names one service is reachable by: hostname, container_name, and network aliases."""
-    result: list[str] = []
-    for key in ("hostname", "container_name"):
-        value = svc.get(key)
-        if value is not None and not isinstance(value, str):
-            msg = f"service {name!r}: {key} must be a string"
-            raise UnsupportedComposeError(msg)
-        if value:
-            result.append(value)
+    result: list[str] = [value for key in ("hostname", "container_name") if (value := _validated_name(name, key, svc))]
     networks = svc.get("networks")
     if networks is not None and not isinstance(networks, list | dict):
         msg = f"service {name!r}: networks must be a list or mapping"

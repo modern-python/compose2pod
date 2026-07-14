@@ -130,11 +130,20 @@ def _validate_image(name: str, svc: dict[str, Any]) -> None:
     if "build" in svc:
         return
     image = svc.get("image")
-    if image is None:
+    if image is None or image == "":
         msg = f"service {name!r}: must set 'image' or 'build'"
         raise UnsupportedComposeError(msg)
     if not isinstance(image, str):
         msg = f"service {name!r}: 'image' must be a string"
+        raise UnsupportedComposeError(msg)
+
+
+def _validate_build(name: str, svc: dict[str, Any]) -> None:
+    """Check build is a string or mapping. Its contents are never read -- only its shape is Docker's business."""
+    if "build" not in svc:
+        return
+    if not isinstance(svc["build"], str | dict):
+        msg = f"service {name!r}: 'build' must be a string or mapping"
         raise UnsupportedComposeError(msg)
 
 
@@ -251,6 +260,7 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     if isinstance(svc.get("entrypoint"), str) and svc.get("command") is not None:
         warnings.append(f"service {name!r}: string entrypoint runs via shell; 'command' is ignored")
     _validate_image(name, svc)
+    _validate_build(name, svc)
     _validate_service_healthcheck(name, svc)
     _validate_service_volumes(name, svc)
     _validate_entrypoint(name, svc)
@@ -447,6 +457,26 @@ def _validate_depends_on(services: dict[str, Any]) -> None:
                 raise UnsupportedComposeError(msg)
 
 
+def _validate_network_references(compose: dict[str, Any], services: dict[str, Any]) -> None:
+    """Every per-service network must be declared top-level, as Docker requires.
+
+    compose2pod ignores the top-level `networks` block's *contents* (every service
+    shares the pod namespace), but a service naming a network nothing declares is a
+    document `docker compose config` refuses -- so the reference is still checked.
+
+    Runs after `hostnames()` deliberately: that call already confirmed each
+    service's `networks` is a list or mapping (or absent), so `svc.get("networks")
+    or {}` here is safe to iterate -- a still-unvalidated string would be walked
+    character by character and produce the wrong error message.
+    """
+    declared = set(compose.get("networks") or {})
+    for name, svc in services.items():
+        for network in svc.get("networks") or {}:
+            if network not in declared:
+                msg = f"service {name!r}: refers to undefined network {network!r}"
+                raise UnsupportedComposeError(msg)
+
+
 def _reject_null_top_level_blocks(compose: dict[str, Any]) -> None:
     """Refuse a bare top-level block -- `docker compose config` refuses each.
 
@@ -493,6 +523,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
     for name, svc in services.items():
         warnings.extend(_validate_service(name, svc))
     hostnames(services)  # validate hostname/container_name/networks shapes at the gate
+    _validate_network_references(compose, services)
     _validate_depends_on(services)
     stores.validate(compose)
     if uses_pod_options(services):

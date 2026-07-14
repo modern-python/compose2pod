@@ -14,6 +14,7 @@ def test_network_alias_lands_on_the_pod(run_pod: Callable[..., PodRun]) -> None:
                 "command": ["sh", "-c", "grep cache-alias /etc/hosts && grep 127.0.0.1 /etc/hosts"],
             },
         },
+        "networks": {"default": None},
     }
     run = run_pod(compose, target="app")
     # Exit 0 proves the long-form networks.aliases entry (a distinct code path
