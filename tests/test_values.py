@@ -45,8 +45,46 @@ def test_validate_size_rejects(value: object) -> None:
 def test_validate_size_int_only_rejects_float() -> None:
     with pytest.raises(UnsupportedComposeError, match="mem_swappiness"):
         validate_size("app", "mem_swappiness", 1.5, allow_float=False)
+
+
+def test_validate_size_int_only_accepts_int() -> None:
     validate_size("app", "mem_swappiness", 60, allow_float=False)
+
+
+def test_validate_size_int_only_accepts_int_string() -> None:
     validate_size("app", "mem_swappiness", "60", allow_float=False)
+
+
+# C1: every Docker size unit accepts, but Docker has no exabyte unit -- 'e'/'eb' is not
+# a suffix, it collides with scientific notation ('1e3') and must not be swallowed as one.
+@pytest.mark.parametrize("value", ["512b", "512k", "512m", "512g", "512t", "512p"])
+def test_validate_size_accepts_every_real_unit(value: str) -> None:
+    validate_size("app", "mem_limit", value)
+
+
+@pytest.mark.parametrize("value", ["1e", "1eb", "512e", "512eb"])
+def test_validate_size_rejects_invented_exabyte_unit(value: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match="mem_limit"):
+        validate_size("app", "mem_limit", value)
+
+
+# C2: Docker's JSON number decoder refuses NaN/Infinity outright ("unsupported value"),
+# and the size grammar refuses the string spellings too ("invalid size").
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), "nan", "inf", "-inf"])
+def test_validate_size_rejects_non_finite(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="mem_limit"):
+        validate_size("app", "mem_limit", value)
+
+
+# I4: Go's float parser (used for size/number strings) permits digit-grouping
+# underscores between digits, so Docker accepts these -- unlike the integer parser.
+@pytest.mark.parametrize("value", ["1_000", "1_0"])
+def test_validate_size_accepts_digit_grouping(value: str) -> None:
+    validate_size("app", "mem_limit", value)
+
+
+def test_validate_size_int_only_accepts_digit_grouping() -> None:
+    validate_size("app", "mem_swappiness", "1_0", allow_float=False)
 
 
 @pytest.mark.parametrize("value", [0.5, 2, -1, "0.5", "2", 1.5])
@@ -60,6 +98,19 @@ def test_validate_number_rejects(value: object) -> None:
         validate_number("app", "cpus", value)
 
 
+# C2: Docker's JSON decoder refuses NaN/Infinity outright ("unsupported value: NaN" /
+# "unsupported value: +Inf"), both as native floats and as the string spellings.
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), "nan", "inf", "-inf"])
+def test_validate_number_rejects_non_finite(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="cpus"):
+        validate_number("app", "cpus", value)
+
+
+# I4: Go's float parser permits digit-grouping underscores between digits.
+def test_validate_number_accepts_digit_grouping() -> None:
+    validate_number("app", "cpus", "1_000")
+
+
 @pytest.mark.parametrize("value", [100, -500, "100"])
 def test_validate_integer_accepts(value: object) -> None:
     validate_integer("app", "oom_score_adj", value)
@@ -67,6 +118,14 @@ def test_validate_integer_accepts(value: object) -> None:
 
 @pytest.mark.parametrize("value", [1.5, "abc", "", True, []])
 def test_validate_integer_rejects(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="oom_score_adj"):
+        validate_integer("app", "oom_score_adj", value)
+
+
+# I4: unlike the float grammars above, Go's integer parser (ParseInt, used for
+# oom_score_adj) does not permit digit-grouping underscores -- "invalid syntax".
+@pytest.mark.parametrize("value", ["1_00", "1_0", "1_000"])
+def test_validate_integer_rejects_digit_grouping(value: str) -> None:
     with pytest.raises(UnsupportedComposeError, match="oom_score_adj"):
         validate_integer("app", "oom_score_adj", value)
 
@@ -114,5 +173,27 @@ def test_validate_ports_accepts(value: object) -> None:
 
 @pytest.mark.parametrize("value", ["8080:80", ["abc"], ["80:80:80"], 8080, {}, [None], [1.5]])
 def test_validate_ports_rejects(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="ports"):
+        validate_ports("app", "ports", value)
+
+
+# C3: a host range is fine on its own, or matched 1:1 against a container range, but
+# a bare/differently-sized container range is "invalid ranges specified for container
+# and host Ports", and a descending range (start > end) is invalid regardless of side.
+@pytest.mark.parametrize("value", [["3000-3005:3000-3005"], ["3000-3005:3000"]])
+def test_validate_ports_accepts_compatible_ranges(value: object) -> None:
+    validate_ports("app", "ports", value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ["3000:3000-3005"],  # container is a range, host is a single port
+        ["3000-3005:3000-3002"],  # both ranges, but different lengths (6 vs 3)
+        ["3005-3000:3005-3000"],  # descending range on both sides
+        ["3005-3000:3000"],  # descending range on the host side only
+    ],
+)
+def test_validate_ports_rejects_incompatible_ranges(value: object) -> None:
     with pytest.raises(UnsupportedComposeError, match="ports"):
         validate_ports("app", "ports", value)

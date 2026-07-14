@@ -14,6 +14,7 @@ same file is accepted. compose2pod defers interpolation to script-run time by
 design and cannot know that value, so it must not judge it.
 """
 
+import math
 import re
 from typing import Any
 
@@ -21,10 +22,18 @@ from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.shell import variable_names
 
 
+# Go's float grammar (used for size/number strings) permits a digit-grouping
+# underscore between two digits -- "1_000" is valid, "_1000"/"1000_"/"1__0" are not.
+_DIGITS = r"[0-9]+(?:_[0-9]+)*"
+
 # Docker parses a size as a float with an optional unit suffix, so `1e3` and
 # `0.5g` are both valid. `b` alone and the `<unit>b` spellings (`mb`, `gb`) are
-# accepted alongside the bare unit letters.
-_SIZE = re.compile(r"^\s*[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\s*(?:[bkmgtpe]b?)?\s*$", re.IGNORECASE)
+# accepted alongside the bare unit letters. There is no exabyte unit: `e`/`eb`
+# is not a suffix Docker recognizes -- it collides with scientific notation.
+_SIZE = re.compile(
+    rf"^\s*{_DIGITS}(?:\.{_DIGITS})?(?:[eE][+-]?{_DIGITS})?\s*(?:[bkmgtp]b?)?\s*$",
+    re.IGNORECASE,
+)
 
 # Go's duration grammar, as used by `stop_grace_period`. A unit is mandatory --
 # Docker refuses a bare `90` with "missing unit in duration".
@@ -64,7 +73,7 @@ def validate_size(name: str, key: str, value: Any, *, allow_float: bool = True) 
     """Check `value` is a byte size: a number, or a string like '512m' / '1gb' / '1e3'."""
     if has_variable(value):
         return
-    if _is_int(value) or (allow_float and isinstance(value, float)):
+    if _is_int(value) or (allow_float and isinstance(value, float) and math.isfinite(value)):
         return
     if isinstance(value, str) and _SIZE.match(value):
         return
@@ -76,15 +85,16 @@ def validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - 
     """Check `value` is a number, or a string that parses as one."""
     if has_variable(value):
         return
-    if _is_int(value) or isinstance(value, float):
+    if _is_int(value) or (isinstance(value, float) and math.isfinite(value)):
         return
     if isinstance(value, str):
         try:
-            float(value)
+            parsed = float(value)
         except ValueError:
             pass
         else:
-            return
+            if math.isfinite(parsed):
+                return
     msg = f"service {name!r}: {key!r} must be a number"
     raise UnsupportedComposeError(msg)
 
@@ -95,7 +105,9 @@ def validate_integer(name: str, key: str, value: Any) -> None:  # noqa: ANN401 -
         return
     if _is_int(value):
         return
-    if isinstance(value, str):
+    # Go's ParseInt (used for oom_score_adj etc.) does not permit the digit-grouping
+    # underscores its float parser allows; unlike Python's int(), it is "invalid syntax".
+    if isinstance(value, str) and "_" not in value:
         try:
             int(value)
         except ValueError:
@@ -127,6 +139,33 @@ def validate_duration(name: str, key: str, value: Any) -> None:  # noqa: ANN401 
     raise UnsupportedComposeError(msg)
 
 
+def _parse_port_range(value: str) -> tuple[int, int]:
+    if "-" in value:
+        start, end = value.split("-", 1)
+        return int(start), int(end)
+    port = int(value)
+    return port, port
+
+
+def _ranges_compatible(host: str | None, container: str) -> bool:
+    """Whether a host/container port pairing is a range Docker accepts.
+
+    A range must ascend (start <= end). If the container side is a range, a
+    present host side must be a range of the same length; a host range paired
+    with a single container port is fine (each host port maps to it).
+    """
+    c_start, c_end = _parse_port_range(container)
+    if c_start > c_end:
+        return False
+    if host is None:
+        return True
+    h_start, h_end = _parse_port_range(host)
+    if h_start > h_end:
+        return False
+    c_len = c_end - c_start + 1
+    return c_len == 1 or h_end - h_start + 1 == c_len
+
+
 def _validate_port_entry(name: str, key: str, entry: Any) -> None:  # noqa: ANN401 - Compose values are untyped
     if isinstance(entry, dict):
         # Long form ({target, published, ...}); compose2pod ignores `ports`
@@ -136,8 +175,10 @@ def _validate_port_entry(name: str, key: str, entry: Any) -> None:  # noqa: ANN4
         return
     if has_variable(entry):
         return
-    if isinstance(entry, str) and _PORT.match(entry):
-        return
+    if isinstance(entry, str):
+        match = _PORT.match(entry)
+        if match and _ranges_compatible(match.group("host"), match.group("container")):
+            return
     msg = f"service {name!r}: {key!r} entry {entry!r} is not a valid port mapping"
     raise UnsupportedComposeError(msg)
 
