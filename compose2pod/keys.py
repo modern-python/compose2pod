@@ -147,7 +147,7 @@ def validate_map(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Com
     raise UnsupportedComposeError(msg)
 
 
-def _as_list(name: str, key: str, value: Any) -> list[Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+def as_list(name: str, key: str, value: Any) -> list[Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     """Normalize list-or-scalar-string form to a list, for merging across extends."""
     if isinstance(value, list):
         return list(value)
@@ -157,9 +157,9 @@ def _as_list(name: str, key: str, value: Any) -> list[Any]:  # noqa: ANN401 - Co
     raise UnsupportedComposeError(msg)
 
 
-def _concat_list(name: str, key: str, base: Any, local: Any) -> list[Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+def concat_list(name: str, key: str, base: Any, local: Any) -> list[Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     """Merge policy for list-shaped keys: concatenate base then local."""
-    return _as_list(name, key, base) + _as_list(name, key, local)
+    return as_list(name, key, base) + as_list(name, key, local)
 
 
 def pairs_to_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
@@ -212,7 +212,7 @@ def _list(flag: str) -> KeySpec:
             tokens += [flag, Expand(value=str(item))]
         return tokens
 
-    return KeySpec(validate=_validate_list, emit=emit, merge=_concat_list)
+    return KeySpec(validate=_validate_list, emit=emit, merge=concat_list)
 
 
 def _map(flag: str) -> KeySpec:

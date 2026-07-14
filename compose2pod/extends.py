@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import SERVICE_KEYS, pairs_to_mapping
+from compose2pod.keys import SERVICE_KEYS, concat_list, pairs_to_mapping
 
 
 # Merge policy for keys with a SERVICE_KEYS KeySpec comes from spec.merge (see
@@ -39,7 +39,14 @@ def _extends_target(name: str, ext: Any) -> str:  # noqa: ANN401 - Compose value
     return service
 
 
-def _as_mapping(key: str, name: str, value: Any) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped
+def _as_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped
+    """Normalize a structural mapping-merge key's value to a mapping.
+
+    Deliberately stricter than `keys.pairs_to_mapping`: list form is accepted
+    only for `environment` and `depends_on`, the two keys Compose actually
+    defines a list form for. `extra_hosts`/`healthcheck` in list form on a
+    merged side are refused as an incompatible form rather than coerced.
+    """
     if isinstance(value, dict):
         return value
     if isinstance(value, list):
@@ -55,15 +62,6 @@ def _as_mapping(key: str, name: str, value: Any) -> dict[str, Any]:  # noqa: ANN
     raise UnsupportedComposeError(msg)
 
 
-def _as_list(key: str, name: str, value: Any) -> list[Any]:  # noqa: ANN401 - Compose values are untyped
-    if isinstance(value, list):
-        return list(value)
-    if isinstance(value, str):
-        return [value]
-    msg = f"service {name!r}: cannot merge {key!r} across incompatible forms"
-    raise UnsupportedComposeError(msg)
-
-
 def _merge(base: dict[str, Any], local: dict[str, Any], name: str) -> dict[str, Any]:
     """Merge `local` onto `base` per key category: mapping-merge, sequence-concat, else override."""
     merged: dict[str, Any] = dict(base)
@@ -72,9 +70,9 @@ def _merge(base: dict[str, Any], local: dict[str, Any], name: str) -> dict[str, 
         if key in base and spec is not None and spec.merge is not None:
             merged[key] = spec.merge(name, key, base[key], local_val)
         elif key in base and key in _STRUCTURAL_MERGE_KEYS:
-            merged[key] = {**_as_mapping(key, name, base[key]), **_as_mapping(key, name, local_val)}
+            merged[key] = {**_as_mapping(name, key, base[key]), **_as_mapping(name, key, local_val)}
         elif key in base and key in _STRUCTURAL_CONCAT_KEYS:
-            merged[key] = _as_list(key, name, base[key]) + _as_list(key, name, local_val)
+            merged[key] = concat_list(name, key, base[key], local_val)
         else:
             merged[key] = local_val
     return merged
