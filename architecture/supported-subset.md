@@ -32,12 +32,22 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   service with no `x-` filter (a service literally named `x-web` is swept
   like any other service, not skipped as an extension field); each
   service's body — every structural key, `healthcheck`, `deploy` and its
-  nested `resources`/`limits`/`reservations`, `ulimits` and its nested
-  `{soft, hard}` mappings, per-service `secrets`/`configs`/`networks`
-  references, and so on — except `build`'s own contents and the service's
-  own `x-`-prefixed keys; and each top-level `secrets`/`configs`
+  nested `resources`/`limits`/`reservations`, per-service `secrets`/
+  `configs` references, and so on — except `build`'s own contents and the
+  service's own `x-`-prefixed keys; and each top-level `secrets`/`configs`
   definition (read by `stores.py`), by name, for the same reason a service
   name is swept regardless of what it looks like.
+
+  Three service keys key their mapping form by another entity's
+  *identifier* rather than by content — `depends_on` (a dependency's
+  service name), `networks` (a network's name), and `ulimits` (a
+  resource-limit category's name) — and get the identical name-not-content
+  treatment (`_sweep_identifier_map`, `compose2pod/parsing.py`): each
+  identifier is checked regardless of what it looks like (a dependency
+  literally named `x-dep` is a real identifier, not an extension field), and
+  only *its* value — ordinary content from that point on, e.g. `ulimits`'
+  nested `{soft, hard}` mapping — is swept with the ordinary `x-`-skipping
+  walk.
 
   **Skipped**, because compose2pod never reads or emits from these
   regions, so a non-string key inside one can never reach the generated
@@ -433,9 +443,7 @@ honors both, refusing loudly on overlap rather than picking a precedence.
 
 - **Supported:** `test`, `interval`, `timeout`, `retries`, `start_period`.
 - A `healthcheck` value that isn't a mapping raises
-  (`_validate_service_healthcheck`, `compose2pod/parsing.py`) — previously a
-  non-mapping healthcheck reached `.get()` calls downstream and crashed raw
-  instead of failing at the gate.
+  (`_validate_service_healthcheck`, `compose2pod/parsing.py`).
 - **`test`:** a bare string (shell form), `"NONE"` / `["NONE"]` (disabled),
   `["CMD", ...]` (exec form), or `["CMD-SHELL", <string>]`. `health_cmd`
   (`compose2pod/healthcheck.py`) is the sole reader and the sole validator —
@@ -444,21 +452,25 @@ honors both, refusing loudly on overlap rather than picking a precedence.
   value is discarded there; `emit.py` calls it again to get the value for
   real). Any other shape raises, including a `CMD-SHELL` whose argument isn't
   a string and a `CMD` whose trailing elements aren't all strings (e.g.
-  `["CMD-SHELL", ["curl", "-f"]]`) — both used to reach `emit_script()`
-  unchecked and crash raw.
+  `["CMD-SHELL", ["curl", "-f"]]`).
 - **`interval`:** parsed to whole seconds by `interval_seconds`
   (`compose2pod/healthcheck.py`). Supported forms: a bare number of seconds
   (`30`, `"30"`, `"30s"`), minutes (`"2m"`), and milliseconds (`"500ms"`).
   Compound durations (`"1h30m"`) and hour suffixes (`"1h"`) are not parsed —
   each is rejected with an `UnsupportedComposeError` rather than silently
-  truncated or misinterpreted.
+  truncated or misinterpreted. An explicit `null` (or an absent `interval`)
+  defaults to 1 second.
 - **`timeout`, `retries`, `start_period`:** each must be a number (int or
-  float) or string when present — the same shape `keys.is_number` enforces
-  for the legacy resource-limit keys. Each is passed straight through
-  `str(value)` into its `--health-*` flag with no further parsing, so a
-  mapping or list (e.g. `retries: {a: 1}`) raises at the gate
-  (`_validate_service_healthcheck`, `compose2pod/parsing.py`) instead of
-  emitting a literal Python `repr()` as the flag value.
+  float), a string, or `null` when present — the same shape `keys.is_number`
+  enforces for the legacy resource-limit keys, plus `null`. A mapping or list
+  (e.g. `retries: {a: 1}`) raises at the gate (`_validate_service_healthcheck`,
+  `compose2pod/parsing.py`) rather than reaching its `--health-*` flag as a
+  literal Python `repr()`. An explicit `null` is treated the same as an
+  absent key -- unset, so its `--health-*` flag is omitted entirely
+  (`_health_flags`, `compose2pod/emit.py`, keyed off the *value*, not key
+  presence). This matches `docker compose config`, which treats an
+  explicitly-null key as unset, and is the same treatment this package
+  already gives a null `environment`/`volumes`/`command` value elsewhere.
 - **Extension fields:** any `x-`-prefixed healthcheck key is accepted and
   ignored silently.
 - Everything else raises.
@@ -673,10 +685,18 @@ operators (e.g. `${FOO!bar}`) is malformed and raises
 `UnsupportedComposeError` rather than silently dropping the trailing text.
 Tool/CLI-supplied values (`--project-dir`, `--image`, the pod name,
 the `--command` override) are literal and never interpolated.
-`--artifact` must be in `SRC:DST` form; a value with no `:` raises
-`UnsupportedComposeError` (`_validate_options`, `compose2pod/emit.py`),
-guarding library callers of both `emit_script` and `referenced_variables`
-as well as the CLI. The pod
+`--artifact` must be a string in `SRC:DST` form; a non-string value or one
+with no `:` raises `UnsupportedComposeError` (`_validate_options`,
+`compose2pod/emit.py`), guarding library callers of both `emit_script` and
+`referenced_variables` as well as the CLI (the CLI itself always supplies a
+string — this guards a direct `EmitOptions` construction). `allow_exit_codes`
+entries must each be an `int` (not `bool`, which is an `int` subclass in
+Python but not a meaningful exit code) — `_validate_options` rejects
+anything else, since each entry is interpolated unquoted into the generated
+`case "$rc" in ...)` pattern; the CLI's `argparse` `type=int` already
+guarantees this, so the check exists for a library caller passing
+`EmitOptions` directly, where an unvalidated string would be shell injection,
+not just a crash. The pod
 name is embedded into the pod-create line, the single-quoted `EXIT`
 trap, and the `<pod>-<name>` store names (some of them unquoted), so it
 must be a shell-inert identifier — `emit_script` validates it against
@@ -714,6 +734,17 @@ list-form `depends_on` across `extends`) enforces the identical
 element-must-be-a-string check before `validate()` ever runs — `extends`
 resolution happens ahead of the gate (see Extends, above), so without its
 own check this same malformed input crashed raw there instead.
+
+The long form's `condition` value gets the same treatment: it must be a
+string (`graph.depends_on`), so a mapping or list condition (e.g. `depends_on:
+{db: {condition: {a: 1}}}`) raises `UnsupportedComposeError` there instead of
+crashing raw (`TypeError: cannot use 'dict' as a set element -- unhashable
+type: 'dict'`) at the `condition not in DEPENDS_ON_CONDITIONS` set-membership
+check that follows it in `parsing._validate_depends_on` — `in` against a
+`set` hashes its operand, and only a `str` condition ever reaches that check.
+This is checked in `graph.py`, not `parsing.py`, so every caller of
+`depends_on` — not only `validate()` — gets the same protection, matching
+every other depends_on shape check, which already lives there.
 
 ## YAML anchors and merge keys
 
