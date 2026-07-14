@@ -228,10 +228,22 @@ def _emit_target(lines: list[str], tokens: list[Token], options: EmitOptions) ->
 
 
 def _validate_options(options: EmitOptions) -> None:
-    """Check option values emit destructures (artifacts are split on ':')."""
+    """Check option values emit destructures or interpolates unquoted.
+
+    CLI-unreachable (argparse enforces `artifact` as `str` and
+    `allow_exit_codes` as `int`) but a library caller can pass `EmitOptions`
+    directly: a non-string `artifact` would crash raw on the ':' membership
+    test below, and a non-int `allow_exit_codes` entry is interpolated
+    unquoted into the generated `case "$rc" in ...)` pattern -- shell
+    injection, not just a crash.
+    """
     for artifact in options.artifacts:
-        if ":" not in artifact:
+        if not isinstance(artifact, str) or ":" not in artifact:
             msg = f"artifact {artifact!r} must be in SRC:DST form"
+            raise UnsupportedComposeError(msg)
+    for code in options.allow_exit_codes:
+        if isinstance(code, bool) or not isinstance(code, int):
+            msg = f"allow_exit_codes entry {code!r} must be an int"
             raise UnsupportedComposeError(msg)
 
 

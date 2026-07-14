@@ -865,10 +865,55 @@ class TestArtifactValidation:
         with pytest.raises(UnsupportedComposeError, match=r"artifact 'nocolon' must be in SRC:DST form"):
             referenced_variables(chats_compose, options)
 
+    def test_non_string_artifact_raises_cleanly(self, chats_compose: dict) -> None:
+        # CLI-unreachable (argparse enforces str), but a library caller can
+        # pass EmitOptions directly -- a non-string artifact used to crash
+        # raw on the ':' membership test (TypeError: argument of type 'int'
+        # is not iterable) instead of failing clean.
+        options = self._options([3])  # ty: ignore[invalid-argument-type]
+        with pytest.raises(UnsupportedComposeError, match=r"artifact 3 must be in SRC:DST form"):
+            emit_script(compose=chats_compose, options=options)
+
     def test_valid_artifact_still_emits_podman_cp(self, chats_compose: dict) -> None:
         options = self._options(["/srv/out/junit.xml:junit.xml"])
         script = emit_script(compose=chats_compose, options=options)
         assert "podman cp test-pod-application:/srv/out/junit.xml junit.xml || true" in script
+
+
+class TestAllowExitCodesValidation:
+    def _options(self, allow_exit_codes: list[int]) -> EmitOptions:
+        return EmitOptions(
+            target="application",
+            ci_image="ci:latest",
+            command="",
+            pod="test-pod",
+            project_dir=".",
+            artifacts=[],
+            allow_exit_codes=allow_exit_codes,
+        )
+
+    def test_non_int_allow_exit_code_raises_cleanly(self, chats_compose: dict) -> None:
+        # CLI-unreachable (argparse enforces int), but a library caller can
+        # pass EmitOptions directly -- a non-int entry is interpolated
+        # unquoted into the generated `case "$rc" in ...)` pattern, so an
+        # unvalidated string is shell injection, not just a crash.
+        options = self._options(
+            ['0) ;; *) rm -rf / ;; esac; case "$rc" in 0']  # ty: ignore[invalid-argument-type]
+        )
+        with pytest.raises(UnsupportedComposeError, match=r"allow_exit_codes entry .* must be an int"):
+            emit_script(compose=chats_compose, options=options)
+
+    def test_bool_allow_exit_code_raises_cleanly(self, chats_compose: dict) -> None:
+        # bool is an int subclass in Python; True/False are not meaningful
+        # exit codes and must not slip past an isinstance(..., int) check.
+        options = self._options([True])
+        with pytest.raises(UnsupportedComposeError, match="allow_exit_codes entry True must be an int"):
+            emit_script(compose=chats_compose, options=options)
+
+    def test_valid_int_allow_exit_codes_still_accepted(self, chats_compose: dict) -> None:
+        options = self._options([1, 2, 5])
+        script = emit_script(compose=chats_compose, options=options)
+        assert "in\n  0|1|2|5) ;;" in script
 
 
 class TestPodmanVersionGuard:
