@@ -53,11 +53,17 @@ def _health_flags(healthcheck: dict[str, Any]) -> list[Token]:
     cmd = health_cmd(healthcheck.get("test"))
     if cmd is not None:
         flags += ["--health-cmd", Expand(value=cmd)]
-        if "timeout" in healthcheck:
+        # An explicit `null` scalar means unset, not "emit the literal string
+        # 'None'" -- the same treatment `environment`/`volumes`/`command`
+        # give a null value elsewhere in this package, and matching `docker
+        # compose config`, which treats an explicitly-null key as absent.
+        # Keyed off value, not presence, so `timeout: null` and an omitted
+        # `timeout` behave identically.
+        if healthcheck.get("timeout") is not None:
             flags += ["--health-timeout", str(healthcheck["timeout"])]
-        if "start_period" in healthcheck:
+        if healthcheck.get("start_period") is not None:
             flags += ["--health-start-period", str(healthcheck["start_period"])]
-        if "retries" in healthcheck:
+        if healthcheck.get("retries") is not None:
             flags += ["--health-retries", str(healthcheck["retries"])]
     return flags
 

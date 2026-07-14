@@ -380,6 +380,20 @@ class TestValidate:
         }
         assert validate(compose) == []
 
+    def test_healthcheck_scalars_accept_explicit_null(self) -> None:
+        # A null scalar is treated as unset (see emit._health_flags), same
+        # ruling `environment`/`volumes`/`command` already get for a null
+        # value -- it must not raise at the gate.
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "healthcheck": {"test": "true", "retries": None, "timeout": None, "start_period": None},
+                }
+            }
+        }
+        assert validate(compose) == []
+
     def test_healthcheck_retries_mapping_rejected_at_gate(self) -> None:
         # Used to be silently accepted and mis-emitted as the literal
         # --health-retries "{'a': 1}".

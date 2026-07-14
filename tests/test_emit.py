@@ -109,6 +109,22 @@ class TestRunFlags:
         assert flags[4:6] == ["--health-cmd", Expand(value="true")]
         assert "--health-timeout" not in flags
 
+    def test_healthcheck_explicit_null_scalars_omit_flags(self) -> None:
+        # An explicit `null` means unset, matching `docker compose config`
+        # and how this package treats null everywhere else (environment/
+        # volumes/command). Before the fix: keyed off key *presence*
+        # (`"timeout" in healthcheck`), not the value, so an explicit null
+        # emitted the literal string 'None' as the flag value.
+        svc = {
+            "image": "x",
+            "healthcheck": {"test": "true", "timeout": None, "retries": None, "start_period": None},
+        }
+        flags = run_flags("app", svc, "p", "/b")
+        assert "--health-timeout" not in flags
+        assert "--health-retries" not in flags
+        assert "--health-start-period" not in flags
+        assert "None" not in [str(f) for f in flags]
+
     def test_user_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "user": "1000:1000"}, "p", "/b")
         assert flags[4:6] == ["--user", Expand(value="1000:1000")]
