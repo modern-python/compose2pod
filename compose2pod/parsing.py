@@ -27,7 +27,9 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
     if not isinstance(healthcheck, dict):
         msg = f"service {name!r}: healthcheck must be a mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"service {name!r}: healthcheck", healthcheck)
+    # Non-string healthcheck keys are already rejected by validate()'s
+    # document-wide _require_string_keys_deep sweep, which runs before this
+    # function is ever reached.
     for key in sorted(healthcheck):
         if key.startswith("x-"):
             continue
@@ -156,7 +158,9 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     if not isinstance(svc, dict):
         msg = f"service {name!r} must be a mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"service {name!r}", svc)
+    # Non-string service-body keys are already rejected by validate()'s
+    # document-wide _require_string_keys_deep sweep, which runs before this
+    # function is ever reached.
     warnings: list[str] = []
     for key in sorted(svc):
         if key.startswith("x-"):
@@ -184,6 +188,59 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     return warnings
 
 
+def _require_string_keys_deep(where: str, node: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Require every mapping key, at every depth of `node`, to be a string.
+
+    PyYAML routinely produces a non-string key: a bare `3:` parses as an int,
+    and under YAML 1.1 a bare `on:`/`off:`/`yes:`/`no:` parses as a bool.
+    Two distinct downstream consumer classes assume `str` keys and break
+    otherwise:
+
+    - Mapping-key readers that crash raw: `sorted()`, `str.startswith`, the
+      secret/config name regex.
+    - Mapping-key consumers that don't crash but f-string-interpolate the key
+      straight into a flag value, silently leaking the Python repr of a bool
+      or int into the emitted script (`keys.key_value_pairs` -- environment/
+      labels/annotations, `keys.extra_host_pairs`, `keys._ulimit_args`,
+      `pod._sysctl_pairs`). This class is corruption, not a crash, and is the
+      one the old hand-placed `require_string_keys` call sites never covered
+      -- they were only wired into mappings whose keys get sorted or
+      startswith'd, never the ones whose keys get f-string'd into a flag.
+
+    Walking the whole document once, recursively, from `validate()`'s entry
+    point closes both classes uniformly regardless of which mapping --
+    existing or future -- a non-string key turns up in, rather than trusting
+    every new structural key's validator to remember to call
+    `require_string_keys` by hand.
+
+    `x-`-prefixed keys' *values* are not recursed into: Compose extension
+    fields legitimately hold arbitrary user payloads (e.g. anchor sources
+    reused via YAML merge keys), and compose2pod accepts and ignores their
+    contents by design. The `x-` key itself is still checked, trivially: it
+    is a string by construction (its own name has to look like `x-...`).
+
+    Rejecting a non-string key is a deliberate divergence from Docker for
+    map-typed *keys* specifically (Docker accepts `environment: {3306: db}`):
+    Compose is parsed as YAML 1.2, where a bare `on`/`off`/`3306` stays a
+    string, so Docker never observes a non-string key at all. Normalizing
+    Python's `bool`/`int` back to a string here would not reproduce that --
+    `True` has no single correct string form (`"on"`? `"true"`? `"True"`?)
+    the way a boolean *value* does (see `keys._render_scalar`, which mirrors
+    Docker's own `true`/`false` value normalization). A non-string key is a
+    YAML-1.1 accident, not intentional Compose; anyone who means the literal
+    string `on` writes `"on"`.
+    """
+    if isinstance(node, dict):
+        require_string_keys(where, node)
+        for key, value in node.items():
+            if key.startswith("x-"):
+                continue
+            _require_string_keys_deep(f"{where}.{key}", value)
+    elif isinstance(node, list):
+        for item in node:
+            _require_string_keys_deep(where, item)
+
+
 def _validate_depends_on(services: dict[str, Any]) -> None:
     """Cross-service depends_on checks: known conditions, service_healthy needs a healthcheck."""
     for name, svc in services.items():
@@ -205,7 +262,11 @@ def validate(compose: dict[str, Any]) -> list[str]:
     if not isinstance(compose, dict):
         msg = f"compose document must be a mapping, got {type(compose).__name__}"
         raise UnsupportedComposeError(msg)
-    require_string_keys("compose document", compose)
+    # Runs first, ahead of every other check: every later check that reads a
+    # mapping's keys directly (sorted(), .startswith()) or f-string-
+    # interpolates one into a flag value can assume every key in the document
+    # is a string from this point on.
+    _require_string_keys_deep("compose document", compose)
     warnings: list[str] = []
     unknown_top = {k for k in compose if k not in SUPPORTED_TOP_LEVEL_KEYS and not k.startswith("x-")}
     if unknown_top:

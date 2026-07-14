@@ -265,3 +265,43 @@ class TestResolveExtends:
         }
         with pytest.raises(UnsupportedComposeError, match="cannot merge 'env_file' across incompatible forms"):
             resolve_extends(doc)
+
+
+class TestNonStringKeysAheadOfTheGate:
+    """resolve_extends() runs before validate()'s document-wide string-key sweep.
+
+    validate() closes non-string mapping keys as a class (see
+    parsing._require_string_keys_deep), but it never gets a turn if
+    resolve_extends() crashes raw on the same input first. None of these
+    hostile shapes involve a value resolve_extends interprets as anything
+    other than an opaque dict key or dict value, so each should pass through
+    unchanged for validate() to reject afterward -- not crash here.
+    """
+
+    def test_non_string_service_name_passes_through(self) -> None:
+        doc = {"services": {True: {"image": "j"}, "app": {"image": "i"}}}
+        assert resolve_extends(doc) == doc
+
+    def test_non_string_key_in_non_extending_service_body_passes_through(self) -> None:
+        doc = {"services": {"app": {"image": "i", 3: "x"}}}
+        assert resolve_extends(doc) == doc
+
+    def test_non_string_key_in_extends_base_body_passes_through(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "j", True: "y"},
+                "app": {"extends": {"service": "base"}, "image": "i"},
+            }
+        }
+        merged = resolve_extends(doc)
+        assert merged["services"]["app"][True] == "y"
+
+    def test_non_string_key_merged_into_environment_across_extends_passes_through(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "j", "environment": {"A": "1"}},
+                "app": {"extends": {"service": "base"}, "environment": {3: "x"}},
+            }
+        }
+        merged = resolve_extends(doc)
+        assert merged["services"]["app"]["environment"] == {"A": "1", 3: "x"}

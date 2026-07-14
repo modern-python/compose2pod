@@ -221,6 +221,32 @@ class TestMain:
         assert rc == EXIT_USAGE_ERROR
         assert "must be a mapping" in capsys.readouterr().err
 
+    def test_non_string_key_survives_extends_and_is_rejected_cleanly(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # resolve_extends() runs before validate(); confirms the merged
+        # non-string key reaches validate()'s sweep and fails clean (exit 2)
+        # instead of crashing raw somewhere in extends.py.
+        yaml_text = (
+            "services:\n"
+            "  base:\n    image: j\n    environment:\n      A: '1'\n"
+            "  app:\n    extends: {service: base}\n    environment:\n      on: '2'\n"
+        )
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "key True must be a string" in capsys.readouterr().err
+
+    def test_non_string_service_name_rejected_cleanly(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # F2: a non-string service name reached --add-host/--name verbatim
+        # (e.g. `podman run --name test-pod-True ...`) instead of being
+        # rejected at the gate.
+        yaml_text = "services:\n  app:\n    image: i\n  on:\n    image: j\n"
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "compose document.services: key True must be a string" in capsys.readouterr().err
+
     def test_yaml_anchor_extension_fields_convert(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:

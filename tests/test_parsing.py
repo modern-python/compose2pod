@@ -589,4 +589,111 @@ class TestValidate:
 
     def test_command_and_entrypoint_list_of_strings_still_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "command": ["run", "me"]}}}) == []
+
+
+class TestRequireStringKeysDeep:
+    """validate()'s document-wide recursive non-string-mapping-key sweep.
+
+    F1: a non-string key in a mapping that gets f-string-interpolated into a
+    flag value (environment/labels/annotations/sysctls/extra_hosts/ulimits)
+    used to leak Python's bool/int repr into the emitted script rather than
+    crash -- the hand-placed require_string_keys call sites never covered
+    these because none of them sorted() or startswith()'d that key. F2: a
+    non-string *service name* (a key of the `services` mapping itself) was
+    never checked at all. Both are closed by one recursive sweep instead of
+    hand-placing more calls -- see _require_string_keys_deep.
+    """
+
+    def test_environment_non_string_key_rejected(self) -> None:
+        # YAML 1.1: a bare `on:` parses as the Python bool True.
+        compose = {"services": {"app": {"image": "x", "environment": {True: "1"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"environment: key True must be a string"):
+            validate(compose)
+
+    def test_labels_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "labels": {True: "v"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"labels: key True must be a string"):
+            validate(compose)
+
+    def test_annotations_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "annotations": {False: "v"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"annotations: key False must be a string"):
+            validate(compose)
+
+    def test_sysctls_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "sysctls": {True: 1}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"sysctls: key True must be a string"):
+            validate(compose)
+
+    def test_extra_hosts_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "extra_hosts": {True: "1.2.3.4"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"extra_hosts: key True must be a string"):
+            validate(compose)
+
+    def test_ulimits_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "ulimits": {True: 100}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"ulimits: key True must be a string"):
+            validate(compose)
+
+    def test_ulimits_nested_soft_hard_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "ulimits": {"nofile": {True: 1024, "hard": 4096}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"ulimits\.nofile: key True must be a string"):
+            validate(compose)
+
+    def test_non_string_service_name_rejected(self) -> None:
+        # F2: the `services` mapping's own keys (service names) were never
+        # checked -- an int/bool name reaches --add-host and --name verbatim.
+        compose = {"services": {"app": {"image": "i"}, True: {"image": "j"}}}
+        with pytest.raises(UnsupportedComposeError, match=r"compose document\.services: key True must be a string"):
+            validate(compose)
+
+    def test_deploy_resources_limits_non_string_key_via_full_pipeline(self) -> None:
+        # A deeper structural key, reached only by walking the whole
+        # document -- confirms the sweep isn't limited to the sites the old
+        # hand-placed calls were wired into.
+        compose = {"services": {"app": {"image": "x", "deploy": {"resources": {"limits": {True: "1"}}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"deploy\.resources\.limits: key True must be a string"):
+            validate(compose)
+
+    def test_secret_definition_non_string_name_via_full_pipeline(self) -> None:
+        compose = {"services": {"app": {"image": "x"}}, "secrets": {1: {"file": "./a"}}}
+        with pytest.raises(UnsupportedComposeError, match=r"compose document\.secrets: key 1 must be a string"):
+            validate(compose)
+
+    def test_top_level_extension_subtree_with_non_string_keys_is_accepted(self) -> None:
+        # x- extension fields legitimately hold arbitrary payloads (e.g.
+        # YAML-anchor sources); their contents are never walked.
+        compose = {"x-anchors": {1: {"a": "b"}}, "services": {"app": {"image": "x"}}}
+        assert validate(compose) == []
+
+    def test_service_level_extension_subtree_with_non_string_keys_is_accepted(self) -> None:
+        compose = {"services": {"app": {"image": "x", "x-meta": {True: [1, {2: "z"}]}}}}
+        assert validate(compose) == []
+
+    def test_ulimits_soft_hard_mapping_still_accepted(self) -> None:
+        compose = {"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": 1024, "hard": 4096}}}}}
+        assert validate(compose) == []
+
+    def test_sysctls_mapping_still_accepted(self) -> None:
+        compose = {"services": {"app": {"image": "x", "sysctls": {"net.core.somaxconn": 1024}}}}
+        assert any("pod-wide" in w for w in validate(compose))
+
+    def test_extra_hosts_map_and_list_forms_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "extra_hosts": {"db": "10.0.0.1"}}}})
+        assert validate({"services": {"app": {"image": "x", "extra_hosts": ["db:10.0.0.1"]}}})
+
+    def test_environment_null_int_float_bool_values_still_accepted(self) -> None:
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "environment": {"A": None, "B": 1, "C": 1.5, "D": True},
+                }
+            }
+        }
+        assert validate(compose) == []
+
+    def test_normal_service_names_with_dots_dashes_underscores_accepted(self) -> None:
+        compose = {"services": {"app.v1": {"image": "x"}, "app-two": {"image": "y"}, "app_3": {"image": "z"}}}
+        assert validate(compose) == []
         assert validate({"services": {"app": {"image": "x", "entrypoint": ["run", "me"]}}}) == []
