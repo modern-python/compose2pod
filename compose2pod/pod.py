@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Expand, Token, extra_host_pairs, split_extra_host, validate_map
+from compose2pod.keys import Expand, Token, extra_host_entries, validate_map
 
 
 _DNS_KEYS = {"dns": "--dns", "dns_search": "--dns-search", "dns_opt": "--dns-option"}
@@ -120,8 +120,7 @@ def _add_host_flags(services: dict[str, Any], order: list[str], hosts: list[str]
         svc = services[name]
         if "extra_hosts" not in svc:
             continue
-        for entry in extra_host_pairs(svc["extra_hosts"]):
-            host, addr = split_extra_host(str(entry))
+        for host, addr in extra_host_entries(svc["extra_hosts"]):
             if merged.get(host, addr) != addr:
                 msg = f"service {name!r}: conflicting host {host!r} ({merged[host]!r} vs {addr!r})"
                 raise UnsupportedComposeError(msg)

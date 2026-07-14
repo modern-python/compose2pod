@@ -243,11 +243,20 @@ def split_extra_host(entry: str) -> tuple[str, str]:
     return host, address
 
 
-def extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
-    """Compose extra_hosts as 'host:ip' entries; map values keep their colons (IPv6-safe)."""
-    if isinstance(value, list):
-        return value
-    return [f"{host}:{_render_scalar(ip)}" for host, ip in value.items()]
+def extra_host_entries(value: list[Any] | dict[str, Any]) -> list[tuple[str, str]]:
+    """Compose extra_hosts as (host, address) pairs, from either form.
+
+    The mapping form arrives already divided, so it is read straight through;
+    only the list form needs splitting. Joining a mapping into 'host:address'
+    and re-splitting it would be lossy -- an address containing '=' would then
+    re-divide at the wrong character.
+    """
+    if isinstance(value, dict):
+        # `_render_scalar` so a boolean address normalizes like `docker compose
+        # config` ('true', not Python's 'True') -- the same rule every other map
+        # value follows.
+        return [(str(host), _render_scalar(address)) for host, address in value.items()]
+    return [split_extra_host(str(item)) for item in value]
 
 
 def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped

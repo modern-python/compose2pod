@@ -49,8 +49,8 @@ def _extends_target(name: str, ext: Any) -> str:  # noqa: ANN401 - Compose value
 def _extra_hosts_to_mapping(name: str, value: list[Any]) -> dict[str, Any]:
     """Normalize list-form `extra_hosts` ('host:ip') to a mapping.
 
-    Not '='-or-'='-only: `pairs_to_mapping` would mangle the whole entry into a
-    single `{'host:ip': None}` key. `keys.split_extra_host` is the one shared
+    `pairs_to_mapping` would mangle an entry into a single `{'host:ip': None}`
+    key, since it splits on '=' only. `keys.split_extra_host` is the one shared
     reader -- Compose's documented `host=ip` and the legacy `host:ip` both work,
     and an IPv6 address keeps its colons.
     """

@@ -193,3 +193,8 @@ class TestExtraHostsSeparators:
         # Used to be accepted and emit the malformed '--add-host "no-separator:"'
         with pytest.raises(UnsupportedComposeError, match="extra_hosts entries must be 'host=ip' or 'host:ip'"):
             validate_pod_options("a", {"image": "x", "extra_hosts": ["no-separator"]})
+
+    def test_mapping_value_containing_an_equals_is_not_re_split(self) -> None:
+        # The mapping form arrives already divided. Joining it into 'host:address'
+        # and re-splitting would divide at the '=' instead.
+        assert self._flags({"somehost": "weird=address"}) == ["--add-host", "somehost:weird=address"]
