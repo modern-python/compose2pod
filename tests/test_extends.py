@@ -2,6 +2,7 @@ from typing import Any, ClassVar
 
 import pytest
 
+from compose2pod.emit import EmitOptions, emit_script
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.extends import _STRUCTURAL_CONCAT_KEYS, _STRUCTURAL_MERGE_KEYS, resolve_extends
 from compose2pod.keys import SERVICE_KEYS
@@ -604,3 +605,61 @@ class TestNullIsNotSpecified:
             }
         }
         assert validate(resolve_extends(doc)) == []
+
+
+class TestNullResetsCommandAndEntrypoint:
+    """A null `command`/`entrypoint` in the extending service ERASES the base's.
+
+    Docker splits here: `environment:`/`volumes:`/`deploy:` null in a child inherit
+    the base's value, but `command:`/`entrypoint:` null erase it -- the image's own
+    default runs. Verified against `docker compose config`: the child's rendered
+    config has no `command` key at all.
+    """
+
+    def _script(self, doc: dict) -> str:
+        options = EmitOptions(
+            target="web",
+            ci_image="ci:latest",
+            command="",
+            pod="test-pod",
+            project_dir=".",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        return emit_script(compose=resolve_extends(doc), options=options)
+
+    def test_null_command_erases_the_inherited_command(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "alpine", "command": ["run", "base"]},
+                "web": {"extends": {"service": "base"}, "command": None},
+            }
+        }
+        assert resolve_extends(doc)["services"]["web"]["command"] is None
+        # The image's own default must run -- the base's argv must not be emitted.
+        # (Assert on the podman-run line, not the whole script: "podman run" contains "run".)
+        run_line = next(line for line in self._script(doc).splitlines() if "--name test-pod-web" in line)
+        assert '"run"' not in run_line, run_line
+        assert '"base"' not in run_line, run_line
+
+    def test_null_entrypoint_erases_the_inherited_entrypoint(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "alpine", "entrypoint": ["/bin/sh", "-c"]},
+                "web": {"extends": {"service": "base"}, "entrypoint": None},
+            }
+        }
+        assert resolve_extends(doc)["services"]["web"]["entrypoint"] is None
+        assert "--entrypoint" not in self._script(doc)
+
+    def test_null_deploy_still_inherits(self) -> None:
+        # deploy allows a null too, but Docker INHERITS it -- so the reset set is
+        # {command, entrypoint}, not "every key that tolerates a null".
+        doc = {
+            "services": {
+                "base": {"image": "alpine", "deploy": {"resources": {"limits": {"memory": "100M"}}}},
+                "web": {"extends": {"service": "base"}, "deploy": None},
+            }
+        }
+        assert resolve_extends(doc)["services"]["web"]["deploy"] == {"resources": {"limits": {"memory": "100M"}}}
+        assert "--memory" in self._script(doc)

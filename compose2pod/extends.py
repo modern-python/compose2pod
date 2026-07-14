@@ -20,6 +20,13 @@ _STRUCTURAL_CONCAT_KEYS = {"secrets", "configs", "volumes", "tmpfs", "env_file"}
 # other would accept a shape the gate refuses standalone.
 _SCALAR_FORM_KEYS = {"tmpfs", "env_file"}
 
+# The keys where an explicit null in the extending service RESETS the inherited
+# value rather than meaning "not specified". Docker erases a child's null
+# `command:`/`entrypoint:` so the image's own default runs, while a child's null
+# `environment:`/`volumes:`/`deploy:`/... inherits the base's value -- so this is
+# not "the keys that tolerate a null" (`deploy` tolerates one and inherits).
+_RESET_ON_NULL_KEYS = {"command", "entrypoint"}
+
 
 def _extends_target(name: str, ext: Any) -> str:  # noqa: ANN401 - Compose values are untyped
     """Return the referenced service name, after refusing cross-file and malformed forms."""
@@ -115,12 +122,18 @@ def _merge(base: dict[str, Any], local: dict[str, Any], name: str, base_name: st
     merged: dict[str, Any] = dict(base)
     for key, local_val in local.items():
         spec = SERVICE_KEYS.get(key)
-        if key in base and (local_val is None or base[key] is None):
-            # A null side means "not specified", so the other side's value
-            # survives -- what Docker does, and what keeps a document valid
-            # through `extends` if it is valid standalone. A null on *both*
-            # sides survives resolution, and the gate refuses it (as Docker
-            # refuses a null no inheritance overwrote).
+        if key in base and local_val is None and key in _RESET_ON_NULL_KEYS:
+            # An explicit null `command:`/`entrypoint:` in the extending service
+            # is a *reset*, not an omission: Docker erases the inherited value and
+            # the image's own default runs. (`deploy:` tolerates a null too but
+            # inherits, so this is not simply "the keys that allow a null".)
+            merged[key] = None
+        elif key in base and (local_val is None or base[key] is None):
+            # Every other null side means "not specified", so the other side's
+            # value survives -- what Docker does, and what keeps a document valid
+            # through `extends` if it is valid standalone. A null on *both* sides
+            # survives resolution, and the gate refuses it (as Docker refuses a
+            # null that no inheritance overwrote).
             merged[key] = base[key] if local_val is None else local_val
         elif key in base and spec is not None and spec.merge is not None:
             # A merge must never *widen* what the gate accepts. `resolve_extends`

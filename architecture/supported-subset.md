@@ -274,14 +274,15 @@ slot (`architecture/glossary.md`).
   incompatible forms`. A malformed *form* is reported against the service the
   value belongs to — the base, when it is the base's value at fault, not the
   service extending it.
-- **A null side means "not specified".** An explicitly-null value on either
-  side of a merge is not a form at all, so the other side's value survives: a
-  null in the extending service inherits the base's value (what Docker does),
-  and a null in the base takes the extending service's. A null on *both* sides
-  survives resolution and the gate then refuses it — as Docker refuses a null
-  that no inheritance overwrote. This is what makes the invariant hold in both
-  directions: a value the gate accepts standalone is accepted through
-  `extends`, and one it refuses standalone is refused through `extends`.
+- **A null in the extending service means "not specified"** — the base's value
+  is inherited, as Docker does. **Except `command` and `entrypoint`, where a
+  null is a *reset*:** Docker erases the inherited value so the image's own
+  default runs, and so does compose2pod. (`deploy` tolerates a null and
+  inherits, so the reset set is not simply "the keys that allow a null".)
+  A null in the *base* cannot be observed in a document that passes the gate —
+  the base is itself a service, so `_reject_null_values` refuses its null
+  first, exactly as Docker does; the merge handles it only to report the error
+  against the base rather than the service extending it.
 - **Divergences from Compose:** short-form `volumes` are concatenated rather
   than merged by target path; podman resolves duplicate mounts at run time.
   Referenced resources
