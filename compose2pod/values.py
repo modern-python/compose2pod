@@ -39,6 +39,9 @@ _SIZE = re.compile(
 # Docker refuses a bare `90` with "missing unit in duration".
 _DURATION = re.compile(r"^[+-]?(?:[0-9]+(?:\.[0-9]+)?(?:ns|us|µs|ms|s|m|h))+$")
 
+# The highest valid TCP/UDP port number, per Docker's own bound.
+_MAX_PORT = 65535
+
 # One side of a port mapping: a single port or an inclusive range.
 _PORT_RANGE = r"[0-9]+(?:-[0-9]+)?"
 # [[IP:]HOST:]CONTAINER[/PROTO] -- the IP may be IPv4 or bracketed IPv6.
@@ -153,14 +156,20 @@ def _ranges_compatible(host: str | None, container: str) -> bool:
     A range must ascend (start <= end). If the container side is a range, a
     present host side must be a range of the same length; a host range paired
     with a single container port is fine (each host port maps to it).
+
+    Bounds are asymmetric, as measured against `docker compose config`: the
+    container (target) port must be 1-65535 -- 0 is rejected as "missing a
+    target port", not treated as a wildcard. The host (published) port may be
+    0 (meaning "pick a free port"), so its floor is 0, not 1. Both endpoints
+    of a range are held to the same bound as a single port on that side.
     """
     c_start, c_end = _parse_port_range(container)
-    if c_start > c_end:
+    if c_start > c_end or not (1 <= c_start <= _MAX_PORT and c_end <= _MAX_PORT):
         return False
     if host is None:
         return True
     h_start, h_end = _parse_port_range(host)
-    if h_start > h_end:
+    if h_start > h_end or h_end > _MAX_PORT:
         return False
     c_len = c_end - c_start + 1
     return c_len == 1 or h_end - h_start + 1 == c_len
@@ -171,11 +180,16 @@ def _validate_port_entry(name: str, key: str, entry: Any) -> None:  # noqa: ANN4
         # Long form ({target, published, ...}); compose2pod ignores `ports`
         # entirely, so its inner keys are Docker's business, not ours.
         return
-    if _is_int(entry):
-        return
     if has_variable(entry):
         return
-    if isinstance(entry, str):
+    # A bare int is a container-only mapping (no host prefix): the same
+    # 1-65535 bound applies as the container side of a string mapping. Bound
+    # it directly rather than routing through `_parse_port_range`, which
+    # splits on "-" and would misparse a negative int stringified.
+    if _is_int(entry):
+        if 1 <= entry <= _MAX_PORT:
+            return
+    elif isinstance(entry, str):
         match = _PORT.match(entry)
         if match and _ranges_compatible(match.group("host"), match.group("container")):
             return

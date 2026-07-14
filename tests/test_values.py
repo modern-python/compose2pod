@@ -197,3 +197,38 @@ def test_validate_ports_accepts_compatible_ranges(value: object) -> None:
 def test_validate_ports_rejects_incompatible_ranges(value: object) -> None:
     with pytest.raises(UnsupportedComposeError, match="ports"):
         validate_ports("app", "ports", value)
+
+
+# Measured against `docker compose config` v5.1.2: the container (target) port
+# must be 1-65535 -- 0 is rejected as "missing a target port", not accepted as
+# a wildcard. The host (published) port allows 0 (meaning "pick a free port"),
+# so its floor is 0, not 1 -- the two sides are not symmetric.
+@pytest.mark.parametrize(
+    "value",
+    [
+        ["1:1"],
+        ["65535:65535"],
+        ["0:80"],
+        [1],
+        [65535],
+    ],
+)
+def test_validate_ports_accepts_bounds(value: object) -> None:
+    validate_ports("app", "ports", value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ["0:0"],  # missing target port
+        ["8080:0"],  # missing target port
+        ["65536:80"],  # invalid hostPort: 65536
+        ["80:65536"],  # invalid containerPort: 65536
+        ["1-65536:80"],  # invalid hostPort: 1-65536 (range upper bound out of range)
+        [0],  # bare container port: missing target port
+        [65536],  # bare container port: invalid containerPort: 65536
+    ],
+)
+def test_validate_ports_rejects_out_of_bounds(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="ports"):
+        validate_ports("app", "ports", value)
