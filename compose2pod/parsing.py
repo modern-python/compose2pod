@@ -27,9 +27,11 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
     if not isinstance(healthcheck, dict):
         msg = f"service {name!r}: healthcheck must be a mapping"
         raise UnsupportedComposeError(msg)
-    # Non-string healthcheck keys are already rejected by validate()'s
-    # document-wide _require_string_keys_deep sweep, which runs before this
-    # function is ever reached.
+    # Redundant with validate()'s _sweep_document when reached through
+    # validate() (the only caller today), but this function has its own
+    # contract as a module entry point -- belt-and-braces, not load-bearing
+    # only by luck of the current call graph.
+    require_string_keys(f"service {name!r}: healthcheck", healthcheck)
     for key in sorted(healthcheck):
         if key.startswith("x-"):
             continue
@@ -158,9 +160,11 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     if not isinstance(svc, dict):
         msg = f"service {name!r} must be a mapping"
         raise UnsupportedComposeError(msg)
-    # Non-string service-body keys are already rejected by validate()'s
-    # document-wide _require_string_keys_deep sweep, which runs before this
-    # function is ever reached.
+    # Redundant with validate()'s _sweep_document when reached through
+    # validate() (the only caller today), but this function has its own
+    # contract as a module entry point -- belt-and-braces, not load-bearing
+    # only by luck of the current call graph.
+    require_string_keys(f"service {name!r}", svc)
     warnings: list[str] = []
     for key in sorted(svc):
         if key.startswith("x-"):
@@ -207,17 +211,17 @@ def _require_string_keys_deep(where: str, node: Any) -> None:  # noqa: ANN401 - 
       -- they were only wired into mappings whose keys get sorted or
       startswith'd, never the ones whose keys get f-string'd into a flag.
 
-    Walking the whole document once, recursively, from `validate()`'s entry
-    point closes both classes uniformly regardless of which mapping --
-    existing or future -- a non-string key turns up in, rather than trusting
-    every new structural key's validator to remember to call
-    `require_string_keys` by hand.
-
     `x-`-prefixed keys' *values* are not recursed into: Compose extension
     fields legitimately hold arbitrary user payloads (e.g. anchor sources
     reused via YAML merge keys), and compose2pod accepts and ignores their
     contents by design. The `x-` key itself is still checked, trivially: it
-    is a string by construction (its own name has to look like `x-...`).
+    is a string by construction (its own name has to look like `x-...`). This
+    skip is only ever correct for a key that plays the role of "extension
+    field name" in the node being walked -- callers (`_sweep_document`/
+    `_sweep_service`) are responsible for never handing this function a
+    mapping whose keys are *identifiers* (a service name, a store name)
+    rather than content keys, since an identifier starting with `x-` is not
+    an extension field.
 
     Rejecting a non-string key is a deliberate divergence from Docker for
     map-typed *keys* specifically (Docker accepts `environment: {3306: db}`):
@@ -239,6 +243,60 @@ def _require_string_keys_deep(where: str, node: Any) -> None:  # noqa: ANN401 - 
     elif isinstance(node, list):
         for item in node:
             _require_string_keys_deep(where, item)
+
+
+def _sweep_service(name: str, svc: dict[str, Any]) -> None:
+    """Require every mapping key in one service body to be a string, at every depth.
+
+    The service's own top-level keys are always checked (`require_string_keys`
+    below), regardless of what the service's *name* looks like -- this
+    function is only ever called with the real body of a real service,
+    including one literally named `x-web` (see `_sweep_document`). Only the
+    service's *own* `x-`-prefixed keys are skipped, same as everywhere else
+    `x-` is treated as an extension-field marker.
+    """
+    where = f"service {name!r}"
+    require_string_keys(where, svc)
+    for key, value in svc.items():
+        if key.startswith("x-"):
+            continue
+        _require_string_keys_deep(f"{where}.{key}", value)
+
+
+def _sweep_document(compose: dict[str, Any]) -> None:
+    """Require every mapping key, at every depth of `compose`, to be a string.
+
+    Behaves like calling `_require_string_keys_deep("compose document",
+    compose)` directly, with one correction: the `services` mapping's own
+    keys (service *names*), and each top-level `secrets`/`configs`
+    definition's own name, are always swept regardless of what the name
+    looks like, rather than treated as extension-field markers when they
+    start with `x-`. `validate()` iterates `services.items()` with no `x-`
+    filter, so a service literally named `x-web` is a real service, not an
+    extension field -- conflating a NAME with a content key let such a
+    service's whole body escape the sweep entirely (see `_sweep_service`).
+    `stores._validate_def` accepts a store name matching
+    `[a-zA-Z0-9][a-zA-Z0-9_.-]*`, which does not exclude one starting `x-`
+    either, so the same correction applies there.
+    """
+    require_string_keys("compose document", compose)
+    services = compose.get("services")
+    if isinstance(services, dict):
+        require_string_keys("compose document.services", services)
+        for name, svc in services.items():
+            if isinstance(svc, dict):
+                _sweep_service(name, svc)
+    for top_key in ("secrets", "configs"):
+        defs = compose.get(top_key)
+        if isinstance(defs, dict):
+            require_string_keys(f"compose document.{top_key}", defs)
+            for def_name, definition in defs.items():
+                if isinstance(definition, dict):
+                    _require_string_keys_deep(f"compose document.{top_key}.{def_name}", definition)
+    for key, value in compose.items():
+        if key in ("services", "secrets", "configs") or key.startswith("x-"):
+            continue
+        _require_string_keys_deep(f"compose document.{key}", value)
 
 
 def _validate_depends_on(services: dict[str, Any]) -> None:
@@ -266,7 +324,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
     # mapping's keys directly (sorted(), .startswith()) or f-string-
     # interpolates one into a flag value can assume every key in the document
     # is a string from this point on.
-    _require_string_keys_deep("compose document", compose)
+    _sweep_document(compose)
     warnings: list[str] = []
     unknown_top = {k for k in compose if k not in SUPPORTED_TOP_LEVEL_KEYS and not k.startswith("x-")}
     if unknown_top:

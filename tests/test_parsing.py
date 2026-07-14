@@ -697,3 +697,47 @@ class TestRequireStringKeysDeep:
         compose = {"services": {"app.v1": {"image": "x"}, "app-two": {"image": "y"}, "app_3": {"image": "z"}}}
         assert validate(compose) == []
         assert validate({"services": {"app": {"image": "x", "entrypoint": ["run", "me"]}}}) == []
+
+
+class TestSweepServiceNamedExtensionPrefix:
+    """A service literally named `x-web` is a real service, not an extension field.
+
+    `validate()` iterates `services.items()` with no `x-` filter, so a
+    service named `x-web` is planned and emitted like any other service.
+    The sweep's `x-` skip is syntactic (`key.startswith("x-")`) but its
+    rationale is semantic ("a subtree we ignore"); on the `services`
+    mapping's own keys those two diverge, since a service name is an
+    identifier, not an extension-field marker. This regression let such a
+    service's whole body escape the sweep -- see _sweep_service/_sweep_document.
+    """
+
+    def test_top_level_body_non_string_key_rejected_cleanly(self) -> None:
+        # Before the fix: _validate_service's own sorted(svc) crashed raw
+        # (`TypeError: '<' not supported between instances of 'int' and
+        # 'str'`) because the sweep skipped this service's body entirely.
+        compose = {"services": {"x-web": {"image": "alpine", 3306: "db"}}}
+        with pytest.raises(UnsupportedComposeError, match=r"service 'x-web': key 3306 must be a string"):
+            validate(compose)
+
+    def test_healthcheck_non_string_key_rejected_cleanly(self) -> None:
+        # Same escape, reached via _validate_service_healthcheck's own
+        # sorted(healthcheck) instead.
+        compose = {"services": {"x-web": {"image": "alpine", "healthcheck": {3: "x"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"service 'x-web'\.healthcheck: key 3 must be a string"):
+            validate(compose)
+
+    def test_nested_map_non_string_key_rejected_cleanly(self) -> None:
+        # Before the fix: validate() returned [] (no warnings, no raise) and
+        # emit_script rendered `-e "True=1" --label "True=v"` -- the Python
+        # repr of the YAML-1.1 bareword keys `on`/`yes`, leaked verbatim.
+        compose = {
+            "services": {
+                "x-web": {"image": "alpine", "environment": {True: 1}, "labels": {True: "v"}},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"service 'x-web'\.environment: key True must be a string"):
+            validate(compose)
+
+    def test_well_formed_is_accepted_as_a_real_service(self) -> None:
+        compose = {"services": {"x-web": {"image": "alpine"}}}
+        assert validate(compose) == []

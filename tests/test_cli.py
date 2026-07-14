@@ -258,6 +258,19 @@ class TestMain:
         assert rc == 0
         assert "podman pod create" in out.out
 
+    def test_non_string_key_from_x_block_anchor_merged_into_service_is_rejected(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # PyYAML resolves anchors/merge keys at load time, so content whose
+        # *source* lived in a skipped x- block lands in the service body as
+        # ordinary content once merged -- it must still be swept there.
+        yaml_text = (
+            "x-common: &common\n  environment:\n    on: 1\nservices:\n  app:\n    image: alpine\n    <<: *common\n"
+        )
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "key True must be a string" in capsys.readouterr().err
+
 
 class TestModuleEntrypoint:
     def test_python_m_runs(self, chats_compose: dict) -> None:
