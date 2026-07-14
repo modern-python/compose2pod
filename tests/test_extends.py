@@ -436,6 +436,28 @@ class TestMergeErrorAttribution:
         with pytest.raises(UnsupportedComposeError, match="service 'web': 'cap_add' must be a list"):
             resolve_extends(doc)
 
+    def test_structural_concat_base_value_blames_the_base(self) -> None:
+        # `_as_concat_list` path, not the registry one.
+        doc = {
+            "services": {
+                "base": {"image": "x", "volumes": "./a:/a"},
+                "web": {"extends": {"service": "base"}, "volumes": ["./b:/b"]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="service 'base': 'volumes' must be a list"):
+            resolve_extends(doc)
+
+    def test_structural_mapping_base_value_blames_the_base(self) -> None:
+        # `_as_mapping` path: healthcheck has no list form.
+        doc = {
+            "services": {
+                "base": {"image": "x", "healthcheck": ["bad"]},
+                "web": {"extends": {"service": "base"}, "healthcheck": {"test": ["CMD", "x"]}},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="service 'base': cannot merge 'healthcheck'"):
+            resolve_extends(doc)
+
 
 class TestExtraHostsListFormMerge:
     """extra_hosts has a list form in Compose, so a merge normalizes it -- correctly."""

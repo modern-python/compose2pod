@@ -236,11 +236,12 @@ slot (`architecture/glossary.md`).
     as it would without `extends`.
   - **Normalization before merge — a merge never widens the gate.** A merged
     side is normalized only through a form that key *actually has*: list-form
-    `environment`, `extra_hosts` and `depends_on` become mappings before the
-    mapping-merge, and scalar-form `tmpfs`/`env_file` become a one-element
-    list before the concatenation. Nothing else is coerced. This matters
-    because `resolve_extends` runs **ahead of** `validate()`: normalizing a
-    form a key does not have would hand the gate a document it would have
+    `environment`, `labels`, `annotations`, `extra_hosts` and `depends_on`
+    become mappings before the mapping-merge, and scalar-form `tmpfs`/`env_file`
+    become a one-element list before the concatenation. Nothing else is
+    coerced. This matters because `resolve_extends` runs **ahead of**
+    `validate()`: normalizing a form a key does not have would hand the gate a
+    document it would have
     refused standalone. So `ulimits` and `healthcheck` (no list form) refuse a
     list, and every list-only key (`cap_add`, `cap_drop`, `security_opt`,
     `devices`, `group_add`, `volumes`, `secrets`, `configs`) refuses a bare
@@ -261,9 +262,11 @@ slot (`architecture/glossary.md`).
   side whose form that key does not have. A registry key raises with its own
   validator's message (`'cap_add' must be a list`), the same message the value
   produces standalone; a structural key raises `cannot merge '<key>' across
-  incompatible forms`. Either way the error names the service the offending
-  value belongs to — the base, when it is the base's value that is malformed,
-  not the service extending it.
+  incompatible forms`. A malformed *form* is reported against the service the
+  value belongs to — the base, when it is the base's value at fault, not the
+  service extending it. (One exception: an explicit `null` on a mergeable key
+  is valid standalone but refused on merge, and a null in the base is reported
+  against the extending service.)
 - **Divergences from Compose:** short-form `volumes` are concatenated rather
   than merged by target path; podman resolves duplicate mounts at run time.
   Referenced resources
