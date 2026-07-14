@@ -34,7 +34,13 @@ class TestValidateDeploy:
             validate_deploy("app", _svc({"resources": {"foo": {}}}))
 
     def test_resources_absent_is_noop(self) -> None:
-        validate_deploy("app", _svc({"resources": None}))
+        # Genuinely absent -- a document not asking for resources at all.
+        validate_deploy("app", _svc({}))
+
+    def test_null_resources_is_refused(self) -> None:
+        # `resources:` with its contents deleted. docker compose config refuses it.
+        with pytest.raises(UnsupportedComposeError, match=r"'deploy.resources' must not be null"):
+            validate_deploy("app", _svc({"resources": None}))
 
     def test_resources_not_mapping_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"deploy.resources must be a mapping"):
@@ -89,11 +95,14 @@ class TestValidateDeploy:
         with pytest.raises(UnsupportedComposeError, match=match):
             validate_deploy("app", _svc(deploy, mem_reservation="256m"))
 
-    def test_null_limits_is_noop(self) -> None:
-        validate_deploy("app", _svc({"resources": {"limits": None}}))
+    def test_null_limits_is_refused(self) -> None:
+        # Used to emit no --memory/--cpus at all: the limits silently did not exist.
+        with pytest.raises(UnsupportedComposeError, match=r"'deploy.resources.limits' must not be null"):
+            validate_deploy("app", _svc({"resources": {"limits": None}}))
 
-    def test_null_reservations_is_noop(self) -> None:
-        validate_deploy("app", _svc({"resources": {"reservations": None}}))
+    def test_null_reservations_is_refused(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'deploy.resources.reservations' must not be null"):
+            validate_deploy("app", _svc({"resources": {"reservations": None}}))
 
     def test_deploy_mixed_type_unknown_keys_do_not_crash_raw(self) -> None:
         # sorted(unknown) used to crash raw (TypeError: '<' not supported

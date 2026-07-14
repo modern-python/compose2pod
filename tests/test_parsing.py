@@ -371,20 +371,6 @@ class TestValidate:
         }
         assert validate(compose) == []
 
-    def test_healthcheck_scalars_accept_explicit_null(self) -> None:
-        # A null scalar is treated as unset (see emit._health_flags), same
-        # ruling `environment`/`volumes`/`command` already get for a null
-        # value -- it must not raise at the gate.
-        compose = {
-            "services": {
-                "app": {
-                    "image": "x",
-                    "healthcheck": {"test": "true", "retries": None, "timeout": None, "start_period": None},
-                }
-            }
-        }
-        assert validate(compose) == []
-
     def test_healthcheck_retries_mapping_rejected_at_gate(self) -> None:
         # Used to be silently accepted and mis-emitted as the literal
         # --health-retries "{'a': 1}".
@@ -960,3 +946,52 @@ class TestNullValuePolicy:
     def test_absent_key_is_not_a_null_key(self) -> None:
         # The check is about a key present with no value, not a key that is missing.
         assert validate({"services": {"app": {"image": "x"}}}) == []
+
+
+class TestNullContentBlocks:
+    """A null is refused wherever `docker compose config` refuses one.
+
+    compose2pod is a drop-in replacement for `docker compose` on rootless
+    runners: the file it converts is the file the developer runs locally. A
+    document Docker will not run must not pass CI green here, so accepting a
+    null it refuses would ship a false green. Verdicts measured against
+    `docker compose config` v5.1.2, position by position.
+    """
+
+    HEALTHCHECK_SCALARS = ("interval", "timeout", "retries", "start_period")
+    TOP_LEVEL_BLOCKS = ("networks", "volumes", "secrets", "configs")
+
+    @pytest.mark.parametrize("key", HEALTHCHECK_SCALARS)
+    def test_null_healthcheck_scalar_is_refused(self, key: str) -> None:
+        # Reverses the earlier "null scalar means unset" ruling: that was taken on
+        # the premise it matched Docker, and Docker refuses all four.
+        healthcheck = {"test": ["CMD", "true"], key: None}
+        with pytest.raises(UnsupportedComposeError, match=f"healthcheck '{key}' must not be null"):
+            validate({"services": {"app": {"image": "x", "healthcheck": healthcheck}}})
+
+    @pytest.mark.parametrize("key", TOP_LEVEL_BLOCKS)
+    def test_null_top_level_block_is_refused(self, key: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match=f"top-level '{key}' must not be null"):
+            validate({"services": {"app": {"image": "x"}}, key: None})
+
+    def test_null_healthcheck_test_is_refused(self) -> None:
+        # Used to emit no --health-cmd at all: the check silently evaporated.
+        with pytest.raises(UnsupportedComposeError, match="healthcheck 'test' must not be null"):
+            validate({"services": {"app": {"image": "x", "healthcheck": {"test": None, "interval": "1s"}}}})
+
+    def test_null_deploy_resources_is_refused(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'deploy\.resources' must not be null"):
+            validate({"services": {"app": {"image": "x", "deploy": {"resources": None}}}})
+
+    def test_null_deploy_limits_is_refused(self) -> None:
+        # Used to emit no --memory/--cpus: the limits silently did not exist.
+        with pytest.raises(UnsupportedComposeError, match=r"'deploy\.resources\.limits' must not be null"):
+            validate({"services": {"app": {"image": "x", "deploy": {"resources": {"limits": None}}}}})
+
+    def test_null_deploy_reservations_is_refused(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'deploy\.resources\.reservations' must not be null"):
+            validate({"services": {"app": {"image": "x", "deploy": {"resources": {"reservations": None}}}}})
+
+    def test_absent_blocks_are_not_null_blocks(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "deploy": {"resources": {}}}}}) == []
+        assert validate({"services": {"app": {"image": "x", "healthcheck": {"test": ["CMD", "true"]}}}}) == []

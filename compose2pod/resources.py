@@ -17,8 +17,8 @@ def _check_number(name: str, field: str, value: Any) -> None:  # noqa: ANN401 - 
 
 
 def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # noqa: ANN401 - Compose values are untyped
-    if limits is None:
-        return
+    # No `limits is None` escape: `_reject_null_block` refuses a null `limits:`
+    # upstream, so a null reaching here is a wrong shape like any other.
     if not isinstance(limits, dict):
         msg = f"service {name!r}: deploy.resources.limits must be a mapping"
         raise UnsupportedComposeError(msg)
@@ -36,8 +36,7 @@ def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # no
 
 
 def _validate_reservations(name: str, svc: dict[str, Any], reservations: Any) -> None:  # noqa: ANN401 - Compose values are untyped
-    if reservations is None:
-        return
+    # No `reservations is None` escape -- see `_validate_limits`.
     if not isinstance(reservations, dict):
         msg = f"service {name!r}: deploy.resources.reservations must be a mapping"
         raise UnsupportedComposeError(msg)
@@ -57,6 +56,19 @@ def _validate_reservations(name: str, svc: dict[str, Any], reservations: Any) ->
             raise UnsupportedComposeError(msg)
 
 
+def _reject_null_block(name: str, path: str, parent: dict[str, Any], key: str) -> None:
+    """Refuse a null where a block of content belongs.
+
+    `deploy: {resources: {limits: }}` is the limits' contents deleted, not a
+    request for no limits: emit would silently drop `--memory`/`--cpus` and say
+    nothing. A key that is simply *absent* is fine -- that is a document not
+    asking for limits at all.
+    """
+    if key in parent and parent[key] is None:
+        msg = f"service {name!r}: '{path}' must not be null"
+        raise UnsupportedComposeError(msg)
+
+
 def validate_deploy(name: str, svc: dict[str, Any]) -> None:
     """Validate a service's deploy block: only deploy.resources, only mappable fields, no legacy conflicts."""
     deploy = svc.get("deploy")
@@ -70,12 +82,15 @@ def validate_deploy(name: str, svc: dict[str, Any]) -> None:
     if unknown:
         msg = f"service {name!r}: deploy: only 'resources' is supported (got {sorted(unknown)})"
         raise UnsupportedComposeError(msg)
+    _reject_null_block(name, "deploy.resources", deploy, "resources")
     resources = deploy.get("resources")
     if resources is None:
         return
     if not isinstance(resources, dict):
         msg = f"service {name!r}: deploy.resources must be a mapping"
         raise UnsupportedComposeError(msg)
+    _reject_null_block(name, "deploy.resources.limits", resources, "limits")
+    _reject_null_block(name, "deploy.resources.reservations", resources, "reservations")
     require_string_keys(f"service {name!r}: deploy.resources", resources)
     unknown = set(resources) - {"limits", "reservations"}
     if unknown:
