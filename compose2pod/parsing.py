@@ -218,10 +218,15 @@ def _require_string_keys_deep(where: str, node: Any) -> None:  # noqa: ANN401 - 
     is a string by construction (its own name has to look like `x-...`). This
     skip is only ever correct for a key that plays the role of "extension
     field name" in the node being walked -- callers (`_sweep_document`/
-    `_sweep_service`) are responsible for never handing this function a
-    mapping whose keys are *identifiers* (a service name, a store name)
+    `_sweep_service`/`_sweep_identifier_map`) are responsible for never
+    handing this function a mapping whose keys are *identifiers* (a service
+    name, a store name, a dependency name, a network name, a ulimit name)
     rather than content keys, since an identifier starting with `x-` is not
-    an extension field.
+    an extension field. `_sweep_document` sweeps `services`/`secrets`/
+    `configs` names this way already; `_sweep_identifier_map` does the same
+    for the identifier-keyed *service* keys (`depends_on`, `networks`,
+    `ulimits`) before handing each identifier's own content to this
+    function.
 
     Rejecting a non-string key is a deliberate divergence from Docker for
     map-typed *keys* specifically (Docker accepts `environment: {3306: db}`):
@@ -245,6 +250,39 @@ def _require_string_keys_deep(where: str, node: Any) -> None:  # noqa: ANN401 - 
             _require_string_keys_deep(where, item)
 
 
+_IDENTIFIER_KEYED_SERVICE_KEYS = {"depends_on", "networks", "ulimits"}
+
+
+def _sweep_identifier_map(where: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    """Sweep a service key whose mapping form is keyed by another entity's *identifier*.
+
+    `depends_on` (dependency = another service's name), `networks` (a
+    network's name), and `ulimits` (a resource-limit category's name) all
+    key their mapping form by an identifier, not a content key -- unlike
+    `environment`/`labels`/`sysctls`/etc., where the map key itself *is*
+    content. `_require_string_keys_deep`'s blanket `x-` skip is only correct
+    for content keys (see its docstring): fed an identifier map directly, it
+    would treat a dependency/network/ulimit literally named `x-foo` as an
+    extension field and skip checking its value, the same conflation that
+    made a service named `x-web` fall through the old sweep. So the
+    identifiers here are checked with `require_string_keys` (no `x-` skip --
+    an identifier starting with `x-` is still a real identifier), and only
+    each identifier's own *value* -- ordinary content from that point on --
+    is handed to the `x-`-skipping deep walk.
+
+    List-form (`depends_on: [...]`/`networks: [...]`) and absent/null values
+    are not identifier-keyed at all; they fall through to the plain deep
+    walk unchanged.
+    """
+    full = f"{where}.{key}"
+    if not isinstance(value, dict):
+        _require_string_keys_deep(full, value)
+        return
+    require_string_keys(full, value)
+    for identifier, content in value.items():
+        _require_string_keys_deep(f"{full}.{identifier}", content)
+
+
 def _sweep_service(name: str, svc: dict[str, Any]) -> None:
     """Require every mapping key in one service body to be a string, at every depth compose2pod reads.
 
@@ -258,14 +296,19 @@ def _sweep_service(name: str, svc: dict[str, Any]) -> None:
     `image_for` never reads its contents -- see
     architecture/supported-subset.md) and any `x-`-prefixed key (an
     extension field whose value is arbitrary user payload, by design, same
-    as everywhere else `x-` is skipped). Everything else is swept
-    recursively, since every other service key's value compose2pod either
-    reads structurally or emits into the generated script.
+    as everywhere else `x-` is skipped). `depends_on`/`networks`/`ulimits`
+    are identifier-keyed and go through `_sweep_identifier_map` instead of
+    the plain deep walk (see there). Everything else is swept recursively,
+    since every other service key's value compose2pod either reads
+    structurally or emits into the generated script.
     """
     where = f"service {name!r}"
     require_string_keys(where, svc)
     for key, value in svc.items():
         if key == "build" or key.startswith("x-"):
+            continue
+        if key in _IDENTIFIER_KEYED_SERVICE_KEYS:
+            _sweep_identifier_map(where, key, value)
             continue
         _require_string_keys_deep(f"{where}.{key}", value)
 

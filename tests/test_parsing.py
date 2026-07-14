@@ -730,6 +730,72 @@ class TestRequireStringKeysDeep:
         assert validate(compose) == []
         assert validate({"services": {"app": {"image": "x", "entrypoint": ["run", "me"]}}}) == []
 
+    def test_deep_x_prefixed_key_skip_is_load_bearing(self) -> None:
+        # Mutant check: deleting `if key.startswith("x-"): continue` from
+        # _require_string_keys_deep makes this raise (it would recurse into
+        # the x- key's value and hit the non-string key 3). The existing
+        # x- tests only cover a top-level x- block (never walked) and a
+        # service-level x- key (skipped by _sweep_service before it ever
+        # reaches _require_string_keys_deep) -- neither exercises the skip
+        # *inside* the deep walk itself, at a nesting level the walk (not
+        # _sweep_service) is the one doing the skipping.
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "healthcheck": {"test": "true", "x-note": {3: 4}},
+                }
+            }
+        }
+        assert validate(compose) == []
+
+
+class TestIdentifierKeyedServiceKeysNotTreatedAsExtensionFields:
+    """depends_on/networks/ulimits key their mapping form by an *identifier*, not a content key.
+
+    _require_string_keys_deep's `x-` skip is only correct for content keys
+    (see its docstring) -- an identifier that happens to start with `x-` is
+    still a real identifier (a dependency, a network, a ulimit category),
+    the same distinction that matters for a service literally named
+    `x-web` (see TestSweepServiceNamedExtensionPrefix). Fed directly to the
+    deep walk, these identifier-keyed maps would let a malformed subtree
+    under an `x-`-prefixed identifier escape the sweep entirely -- closed by
+    _sweep_identifier_map, which checks the identifiers themselves (no `x-`
+    skip) before handing each identifier's own value to the ordinary
+    (`x-`-skipping) deep walk.
+    """
+
+    def test_dependency_named_extension_prefix_content_rejected(self) -> None:
+        compose = {
+            "services": {
+                "x-dep": {"image": "a"},
+                "web": {"image": "b", "depends_on": {"x-dep": {3: 4}}},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on\.x-dep: key 3 must be a string"):
+            validate(compose)
+
+    def test_network_named_extension_prefix_content_rejected(self) -> None:
+        compose = {"services": {"web": {"image": "a", "networks": {"x-net": {3: 4}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"networks\.x-net: key 3 must be a string"):
+            validate(compose)
+
+    def test_ulimit_named_extension_prefix_content_rejected(self) -> None:
+        compose = {"services": {"web": {"image": "a", "ulimits": {"x-lim": {3: 4}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"ulimits\.x-lim: key 3 must be a string"):
+            validate(compose)
+
+    def test_dependency_named_extension_prefix_well_formed_is_accepted(self) -> None:
+        # The identifier itself starting with x- is not rejected -- only a
+        # malformed subtree under it is.
+        compose = {
+            "services": {
+                "x-dep": {"image": "a"},
+                "web": {"image": "b", "depends_on": ["x-dep"]},
+            }
+        }
+        assert validate(compose) == []
+
 
 class TestSweepServiceNamedExtensionPrefix:
     """A service literally named `x-web` is a real service, not an extension field.
