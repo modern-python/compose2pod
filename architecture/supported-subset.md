@@ -234,26 +234,32 @@ slot (`architecture/glossary.md`).
     `entrypoint` (argv replaced wholesale, never concatenated) — also
     covers unknown keys, which `validate()` then rejects downstream exactly
     as it would without `extends`.
-  - **Normalization before merge:** list-form `environment` and list-form
-    `depends_on` (a bare service-name list) are normalized to mappings
-    before the mapping-merge; scalar-form `tmpfs`/`env_file` are normalized
-    to a one-element list before the concatenation.
+  - **Normalization before merge — a merge never widens the gate.** A merged
+    side is normalized only through a form that key *actually has*: list-form
+    `environment`, `extra_hosts` and `depends_on` become mappings before the
+    mapping-merge, and scalar-form `tmpfs`/`env_file` become a one-element
+    list before the concatenation. Nothing else is coerced. This matters
+    because `resolve_extends` runs **ahead of** `validate()`: normalizing a
+    form a key does not have would hand the gate a document it would have
+    refused standalone. So `ulimits` and `healthcheck` (no list form) refuse a
+    list, and every list-only key (`cap_add`, `cap_drop`, `security_opt`,
+    `devices`, `group_add`, `volumes`, `secrets`, `configs`) refuses a bare
+    scalar — exactly as each does outside `extends`. The accepted forms are
+    read from each key's own validator (`spec.validate` runs on both sides
+    before `spec.merge`), so the merge policy cannot drift from the gate.
+    `extra_hosts`' list form is `host:ip` — colon-separated, split on the
+    *first* colon so an IPv6 address survives (`myhost:::1` →
+    `{myhost: ::1}`).
 - **Refused loudly:** cross-file `extends: {file: ..., service: ...}`; a
   bare-string (or any other non-mapping) `extends`; an unrecognized key
   under `extends` other than `service`; a non-string `service`; a `service`
-  naming one that doesn't exist; and a merge across incompatible forms (a
-  mapping-merge key that is neither a mapping nor list-form
-  `environment`/`depends_on`; a sequence-concatenate key that is neither a
-  list nor a scalar string).
-- **Divergences from Compose:** `environment`/`depends_on` accept list form
-  directly in `extends.py`'s own merge (`_as_mapping`); `extra_hosts`/
-  `healthcheck` do not — list form on a merged side is refused for those two.
-  `labels`/`annotations`/`ulimits` instead route through their `SERVICE_KEYS`
-  merge policy (`_merge_map`), which *does* coerce list form, via the same
-  `pairs_to_mapping` normalizer `environment` uses — both paths reject a
-  non-string list element identically, since it's the one function they
-  share. Short-form `volumes` are concatenated rather than merged by target
-  path; podman resolves duplicate mounts at run time. Referenced resources
+  naming one that doesn't exist; and a merge across incompatible forms — a
+  side whose form that key does not have, which raises with the key's own
+  validator message (`'cap_add' must be a list`), the same message the value
+  produces standalone.
+- **Divergences from Compose:** short-form `volumes` are concatenated rather
+  than merged by target path; podman resolves duplicate mounts at run time.
+  Referenced resources
   (top-level `volumes`, `networks`, `secrets`, `configs`) are not
   auto-imported — as in Compose, the extending service must declare what it
   needs.
