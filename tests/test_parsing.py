@@ -324,6 +324,18 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": [1, 2], "hard": 3}}}}})
 
+    def test_ulimits_boolean_scalar_raises(self) -> None:
+        # bool IS an int in Python, so isinstance(spec, int | str) let it
+        # through and emit rendered the literal --ulimit "nofile=True". A
+        # boolean ulimit is meaningless -- unlike environment's bool (which
+        # Docker normalizes), there is no sensible ulimit normalization.
+        with pytest.raises(UnsupportedComposeError, match="must be an int or a soft/hard mapping"):
+            validate({"services": {"app": {"image": "x", "ulimits": {"nofile": True}}}})
+
+    def test_ulimits_boolean_soft_hard_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
+            validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": True, "hard": 100}}}}})
+
     def test_pull_policy_null_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "pull_policy": None}}}) == []
 

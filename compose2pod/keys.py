@@ -254,10 +254,17 @@ def _validate_ulimits(name: str, key: str, value: Any) -> None:  # noqa: ANN401 
             if set(spec) != {"soft", "hard"}:
                 msg = f"service {name!r}: ulimit {limit!r} mapping must have exactly 'soft' and 'hard'"
                 raise UnsupportedComposeError(msg)
-            if not isinstance(spec["soft"], int | str) or not isinstance(spec["hard"], int | str):
+            # bool IS an int in Python, so a plain `isinstance(..., int | str)`
+            # would silently let a boolean soft/hard value through.
+            if any(
+                isinstance(spec[bound], bool) or not isinstance(spec[bound], int | str) for bound in ("soft", "hard")
+            ):
                 msg = f"service {name!r}: ulimit {limit!r} 'soft' and 'hard' must be int or str"
                 raise UnsupportedComposeError(msg)
-        elif not isinstance(spec, int | str):
+        elif isinstance(spec, bool) or not isinstance(spec, int | str):
+            # A boolean ulimit is meaningless -- unlike environment's bool
+            # (which Docker normalizes to a string), there is no sensible
+            # normalization here, so it is rejected rather than coerced.
             msg = f"service {name!r}: ulimit {limit!r} must be an int or a soft/hard mapping"
             raise UnsupportedComposeError(msg)
 
