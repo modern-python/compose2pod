@@ -1,17 +1,22 @@
 ---
 status: accepted
-summary: A document `docker compose config` rejects must be rejected here too — a hard, one-way rule binding only on the document's own content, enforced by a differential conformance harness rather than by hand-measurement.
+summary: A document `docker compose config` rejects must be rejected here too; one it accepts is accepted whenever podman can express it, and where it cannot yet, that is a tracked limitation rather than a defect. Binds only on the document's own content; enforced by a differential conformance harness.
 supersedes: null
 superseded_by: null
 ---
 
-# Docker's refusals bind; compose2pod's own refusals must be declared
+# Docker's refusals bind; podman decides what we can accept
 
-**Decision:** compose2pod must reject every document `docker compose config`
-rejects. It may reject more — that is the honest subset — but only
-deliberately, and every such refusal is named in
-`architecture/supported-subset.md`. The rule binds only on what the *document*
-says, never on the host it is read from.
+**Decision:** two rules, in one direction each.
+
+- **Docker rejects ⇒ compose2pod rejects.** Hard, no exceptions.
+- **Docker accepts ⇒ compose2pod accepts, when podman can express it and it
+  means something inside a pod.** Where it cannot yet, that is a **current
+  limitation** — a deferred piece of the subset, tracked in
+  `planning/deferred.md` — not a bug, and not a licence to refuse on taste.
+
+The rule binds only on what the *document* says, never on the host it is read
+from.
 
 ## Context
 
@@ -45,13 +50,30 @@ the single failure the gate exists to prevent, so the rule carries no residue �
 `2026-07-14.10` writes the four value grammars (size, number, duration, port)
 needed to make it literally true rather than approximately true.
 
-**The soft rule (the subset).** Rejecting what Docker accepts stays allowed:
-compose2pod cannot support everything Compose does, and refusing loudly beats
-dropping behavior silently. But an *undeclared* over-rejection is a bug, not a
-subset — the `on:`-as-a-key regression (`2026-07-14.09`) was exactly that. So
-every refusal of something Docker accepts must be named in
-`architecture/supported-subset.md` with a reason. Two exist today
-(`sysctls: [a]`, `volumes: [a]`); both are already declared.
+**The second rule: podman decides, not documentation.** An earlier draft of this
+decision said an over-rejection was fine "as long as it is declared". That test
+was worthless — it is a standard met by typing a sentence, and it let taste
+masquerade as design. The test is **podman**:
+
+- **Legitimate refusal — the capability cannot work.** `network_mode` (every
+  service shares the pod's namespace), per-service `dns` (one `/etc/resolv.conf`
+  per pod), `stop_signal` (the script force-removes the pod and never stops a
+  container gracefully), `sysctls: ["a"]` (no `=`, so there is no value to put in
+  a `--sysctl` flag). These stay refused, permanently, and the reason is podman's,
+  not ours.
+- **Not a licence to refuse a *form*.** Where compose2pod supports the
+  capability, an unusual spelling of it that podman can honor must be accepted.
+  A quoted boolean (`tty: "true"` — podman only ever sees `--tty` or nothing) and
+  a compound duration (`interval: 1h30m` — 5400s, and the value only paces a
+  polling loop) are forms, not capabilities.
+
+**An over-rejection is a limitation, not a bug.** Where we refuse a form podman
+could express, we are behind, not wrong: it is a deferred part of the subset,
+recorded in `planning/deferred.md` with a revisit trigger, and workable later.
+This distinction is what keeps the rule bounded — it forbids refusing a spelling
+on taste, without obliging compose2pod to implement every Compose feature podman
+happens to support. A key outside the subset entirely is still refused loudly;
+that is the honest subset, and it is unaffected.
 
 **The carve-out: the document, not the host.** Docker's verdict binds only when
 it is a property of the document alone. `docker compose config` also rejects on
@@ -86,3 +108,6 @@ plain CI job.
 - **A grammar validator drifts from Docker's** — the port or size grammar
   starts refusing a value Docker accepts — turning the soundness fix into an
   over-rejection. The harness catches this too, in the other direction.
+- **A refusal is justified by "we don't parse that yet" rather than by podman.**
+  That is the failure mode the second rule exists to catch: the refusal is a
+  limitation to be tracked and worked off, not a design position to be defended.
