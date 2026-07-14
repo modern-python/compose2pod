@@ -60,6 +60,21 @@ class TestMain:
         assert out.out.startswith("#!/bin/sh")
         assert "podman pod create" in out.out
         assert "compose2pod:" in out.err
+        # main() calls validate() once for its own warnings, and emit_script /
+        # referenced_variables each call validate() again internally (closing
+        # the gate for direct library callers) -- each warning must still
+        # appear exactly once, not once per internal validate() call.
+        err_lines = out.err.splitlines()
+        expected_warnings = [
+            "compose2pod: service 'application': ignoring 'ports'",
+            "compose2pod: service 'application': ignoring 'restart'",
+            "compose2pod: service 'application': ignoring 'stdin_open'",
+            "compose2pod: service 'application': ignoring 'tty'",
+            "compose2pod: service 'db': ignoring 'ports'",
+            "compose2pod: service 'db': ignoring 'restart'",
+        ]
+        for warning in expected_warnings:
+            assert err_lines.count(warning) == 1, err_lines
 
     def test_yaml_stdin_success(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
         yaml_text = "services:\n  app:\n    image: x\n"

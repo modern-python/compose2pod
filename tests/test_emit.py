@@ -952,3 +952,46 @@ class TestPodmanVersionGuard:
         result = self._run_header(tmp_path, "exit 1")
         assert result.returncode == 0
         assert result.stderr == ""
+
+
+class TestPublicEntryPointsValidateWithoutBeingToldTo:
+    """Both public entry points must reject malformed input on their own.
+
+    emit_script/referenced_variables are public exports; a library caller may
+    call either directly, skipping validate(). Both project the same `_plan`
+    traversal, so `_plan` itself must gate malformed input -- these documents
+    used to reach a raw crash or (worse) silently corrupt output.
+    """
+
+    def _options(self, target: str = "web") -> EmitOptions:
+        return EmitOptions(
+            target=target,
+            ci_image="ci",
+            command="",
+            pod="p",
+            project_dir=".",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+
+    def test_missing_services_key_raises_cleanly_not_a_keyerror(self) -> None:
+        with pytest.raises(UnsupportedComposeError):
+            emit_script(compose={}, options=self._options())
+
+    def test_non_list_cap_add_raises_cleanly_not_a_typeerror(self) -> None:
+        compose = {"services": {"web": {"image": "a", "cap_add": 3}}}
+        with pytest.raises(UnsupportedComposeError):
+            emit_script(compose=compose, options=self._options())
+
+    def test_non_string_user_is_rejected_not_silently_stringified(self) -> None:
+        # Before the _plan gate, this silently emitted the Python repr of the
+        # dict as the --user value: --user "{'a': 1}" -- corruption, not a crash.
+        compose = {"services": {"web": {"image": "a", "user": {"a": 1}}}}
+        with pytest.raises(UnsupportedComposeError):
+            emit_script(compose=compose, options=self._options())
+
+    def test_referenced_variables_is_equally_guarded(self) -> None:
+        # referenced_variables projects the same _plan traversal as emit_script
+        # and must reject malformed input identically.
+        with pytest.raises(UnsupportedComposeError):
+            referenced_variables({}, self._options())

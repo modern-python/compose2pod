@@ -11,6 +11,7 @@ from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, Expand, Token, key_value_pairs
+from compose2pod.parsing import validate
 from compose2pod.pod import pod_create_flags
 from compose2pod.resources import deploy_resource_flags
 from compose2pod.shell import to_shell, variable_names
@@ -254,8 +255,19 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     service's `run_tokens` and the `pod_create_flags` render into lines *and*
     have their `Expand` variables collected, so the script and the variable
     list cannot disagree about what the script expands at run time.
+
+    `emit_script` and `referenced_variables` are both public entry points that
+    project this traversal, so a library caller can reach either one without
+    ever calling `validate()` first. Validating `compose` here -- and nowhere
+    else -- makes both safe by construction: this is the one place a caller
+    cannot route around. `cli.py` also calls `validate()` itself (to print
+    warnings before emitting), so this repeats that pass; `validate()` only
+    reads `compose` and returns warnings, so the repeat is side-effect-free.
+    The warnings from this pass have no channel to reach a caller here --
+    `cli.py` already printed its own copy -- so they are discarded on purpose.
     """
     _validate_options(options)
+    _ = validate(compose)  # re-validate; warnings already surfaced by the caller, if any
     if not POD_NAME_PATTERN.fullmatch(options.pod):
         msg = f"invalid pod name {options.pod!r}"
         raise UnsupportedComposeError(msg)
