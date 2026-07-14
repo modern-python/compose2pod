@@ -41,20 +41,34 @@ SHAPES: dict[str, Any] = {
     "quoted-bool": "true",
 }
 
-# `env_file` is the decision's carve-out: `docker compose config` rejects a
-# missing env file, which is a fact about the *reading host's filesystem*, not
-# about the document. compose2pod emits a script that runs elsewhere, where the
-# file is checked out. Docker's verdict there cannot bind, so the key is not
-# probed by the matrix.
-CARVE_OUT_KEYS = {"env_file"}
+# `env_file`'s shapes that carry a bare string -- "" (empty-str), "somevalue"
+# (str), "true" (quoted-bool), and ["a"] (list-of-str) -- are the decision's
+# carve-out: `docker compose config` treats every one of those strings as a
+# path and rejects it when the file is missing from the *reading host's*
+# filesystem -- a fact about the host, not the document. Verified by hand
+# against `docker compose config` v5.1.2 that all four raise that
+# host-dependent error ("env file ... not found") regardless of the string's
+# content, including the empty string. compose2pod emits a script that runs
+# elsewhere, where the file is checked out at run time, so Docker's verdict
+# there cannot bind. Every other env_file shape -- including the long-form
+# mapping (`{path: ..., required: ..., format: ...}`) -- is a question about
+# the document alone, not the host, and is probed like any other key.
+CARVE_OUT: set[tuple[str, str]] = {
+    ("env_file", "empty-str"),
+    ("env_file", "str"),
+    ("env_file", "quoted-bool"),
+    ("env_file", "list-of-str"),
+}
 
 
-@pytest.mark.parametrize("key", [k for k in KEYS if k not in CARVE_OUT_KEYS])
+@pytest.mark.parametrize("key", KEYS)
 @pytest.mark.parametrize("shape", list(SHAPES))
 def test_docker_rejection_implies_our_rejection(
     key: str,
     shape: str,
     assert_rule: Callable[[dict[str, Any]], str],
 ) -> None:
+    if (key, shape) in CARVE_OUT:
+        pytest.skip("host-dependent shape -- see CARVE_OUT's comment")
     compose = {"services": {"app": {"image": "nginx:alpine", key: SHAPES[shape]}}}
     assert_rule(compose)

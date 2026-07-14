@@ -33,6 +33,14 @@ never written. Every one was measured against `docker compose config` v5.1.2.
   re-measuring what podman does with it before deciding whether this is a
   legitimate refusal (like `sysctls: ["a"]`, which genuinely cannot form a flag)
   or another unfinished form.
+- **Long-form `env_file`.** Docker accepts the mapping form
+  (`{path: ..., required: ..., format: ...}`) in addition to a plain string
+  or list of strings; compose2pod's `_validate_string_or_string_list` requires
+  every entry to be a string. The mapping resolves to the same `--env-file
+  <path>` flag `emit._env_flags` already emits for the string form, so
+  `required` (skip the flag instead of refusing, when the file is missing)
+  and `format` (`raw` vs the default interpolated parsing) are the only real
+  work.
 
 **Revisit trigger:** a user reports a compose file that `docker compose` runs and
 compose2pod refuses — most likely the quoted-boolean case, since anything that
