@@ -81,6 +81,26 @@ loader has resolved `on` to `True`, `"on"` is gone.
 A genuine boolean *value* still renders lowercase (`DEBUG: true` → `DEBUG=true`,
 see `_render_scalar`), which is what Docker renders too.
 
+The same YAML-1.1-vs-1.2 gap exists for **floats**, and `_build_yaml_loader`
+fixes it the same way. Docker's YAML 1.2 parser makes a value a float from an
+exponent alone — no dot required — so a bare `1e3` is `1000.0` to Docker.
+PyYAML's YAML 1.1 float grammar requires a dot unconditionally, so PyYAML
+leaves a bare `1e3` the plain string `"1e3"`. That is not cosmetic: `cpuset`
+must be a string, so `cpuset: 1e3` is *accepted* here (compose2pod sees a
+string) while Docker *rejects* it (Docker sees the float 1000.0) — a false
+green. The same gap over-rejects the reverse case on `oom_score_adj`,
+`cpu_shares`, `cpu_quota`, `cpu_period` and `pids_limit`, whose validators
+accept a whole-valued float natively but reject the same value as a strict
+integer *string* — Docker accepts `oom_score_adj: 1e3` (float 1000.0, cast
+leniently) while PyYAML's loader was handing compose2pod the string `"1e3"`,
+which the strict-integer-string grammar refuses. The loader's float resolver
+matches only the YAML 1.2 core-schema grammar (a dotted mantissa with an
+optional exponent, or an undotted mantissa with a mandatory exponent, or
+`.inf`/`.nan`); a bare integer like `123` has neither a dot nor an exponent
+and still resolves as `int`, and a *quoted* `"1e3"` still resolves as `str`
+for the same reason a quoted `"on"` does — quoting bypasses implicit
+resolution entirely.
+
 The rejection runs up front, not key by key, because some downstream
 readers crash raw on a non-string key (`sorted()`, `str.startswith`, the
 secret/config name regex) while others silently f-string it into a flag

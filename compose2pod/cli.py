@@ -31,21 +31,46 @@ with contextlib.suppress(ImportError):  # the optional [yaml] extra is not insta
 # spelling is gone and no downstream pass can recover it.
 _YAML_12_BOOL = r"^(?:true|True|TRUE|false|False|FALSE)$"
 
+# YAML 1.2's core-schema float: a dotted mantissa with an optional exponent, OR
+# an undotted mantissa with a *mandatory* exponent, OR one of the two named
+# constants. PyYAML implements YAML *1.1*, whose float grammar requires a dot
+# unconditionally -- a bare `1e3` has none, so PyYAML leaves it the string
+# "1e3". Docker's parser is YAML 1.2, where the exponent alone is enough, so
+# to Docker `1e3` is the float 1000.0. That is not cosmetic: `cpuset: 1e3` is
+# a *string* to compose2pod today, so it slides past the "must be a string"
+# rule Docker enforces on the float it sees -- accepting a document Docker
+# refuses. The bare-mantissa branch is deliberately narrower than PyYAML's own
+# (no digit-grouping underscore, no sexagesimal `:`) because YAML 1.2's core
+# schema has neither; it must also never swallow a plain integer (`123`), so
+# an exponent or a dot is required in every branch, never both optional at once.
+_YAML_12_FLOAT = (
+    r"^[-+]?(?:[0-9]+\.[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?$"
+    r"|^[-+]?[0-9]+[eE][-+]?[0-9]+$"
+    r"|^[-+]?\.(?:inf|Inf|INF)$"
+    r"|^\.(?:nan|NaN|NAN)$"
+)
+
 
 def _build_yaml_loader(yaml_module: ModuleType) -> type:
-    """Build a SafeLoader that resolves booleans the way YAML 1.2 (and so Docker) does."""
+    """Build a SafeLoader that resolves booleans and floats the way YAML 1.2 (and so Docker) does."""
 
     class Loader(yaml_module.SafeLoader):
         pass
 
-    # Drop PyYAML's YAML 1.1 bool resolver, then install the 1.2 one. Rebuilding
-    # the table is what removes `on`/`off`/`yes`/`no` from the boolean set; they
-    # fall through to the plain-string resolver.
+    # Drop PyYAML's YAML 1.1 bool and float resolvers, then install the 1.2 ones.
+    # Rebuilding the table is what removes `on`/`off`/`yes`/`no` from the boolean
+    # set and a bare `1e3` from the string set; they fall through to (respectively)
+    # the plain-string and float resolvers.
     Loader.yaml_implicit_resolvers = {
-        first_char: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"]
+        first_char: [
+            (tag, regexp)
+            for tag, regexp in resolvers
+            if tag not in {"tag:yaml.org,2002:bool", "tag:yaml.org,2002:float"}
+        ]
         for first_char, resolvers in yaml_module.SafeLoader.yaml_implicit_resolvers.items()
     }
     Loader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(_YAML_12_BOOL), list("tTfF"))
+    Loader.add_implicit_resolver("tag:yaml.org,2002:float", re.compile(_YAML_12_FLOAT), list("-+0123456789."))
     return Loader
 
 
