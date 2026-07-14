@@ -17,59 +17,78 @@ warns (ignored, behavior-neutral inside a single pod) or raises
 - **Extension fields:** any key prefixed `x-` is accepted and ignored
   silently, per the Compose spec. This is what lets a document hold shared
   config in a top-level `x-*` block for reuse via YAML anchors.
-- **Every mapping key, at every depth of the whole document, must be a
-  string.** PyYAML routinely produces a non-string key — a bare `3:` parses
-  as an int, and under YAML 1.1 a bare `on:`/`off:`/`yes:`/`no:` parses as a
-  bool. `validate()` walks the entire compose document once, recursively,
-  before running any other check (`_require_string_keys_deep`,
+- **Every mapping key must be a string, in every region `validate()`
+  actually reads from or emits into.** PyYAML routinely produces a
+  non-string key — a bare `3:` parses as an int, and under YAML 1.1 a bare
+  `on:`/`off:`/`yes:`/`no:` parses as a bool. `validate()` sweeps these
+  regions once, recursively, before running any other check
+  (`_sweep_document`/`_sweep_service`/`_require_string_keys_deep`,
   `compose2pod/parsing.py`, built on `require_string_keys`,
-  `compose2pod/keys.py`) and rejects a non-string key at any depth —
-  `UnsupportedComposeError` names the offending key and its location. This
-  applies uniformly to every mapping in the document (the top-level document
-  itself, every service body and its nested structures, `healthcheck`,
-  `deploy` and its nested `resources`/`limits`/`reservations`, every
-  top-level `secrets`/`configs` definition and every service's long-form
-  reference, `ulimits` and its nested `{soft, hard}` mappings, and so on) —
-  it is not a list of specific mappings to keep in sync as new keys are
-  added. **Exception:** `x-`-prefixed keys' values are not walked, since
-  Compose extension fields legitimately hold arbitrary payloads (e.g. YAML
-  anchor sources reused via `<<:`) that compose2pod accepts and ignores by
-  design; the `x-` key itself is still checked (trivially — its own name has
-  to look like `x-...`).
+  `compose2pod/keys.py`) and rejects a non-string key found in any of
+  them — `UnsupportedComposeError` names the offending key and its
+  location. Swept: the top-level document's own keys; the `services`
+  mapping's own keys (service *names*) — always, regardless of what a name
+  looks like, since `validate()` treats every entry in `services` as a real
+  service with no `x-` filter (a service literally named `x-web` is swept
+  like any other service, not skipped as an extension field); each
+  service's body — every structural key, `healthcheck`, `deploy` and its
+  nested `resources`/`limits`/`reservations`, `ulimits` and its nested
+  `{soft, hard}` mappings, per-service `secrets`/`configs`/`networks`
+  references, and so on — except `build`'s own contents and the service's
+  own `x-`-prefixed keys; and each top-level `secrets`/`configs`
+  definition (read by `stores.py`), by name, for the same reason a service
+  name is swept regardless of what it looks like.
+
+  **Skipped**, because compose2pod never reads or emits from these
+  regions, so a non-string key inside one can never reach the generated
+  script: `x-` blocks (top-level and per-service) — Compose extension
+  fields legitimately hold arbitrary payloads (e.g. YAML anchor sources
+  reused via `<<:`) that compose2pod accepts and ignores by design, so
+  their contents are never walked (the `x-` key itself is still checked,
+  trivially — its own name has to look like `x-...`); `build`'s own
+  contents (`context`/`dockerfile`/`args`, never read — see `build` below);
+  and the ignored top-level `networks`/`volumes` blocks (accepted, but
+  their contents are never read — see Volumes below and the Pod-level
+  options section for why top-level `networks` has no effect).
 
   Two distinct downstream consumer classes motivate rejecting a non-string
-  key up front rather than one key at a time: mapping-key readers that
-  crash raw otherwise (`sorted()`, `str.startswith`, the secret/config name
-  regex), and mapping-key consumers that don't crash but f-string-
-  interpolate the key straight into a flag value, silently leaking a bool's
-  or int's Python repr into the emitted script instead
-  (`keys.key_value_pairs` — `environment`/`labels`/`annotations`,
-  `keys.extra_host_pairs` — `extra_hosts`, `keys._ulimit_args` — `ulimits`,
-  `pod._sysctl_pairs` — `sysctls`). The second class is silent corruption,
-  not a crash, and is why a document-wide walk replaced hand-placing a check
-  at each mapping some other symptom happened to point at.
+  key up front rather than one key at a time within a swept region:
+  mapping-key readers that crash raw otherwise (`sorted()`,
+  `str.startswith`, the secret/config name regex), and mapping-key
+  consumers that don't crash but f-string-interpolate the key straight into
+  a flag value, silently leaking a bool's or int's Python repr into the
+  emitted script instead (`keys.key_value_pairs` — `environment`/
+  `labels`/`annotations`, `keys.extra_host_pairs` — `extra_hosts`,
+  `keys._ulimit_args` — `ulimits`, `pod._sysctl_pairs` — `sysctls`). The
+  second class is silent corruption, not a crash.
 
-  This is a deliberate divergence from Docker: `environment: {3306: db}` is
-  valid Compose and Docker accepts it, but compose2pod refuses it. Docker
-  parses Compose as YAML 1.2, where a bare `3306`/`on`/`off` stays the
-  string it looks like, so Docker never observes a non-string key at all.
-  Normalizing Python's `int`/`bool` back into a key string here would not
-  reproduce that: unlike a boolean *value* (`DEBUG: true`, normalized to the
-  string `"true"` like Docker does — see `_render_scalar` below), a boolean
-  or int *key* has no single correct string form to normalize to (`True` →
-  `"on"`? `"true"`? `"True"`?). A non-string key is a YAML-1.1 accident, not
-  intentional Compose; anyone who means the literal string `on` writes
-  `"on"`.
+  This is a deliberate divergence from Docker for keys that *are* swept:
+  `environment: {3306: db}` is valid Compose and Docker accepts it, but
+  compose2pod refuses it. Docker parses Compose as YAML 1.2, where a bare
+  `3306`/`on`/`off` stays the string it looks like, so Docker never
+  observes a non-string key at all. Normalizing Python's `int`/`bool` back
+  into a key string here would not reproduce that: unlike a boolean *value*
+  (`DEBUG: true`, normalized to the string `"true"` like Docker does — see
+  `_render_scalar` below), a boolean or int *key* has no single correct
+  string form to normalize to (`True` → `"on"`? `"true"`? `"True"`?). A
+  non-string key is a YAML-1.1 accident, not intentional Compose; anyone
+  who means the literal string `on` writes `"on"`. Docker also accepts a
+  non-string key in `build`'s `args` or a top-level `volumes` block's
+  `driver_opts` — since compose2pod never reads either, it accepts them
+  too, matching Docker rather than diverging from it there.
 
   A handful of module entry points that are also called directly (not only
-  reached through `validate()`) keep their own `require_string_keys` call in
-  addition to the document-wide sweep, as defense at their own boundary:
-  `resources.validate_deploy`'s four checks (`deploy` and its nested
-  `resources`/`limits`/`reservations`) and `stores.py`'s three checks (a
-  secret/config definition's keys, a long-form reference's keys, and the
-  top-level `secrets`/`configs` block's own keys). These are redundant only
-  when reached through `validate()`; each is still load-bearing for a caller
-  that invokes that function directly.
+  reached through `validate()`) keep their own `require_string_keys` call
+  in addition to the sweep, as defense at their own boundary and as
+  belt-and-braces for two service-level checks the sweep also covers:
+  `_validate_service` and `_validate_service_healthcheck`
+  (`compose2pod/parsing.py`), `resources.validate_deploy`'s four checks
+  (`deploy` and its nested `resources`/`limits`/`reservations`), and
+  `stores.py`'s three checks (a secret/config definition's keys, a
+  long-form reference's keys, and the top-level `secrets`/`configs`
+  block's own keys). These are redundant only when reached through
+  `validate()`; each is still load-bearing for a caller that invokes that
+  function directly.
 - Everything else raises.
 
 ## Service keys
