@@ -1,9 +1,11 @@
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.extends import resolve_extends
+from compose2pod.extends import _STRUCTURAL_CONCAT_KEYS, _STRUCTURAL_MERGE_KEYS, resolve_extends
+from compose2pod.keys import SERVICE_KEYS
+from compose2pod.parsing import validate
 
 
 def _services(doc: dict[str, Any]) -> dict[str, Any]:
@@ -89,17 +91,21 @@ class TestResolveExtends:
                 "web": {"extends": {"service": "base"}, "labels": 5},
             }
         }
-        with pytest.raises(UnsupportedComposeError, match="cannot merge 'labels' across incompatible forms"):
+        with pytest.raises(UnsupportedComposeError, match="'labels' must be a list or mapping"):
             resolve_extends(doc)
 
-    def test_cap_add_scalar_normalized_before_concat(self) -> None:
+    def test_cap_add_scalar_form_is_refused_not_normalized(self) -> None:
+        # Compose has no scalar form for cap_add and the gate refuses one, so a
+        # merge must not quietly normalize it into a list -- that would let
+        # `extends` accept a document that is invalid on its own.
         doc = {
             "services": {
                 "base": {"image": "x", "cap_add": "NET_ADMIN"},
                 "web": {"extends": {"service": "base"}, "cap_add": ["SYS_TIME"]},
             }
         }
-        assert _services(doc)["web"]["cap_add"] == ["NET_ADMIN", "SYS_TIME"]
+        with pytest.raises(UnsupportedComposeError, match="'cap_add' must be a list"):
+            resolve_extends(doc)
 
     def test_depends_on_list_and_map_forms_merge(self) -> None:
         doc = {
@@ -214,7 +220,7 @@ class TestResolveExtends:
                 "web": {"extends": {"service": "base"}, "cap_add": {"bad": "shape"}},
             }
         }
-        with pytest.raises(UnsupportedComposeError, match="cannot merge 'cap_add' across incompatible forms"):
+        with pytest.raises(UnsupportedComposeError, match="'cap_add' must be a list"):
             resolve_extends(doc)
 
     def test_extends_non_dict_base_defers_to_validate(self) -> None:
@@ -334,3 +340,199 @@ class TestMergeErrorMessageOrder:
         }
         merged = resolve_extends(doc)
         assert merged["services"]["app"]["env_file"] == ["base.env", "local.env"]
+
+
+class TestMergeNeverWidensTheGate:
+    """`extends` must not turn a form the gate refuses into one it accepts.
+
+    `resolve_extends` runs ahead of `validate()`, so a normalizing merge can
+    launder an invalid shape into a valid one. Each case below uses the shape
+    that actually laundered -- a bare scalar for the list-only keys, a list for
+    the mapping-only keys -- not merely any invalid value.
+    """
+
+    # key -> (valid base value, a form that key does NOT have)
+    HOSTILE: ClassVar[dict[str, tuple[Any, Any]]] = {
+        # Mapping-only: Compose gives these no list form.
+        "ulimits": ({"nofile": 1}, ["nofile=2"]),
+        "healthcheck": ({"test": ["CMD", "x"]}, ["x"]),
+        # List-only: Compose gives these no scalar form. `as_list` used to
+        # normalize a bare string into [string], laundering it past the gate.
+        "cap_add": (["NET_ADMIN"], "SYS_TIME"),
+        "cap_drop": (["ALL"], "NET_RAW"),
+        "security_opt": (["label=disable"], "seccomp=unconfined"),
+        "devices": (["/dev/fuse"], "/dev/null"),
+        "group_add": (["1000"], "2000"),
+        "volumes": (["./a:/a"], "./b:/b"),
+        "secrets": (["s"], "s"),
+        "configs": (["c"], "c"),
+        # Map-or-list keys: a scalar is neither.
+        "labels": ({"a": "1"}, 5),
+        "annotations": ({"a": "1"}, 5),
+        "environment": ({"A": "1"}, 5),
+        "extra_hosts": ({"h": "1.1.1.1"}, 5),
+        "depends_on": ({"db": {}}, 5),
+        # Scalar IS a valid form for these two, so a non-scalar non-list is used.
+        "tmpfs": (["/scratch/a"], 5),
+        "env_file": (["a.env"], 5),
+    }
+
+    def test_table_covers_every_mergeable_key(self) -> None:
+        # Guards the guard: a new mergeable key cannot be added without a case
+        # here, which is exactly how the merge policy drifted from the gate.
+        mergeable = {key for key, spec in SERVICE_KEYS.items() if spec.merge is not None}
+        mergeable |= _STRUCTURAL_MERGE_KEYS | _STRUCTURAL_CONCAT_KEYS
+        assert set(self.HOSTILE) == mergeable
+
+    # Top-level definitions the store keys need, so the only thing that can
+    # refuse them is the shape -- not an "unknown secret/config" lookup failure.
+    TOP_LEVEL: ClassVar[dict[str, dict[str, Any]]] = {
+        "secrets": {"secrets": {"s": {"environment": "E"}}},
+        "configs": {"configs": {"c": {"content": "x"}}},
+    }
+
+    @pytest.mark.parametrize("key", sorted(HOSTILE))
+    def test_form_refused_standalone_is_refused_through_extends(self, key: str) -> None:
+        base_val, bad_val = self.HOSTILE[key]
+        top = self.TOP_LEVEL.get(key, {})
+
+        # The gate refuses this form on a plain service...
+        with pytest.raises(UnsupportedComposeError):
+            validate({"services": {"app": {"image": "x", key: bad_val}}, **top})
+
+        # ...so it must not become acceptable by arriving through `extends`.
+        doc = {
+            "services": {
+                "base": {"image": "x", key: base_val},
+                "app": {"extends": {"service": "base"}, key: bad_val},
+            },
+            **top,
+        }
+        with pytest.raises(UnsupportedComposeError):
+            validate(resolve_extends(doc))
+
+
+class TestMergeErrorAttribution:
+    """A merge error names the service the offending value actually belongs to."""
+
+    def test_bad_value_in_the_base_blames_the_base(self) -> None:
+        # `web`'s own cap_add is a valid list; the base's is the malformed one.
+        doc = {
+            "services": {
+                "base": {"image": "x", "cap_add": "NET_ADMIN"},
+                "web": {"extends": {"service": "base"}, "cap_add": ["SYS_TIME"]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="service 'base': 'cap_add' must be a list"):
+            resolve_extends(doc)
+
+    def test_bad_value_in_the_extending_service_blames_it(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "cap_add": ["NET_ADMIN"]},
+                "web": {"extends": {"service": "base"}, "cap_add": "SYS_TIME"},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="service 'web': 'cap_add' must be a list"):
+            resolve_extends(doc)
+
+    def test_structural_concat_base_value_blames_the_base(self) -> None:
+        # `_as_concat_list` path, not the registry one.
+        doc = {
+            "services": {
+                "base": {"image": "x", "volumes": "./a:/a"},
+                "web": {"extends": {"service": "base"}, "volumes": ["./b:/b"]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="service 'base': 'volumes' must be a list"):
+            resolve_extends(doc)
+
+    def test_structural_mapping_base_value_blames_the_base(self) -> None:
+        # `_as_mapping` path: healthcheck has no list form.
+        doc = {
+            "services": {
+                "base": {"image": "x", "healthcheck": ["bad"]},
+                "web": {"extends": {"service": "base"}, "healthcheck": {"test": ["CMD", "x"]}},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="service 'base': cannot merge 'healthcheck'"):
+            resolve_extends(doc)
+
+
+class TestExtraHostsListFormMerge:
+    """extra_hosts has a list form in Compose, so a merge normalizes it -- correctly."""
+
+    def test_list_form_merges_with_map_form(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "extra_hosts": {"db": "1.1.1.1"}},
+                "web": {"extends": {"service": "base"}, "extra_hosts": ["cache:2.2.2.2"]},
+            }
+        }
+        assert resolve_extends(doc)["services"]["web"]["extra_hosts"] == {"db": "1.1.1.1", "cache": "2.2.2.2"}
+
+    def test_local_wins_on_collision(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "extra_hosts": {"db": "1.1.1.1"}},
+                "web": {"extends": {"service": "base"}, "extra_hosts": ["db:9.9.9.9"]},
+            }
+        }
+        assert resolve_extends(doc)["services"]["web"]["extra_hosts"] == {"db": "9.9.9.9"}
+
+    def test_ipv6_address_keeps_its_colons(self) -> None:
+        # Splitting on the *first* colon only. pairs_to_mapping would have split on
+        # '=' and produced a single {'myhost:::1': None} key.
+        doc = {
+            "services": {
+                "base": {"image": "x", "extra_hosts": {"a": "1.1.1.1"}},
+                "web": {"extends": {"service": "base"}, "extra_hosts": ["myhost:::1"]},
+            }
+        }
+        assert resolve_extends(doc)["services"]["web"]["extra_hosts"] == {"a": "1.1.1.1", "myhost": "::1"}
+
+    def test_entry_without_a_colon_is_refused(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "extra_hosts": {"a": "1.1.1.1"}},
+                "web": {"extends": {"service": "base"}, "extra_hosts": ["no-colon-here"]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts entries must be 'host:ip' strings"):
+            resolve_extends(doc)
+
+    def test_non_string_entry_is_refused(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "extra_hosts": {"a": "1.1.1.1"}},
+                "web": {"extends": {"service": "base"}, "extra_hosts": [5]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts entries must be 'host:ip' strings"):
+            resolve_extends(doc)
+
+
+class TestStructuralConcatScalarForm:
+    """Only tmpfs/env_file have a bare-string form; the rest must stay lists."""
+
+    def test_volumes_scalar_form_is_refused(self) -> None:
+        # The gate refuses `volumes: "./a:/a"` standalone, so a merge must not
+        # normalize it into a list either.
+        doc = {
+            "services": {
+                "base": {"image": "x", "volumes": ["./a:/a"]},
+                "web": {"extends": {"service": "base"}, "volumes": "./b:/b"},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="'volumes' must be a list"):
+            resolve_extends(doc)
+
+    def test_tmpfs_scalar_form_still_normalizes(self) -> None:
+        # Compose does give tmpfs a scalar form, and the gate accepts one.
+        doc = {
+            "services": {
+                "base": {"image": "x", "tmpfs": "/scratch/base"},
+                "web": {"extends": {"service": "base"}, "tmpfs": ["/scratch/local"]},
+            }
+        }
+        assert resolve_extends(doc)["services"]["web"]["tmpfs"] == ["/scratch/base", "/scratch/local"]
