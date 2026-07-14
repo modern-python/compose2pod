@@ -115,7 +115,14 @@ def _merge(base: dict[str, Any], local: dict[str, Any], name: str, base_name: st
     merged: dict[str, Any] = dict(base)
     for key, local_val in local.items():
         spec = SERVICE_KEYS.get(key)
-        if key in base and spec is not None and spec.merge is not None:
+        if key in base and (local_val is None or base[key] is None):
+            # A null side means "not specified", so the other side's value
+            # survives -- what Docker does, and what keeps a document valid
+            # through `extends` if it is valid standalone. A null on *both*
+            # sides survives resolution, and the gate refuses it (as Docker
+            # refuses a null no inheritance overwrote).
+            merged[key] = base[key] if local_val is None else local_val
+        elif key in base and spec is not None and spec.merge is not None:
             # A merge must never *widen* what the gate accepts. `resolve_extends`
             # runs ahead of `validate()`, so a normalizing merge (list -> mapping)
             # can launder a form the key does not have into one it does:

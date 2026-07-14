@@ -94,9 +94,6 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"'volumes' must be a list"):
             validate({"services": {"app": {"image": "x", "volumes": "/"}}})
 
-    def test_null_volumes_is_accepted(self) -> None:
-        assert validate({"services": {"app": {"image": "x", "volumes": None}}}) == []
-
     def test_no_services_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="no services"):
             validate({"services": {}})
@@ -354,12 +351,6 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": True, "hard": 100}}}}})
 
-    def test_pull_policy_null_is_accepted(self) -> None:
-        assert validate({"services": {"app": {"image": "x", "pull_policy": None}}}) == []
-
-    def test_ulimits_null_is_accepted(self) -> None:
-        assert validate({"services": {"app": {"image": "x", "ulimits": None}}}) == []
-
     def test_non_mapping_healthcheck_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="healthcheck must be a mapping"):
             validate({"services": {"app": {"image": "x", "healthcheck": ["CMD", "true"]}}})
@@ -442,7 +433,6 @@ class TestValidate:
     def test_tmpfs_string_and_list_of_strings_still_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "tmpfs": "/tmp"}}}) == []  # noqa: S108
         assert validate({"services": {"app": {"image": "x", "tmpfs": ["/tmp", "/run"]}}}) == []  # noqa: S108
-        assert validate({"services": {"app": {"image": "x", "tmpfs": None}}}) == []
 
     def test_non_string_hostname_raises_at_gate(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="hostname must be a string"):
@@ -519,9 +509,6 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"'environment' must be a list or mapping"):
             validate({"services": {"app": {"image": "x", "environment": "FOO=bar"}}})
 
-    def test_null_environment_is_accepted(self) -> None:
-        assert validate({"services": {"app": {"image": "x", "environment": None}}}) == []
-
     def test_environment_list_of_mapping_rejected_at_gate(self) -> None:
         # The commonest Compose YAML slip: `- KEY: value` (list + mapping)
         # instead of `- KEY=value`. Used to be silently accepted and emit the
@@ -562,7 +549,6 @@ class TestValidate:
     def test_string_and_list_env_file_are_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "env_file": "tests.env"}}}) == []
         assert validate({"services": {"app": {"image": "x", "env_file": ["a.env", "b.env"]}}}) == []
-        assert validate({"services": {"app": {"image": "x", "env_file": None}}}) == []
 
     def test_env_file_list_with_non_string_entry_rejected_at_gate(self) -> None:
         # Used to reach emit and crash with TypeError: argument should be a str or an os.PathLike object.
@@ -909,3 +895,68 @@ class TestSweepListRecursion:
         }
         with pytest.raises(UnsupportedComposeError, match=r"service 'app'\.secrets: key 1 must be a string"):
             validate(compose)
+
+
+class TestNullValuePolicy:
+    """An explicit null is refused everywhere Docker refuses it.
+
+    Measured against `docker compose config` (v5.1.2), key by key: Docker accepts
+    an explicit null for exactly `command`, `entrypoint` and `deploy` -- where it
+    means "not specified" -- and refuses it for every other service key. A bare
+    `environment:` is nearly always a deleted-contents mistake, and silently
+    emitting nothing for it is the failure this gate exists to prevent.
+    """
+
+    # The only service keys Docker tolerates an explicit null on.
+    NULL_OK = ("command", "entrypoint", "deploy")
+
+    NULL_REFUSED = (
+        "environment",
+        "env_file",
+        "volumes",
+        "tmpfs",
+        "healthcheck",
+        "depends_on",
+        "networks",
+        "hostname",
+        "container_name",
+        "secrets",
+        "configs",
+        "pull_policy",
+        "ulimits",
+        "user",
+        "working_dir",
+        "platform",
+        "init",
+        "read_only",
+        "privileged",
+        "group_add",
+        "cap_add",
+        "cap_drop",
+        "security_opt",
+        "devices",
+        "labels",
+        "annotations",
+        "extra_hosts",
+        "dns",
+        "sysctls",
+        "mem_limit",
+        "cpus",
+    )
+
+    @pytest.mark.parametrize("key", NULL_OK)
+    def test_null_accepted_where_docker_accepts_it(self, key: str) -> None:
+        assert validate({"services": {"app": {"image": "x", key: None}}}) == []
+
+    @pytest.mark.parametrize("key", NULL_REFUSED)
+    def test_null_refused_where_docker_refuses_it(self, key: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match=f"'{key}' must not be null"):
+            validate({"services": {"app": {"image": "x", key: None}}})
+
+    def test_null_extension_field_is_accepted(self) -> None:
+        # `x-` blocks are arbitrary user payload; compose2pod never reads them.
+        assert validate({"services": {"app": {"image": "x", "x-anything": None}}}) == []
+
+    def test_absent_key_is_not_a_null_key(self) -> None:
+        # The check is about a key present with no value, not a key that is missing.
+        assert validate({"services": {"app": {"image": "x"}}}) == []

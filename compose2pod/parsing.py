@@ -13,6 +13,10 @@ from compose2pod.resources import validate_deploy
 
 SUPPORTED_SERVICE_KEYS = set(SERVICE_KEYS) | STRUCTURAL_KEYS
 IGNORED_SERVICE_KEYS = {"ports", "restart", "stdin_open", "tty", "stop_signal", "stop_grace_period", "profiles"}
+# The only service keys Docker tolerates an explicit null on, where it means
+# "not specified" (measured against `docker compose config`). Every other key
+# with a bare `key:` is refused -- see `_reject_null_values`.
+NULL_ALLOWED_KEYS = {"command", "entrypoint", "deploy"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
 _HEALTHCHECK_SCALAR_KEYS = ("timeout", "retries", "start_period")
 SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks", "volumes", "secrets", "configs"}
@@ -103,9 +107,12 @@ def _validate_argv_list(name: str, key: str, value: list[Any]) -> None:
 
 def _validate_entrypoint(name: str, svc: dict[str, Any]) -> None:
     """Check the structural entrypoint key's form (it is not a registry key)."""
-    if "entrypoint" not in svc:
+    entrypoint = svc.get("entrypoint")
+    if entrypoint is None:
+        # An explicit null means "not specified", as it does for its sibling
+        # `command` and as Docker accepts for both. `entrypoint_tokens` emits
+        # nothing for it.
         return
-    entrypoint = svc["entrypoint"]
     if not isinstance(entrypoint, str | list):
         msg = f"service {name!r}: 'entrypoint' must be a string or list"
         raise UnsupportedComposeError(msg)
@@ -155,6 +162,25 @@ def _validate_env_file(name: str, svc: dict[str, Any]) -> None:
     _validate_string_or_string_list(name, "env_file", svc.get("env_file"))
 
 
+def _reject_null_values(name: str, svc: dict[str, Any]) -> None:
+    """Refuse an explicitly-null service value, everywhere Docker refuses one.
+
+    Measured against `docker compose config`: it tolerates an explicit null on
+    exactly `command`, `entrypoint` and `deploy` -- where a null means "not
+    specified" -- and refuses one on every other service key, because a bare
+    `environment:` is almost always a deleted-contents mistake rather than an
+    intent. Emitting nothing for it silently would be exactly the dropped
+    behavior this gate exists to catch.
+
+    One rule rather than a per-key decision, so the policy cannot drift back
+    into an enumeration. `x-` keys are arbitrary user payload and are exempt.
+    """
+    for key, value in svc.items():
+        if value is None and key not in NULL_ALLOWED_KEYS and not key.startswith("x-"):
+            msg = f"service {name!r}: '{key}' must not be null (Compose refuses a bare '{key}:')"
+            raise UnsupportedComposeError(msg)
+
+
 def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compose values are untyped
     """Validate one service; returns warnings, raises UnsupportedComposeError."""
     if not isinstance(svc, dict):
@@ -165,6 +191,7 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     # contract as a module entry point -- belt-and-braces, not load-bearing
     # only by luck of the current call graph.
     require_string_keys(f"service {name!r}", svc)
+    _reject_null_values(name, svc)
     warnings: list[str] = []
     for key in sorted(svc):
         if key.startswith("x-"):

@@ -86,6 +86,15 @@ redundant only when reached through `validate()`.
 Each entry in `services` must itself be a mapping; any other shape (a bare
 string, a list, ...) raises.
 
+**An explicitly-null value raises**, for every service key except `command`,
+`entrypoint` and `deploy` — the three where Compose gives a null a meaning
+("not specified") and `docker compose config` accepts one. A bare
+`environment:` with its contents deleted is a mistake, not an instruction to
+emit nothing, so it is refused rather than silently dropped
+(`_reject_null_values`). One rule, taken from Docker's own verdict key by key,
+rather than a per-key decision to keep in sync. `x-` extension keys are exempt:
+their contents are arbitrary user payload compose2pod never reads.
+
 - **Supported:** `image`, `build`, `command`, `entrypoint`, `environment`,
   `env_file`, `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
   `container_name`, `tmpfs`, `secrets`, `configs`, plus the declarative
@@ -264,9 +273,15 @@ slot (`architecture/glossary.md`).
   produces standalone; a structural key raises `cannot merge '<key>' across
   incompatible forms`. A malformed *form* is reported against the service the
   value belongs to — the base, when it is the base's value at fault, not the
-  service extending it. (One exception: an explicit `null` on a mergeable key
-  is valid standalone but refused on merge, and a null in the base is reported
-  against the extending service.)
+  service extending it.
+- **A null side means "not specified".** An explicitly-null value on either
+  side of a merge is not a form at all, so the other side's value survives: a
+  null in the extending service inherits the base's value (what Docker does),
+  and a null in the base takes the extending service's. A null on *both* sides
+  survives resolution and the gate then refuses it — as Docker refuses a null
+  that no inheritance overwrote. This is what makes the invariant hold in both
+  directions: a value the gate accepts standalone is accepted through
+  `extends`, and one it refuses standalone is refused through `extends`.
 - **Divergences from Compose:** short-form `volumes` are concatenated rather
   than merged by target path; podman resolves duplicate mounts at run time.
   Referenced resources

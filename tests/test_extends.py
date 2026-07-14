@@ -557,3 +557,50 @@ class TestStructuralConcatScalarForm:
             }
         }
         assert resolve_extends(doc)["services"]["web"]["tmpfs"] == ["/scratch/base", "/scratch/local"]
+
+
+class TestNullIsNotSpecified:
+    """A null side means 'not specified', so the other side's value survives (as Docker does)."""
+
+    def test_null_in_the_extending_service_inherits_the_base(self) -> None:
+        # `docker compose config` on the same document keeps the base's value.
+        doc = {
+            "services": {
+                "base": {"image": "x", "environment": {"A": "1"}, "volumes": ["./a:/a"]},
+                "web": {"extends": {"service": "base"}, "environment": None, "volumes": None},
+            }
+        }
+        web = resolve_extends(doc)["services"]["web"]
+        assert web["environment"] == {"A": "1"}
+        assert web["volumes"] == ["./a:/a"]
+
+    def test_null_in_the_base_takes_the_extending_service_value(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "environment": None},
+                "web": {"extends": {"service": "base"}, "environment": {"B": "2"}},
+            }
+        }
+        assert resolve_extends(doc)["services"]["web"]["environment"] == {"B": "2"}
+
+    def test_null_on_both_sides_survives_and_the_gate_refuses_it(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "x", "environment": None},
+                "web": {"extends": {"service": "base"}, "environment": None},
+            }
+        }
+        merged = resolve_extends(doc)
+        assert merged["services"]["web"]["environment"] is None
+        with pytest.raises(UnsupportedComposeError, match="'environment' must not be null"):
+            validate(merged)
+
+    def test_a_document_valid_standalone_stays_valid_through_extends(self) -> None:
+        # The invariant the null handling exists to restore, in the accepting direction.
+        doc = {
+            "services": {
+                "base": {"image": "x", "command": ["run"]},
+                "web": {"extends": {"service": "base"}, "command": None},
+            }
+        }
+        assert validate(resolve_extends(doc)) == []

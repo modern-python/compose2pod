@@ -271,8 +271,9 @@ def _emit_pull_policy(value: Any) -> list[Token]:  # noqa: ANN401 - Compose valu
 
 
 def _validate_ulimits(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    if value is None:
-        return
+    # No `value is None` escape: the gate refuses a null `ulimits:` outright
+    # (`parsing._reject_null_values`), as Docker does, so a null reaching here
+    # is a wrong shape like any other.
     if not isinstance(value, dict):
         msg = f"service {name!r}: '{key}' must be a mapping"
         raise UnsupportedComposeError(msg)
