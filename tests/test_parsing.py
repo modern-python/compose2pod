@@ -1063,6 +1063,14 @@ def test_build_must_be_string_or_mapping() -> None:
     validate({"services": {"app": {"build": {"context": "."}}}})
 
 
+def test_build_mapping_rejects_non_string_key() -> None:
+    # require_string_keys guards build's own top-level keys (distinct from its
+    # unread contents, see test_build_contents_non_string_key_accepted): a bare
+    # `True:` key must raise cleanly, not crash downstream on a non-str key.
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate({"services": {"app": {"build": {True: "x", "context": "."}}}})
+
+
 def test_build_mapping_rejects_unknown_keys() -> None:
     # Measured against `docker compose config` v5.1.2: `build` is a strict
     # JSON schema -- an unrecognized key is refused ("additional properties

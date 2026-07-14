@@ -411,3 +411,32 @@ class TestYaml12Floats:
         rc = run_main(compose, ["--target", "app", "--image", "ci:1", "--format", "yaml"], monkeypatch)
         assert rc == 0
         assert "--oom-score-adj" in capsys.readouterr().out
+
+
+class TestYaml11IntBoundaryForms:
+    """Int-boundary forms must still resolve as `int`.
+
+    The float-resolver rebuild (2026-07-15.01) touches the same implicit-resolver
+    table PyYAML's int resolver reads from; these forms must not slide into the
+    new float branch or fall through to `str`.
+    """
+
+    def test_leading_zero_octal_still_loads_as_int(self) -> None:
+        loaded = cli._load_yaml("k: 007\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 7}
+        assert isinstance(loaded["k"], int)
+
+    def test_hex_still_loads_as_int(self) -> None:
+        loaded = cli._load_yaml("k: 0x1A\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 26}
+        assert isinstance(loaded["k"], int)
+
+    def test_binary_still_loads_as_int(self) -> None:
+        loaded = cli._load_yaml("k: 0b101\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 5}
+        assert isinstance(loaded["k"], int)
+
+    def test_sexagesimal_still_loads_as_int(self) -> None:
+        loaded = cli._load_yaml("k: 1:20\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 80}
+        assert isinstance(loaded["k"], int)

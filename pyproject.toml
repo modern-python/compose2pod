@@ -74,11 +74,12 @@ isort.lines-after-imports = 2
 isort.no-lines-before = ["standard-library", "local-folder"]
 
 [tool.pytest.ini_options]
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration and not conformance'"
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "integration: end-to-end tests that execute generated scripts against real podman (CI-only)",
+    "conformance: differential tests asserting compose2pod refuses whatever `docker compose config` refuses (CI-only; needs the docker CLI, no daemon)",
 ]
 
 [tool.coverage]
@@ -87,4 +88,4 @@ report.exclude_also = ["if typing.TYPE_CHECKING:"]
 # subprocess (tests/test_cli.py::test_python_m_runs), which the parent coverage process
 # can't measure; omit it rather than enable subprocess/branch coverage machinery.
 # tests/integration/* only runs in the dedicated podman CI job, never in the gated run.
-run.omit = ["compose2pod/__main__.py", "tests/integration/*"]
+run.omit = ["compose2pod/__main__.py", "tests/integration/*", "tests/conformance/*"]

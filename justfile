@@ -45,6 +45,11 @@ test-branch:
 test-integration:
     uv run --no-sync pytest -m integration
 
+# Conformance: assert compose2pod refuses whatever `docker compose config` refuses.
+# CI-only; needs the docker CLI on PATH (no daemon). Overrides the default -m in addopts.
+test-conformance:
+    uv run --no-sync pytest -m conformance
+
 # Build + publish to PyPI. Version comes from the git tag ($GITHUB_REF_NAME); no pyproject bump.
 # Auth via PyPI Trusted Publishing (OIDC); uv publish auto-detects the CI id-token.
 publish:

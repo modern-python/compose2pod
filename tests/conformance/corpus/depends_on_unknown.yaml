@@ -1,0 +1,5 @@
+services:
+  app:
+    image: nginx
+    depends_on:
+      - nonexistent
