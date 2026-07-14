@@ -192,6 +192,24 @@ class TestValidate:
         ):
             validate(compose)
 
+    def test_unhashable_depends_on_condition_raises_cleanly(self) -> None:
+        # Before the fix: `condition not in DEPENDS_ON_CONDITIONS`
+        # (parsing._validate_depends_on) crashed raw (TypeError: cannot use
+        # 'dict' as a set element -- unhashable type: 'dict') because
+        # DEPENDS_ON_CONDITIONS is a set and `in` hashes its operand;
+        # graph.depends_on checked the dependency's spec was a mapping but
+        # never the condition's own type. This is a mapping's *key* being
+        # a string -- the sweep's non-string-key check is irrelevant here,
+        # since `{"a": 1}` is a well-formed mapping with a string key.
+        compose = {
+            "services": {
+                "app": {"image": "x", "depends_on": {"db": {"condition": {"a": 1}}}},
+                "db": {"image": "y"},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
+            validate(compose)
+
     def test_top_level_extension_key_is_accepted(self) -> None:
         compose = {"x-application-defaults": {"build": {}}, "services": {"app": {"image": "x"}}}
         assert validate(compose) == []

@@ -22,7 +22,20 @@ def depends_on(svc: dict[str, Any]) -> dict[str, str]:
         if not isinstance(spec, dict):
             msg = f"depends_on entry {dep!r} must be a mapping"
             raise UnsupportedComposeError(msg)
-        result[dep] = spec.get("condition", "service_started")
+        condition = spec.get("condition", "service_started")
+        if not isinstance(condition, str):
+            # Callers (parsing._validate_depends_on) test membership in a
+            # `set` of known condition strings -- `x in a_set` hashes `x`,
+            # so an unhashable condition (a dict or list) would otherwise
+            # crash raw with `TypeError: unhashable type` instead of failing
+            # clean. Checked here, not there: this function already owns
+            # every other depends_on shape check (list vs mapping, spec must
+            # be a mapping), so a bad condition type belongs with them, and
+            # every caller of `depends_on` -- not just validate() -- gets the
+            # same protection.
+            msg = f"depends_on entry {dep!r}: condition must be a string"
+            raise UnsupportedComposeError(msg)
+        result[dep] = condition
     return result
 
 

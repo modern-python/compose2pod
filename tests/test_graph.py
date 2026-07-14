@@ -36,6 +36,23 @@ class TestDependsOn:
             "keydb": "service_started",
         }
 
+    def test_unhashable_condition_raises_cleanly(self) -> None:
+        # DEPENDS_ON_CONDITIONS (parsing.py) is a set, and `x in a_set`
+        # hashes `x` -- an unhashable condition (dict/list) used to crash
+        # raw (TypeError: unhashable type) instead of failing clean.
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
+            depends_on({"depends_on": {"db": {"condition": {"a": 1}}}})
+
+    def test_list_condition_also_raises_cleanly(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
+            depends_on({"depends_on": {"db": {"condition": ["x"]}}})
+
+    def test_int_condition_raises_cleanly(self) -> None:
+        # Hashable but still not a valid condition shape -- must not slip
+        # past this check only to fail confusingly deeper in.
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
+            depends_on({"depends_on": {"db": {"condition": 1}}})
+
 
 class TestHostnames:
     def test_collects_service_names_and_aliases(self, chats_compose: dict) -> None:
