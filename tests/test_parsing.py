@@ -741,3 +741,51 @@ class TestSweepServiceNamedExtensionPrefix:
     def test_well_formed_is_accepted_as_a_real_service(self) -> None:
         compose = {"services": {"x-web": {"image": "alpine"}}}
         assert validate(compose) == []
+
+
+class TestSweepSkipsUnreadRegions:
+    """`build`'s contents and the ignored top-level `networks`/`volumes` blocks are never read.
+
+    compose2pod accepts these regions but never inspects their contents (see
+    architecture/supported-subset.md), so a non-string key inside them can
+    never reach the generated script and must not be rejected -- Docker
+    itself accepts them. The `environment`/other emitted-map divergence
+    (`{3306: db}` rejected) is unaffected: those keys do reach the script.
+    """
+
+    def test_build_contents_non_string_key_accepted(self) -> None:
+        compose = {"services": {"app": {"build": {"context": ".", "args": {True: 1}}}}}
+        assert validate(compose) == []
+
+    def test_top_level_volumes_contents_non_string_key_accepted(self) -> None:
+        compose = {
+            "services": {"app": {"image": "alpine"}},
+            "volumes": {"data": {"driver_opts": {True: 1}}},
+        }
+        assert any("ignoring top-level 'volumes'" in w for w in validate(compose))
+
+    def test_top_level_networks_contents_non_string_key_accepted(self) -> None:
+        compose = {
+            "services": {"app": {"image": "alpine"}},
+            "networks": {"net1": {"driver_opts": {True: 1}}},
+        }
+        assert any("ignoring top-level 'networks'" in w for w in validate(compose))
+
+    def test_environment_non_string_key_still_rejected(self) -> None:
+        # The `environment: {3306: db}` divergence from Docker stands: that
+        # key does reach the emitted script, unlike build/top-level
+        # networks/volumes above.
+        compose = {"services": {"app": {"image": "x", "environment": {3306: "db"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"environment: key 3306 must be a string"):
+            validate(compose)
+
+    def test_top_level_secrets_and_configs_stay_swept(self) -> None:
+        # Unlike build/top-level networks/volumes, secrets and configs ARE
+        # read (stores.py) and must stay swept, at both the definition and
+        # the service-reference sides.
+        compose = {
+            "services": {"app": {"image": "x", "secrets": [{"source": "s", True: "bogus"}]}},
+            "secrets": {"s": {"file": "./a"}},
+        }
+        with pytest.raises(UnsupportedComposeError):
+            validate(compose)

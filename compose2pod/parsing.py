@@ -246,38 +246,61 @@ def _require_string_keys_deep(where: str, node: Any) -> None:  # noqa: ANN401 - 
 
 
 def _sweep_service(name: str, svc: dict[str, Any]) -> None:
-    """Require every mapping key in one service body to be a string, at every depth.
+    """Require every mapping key in one service body to be a string, at every depth compose2pod reads.
 
     The service's own top-level keys are always checked (`require_string_keys`
     below), regardless of what the service's *name* looks like -- this
     function is only ever called with the real body of a real service,
-    including one literally named `x-web` (see `_sweep_document`). Only the
-    service's *own* `x-`-prefixed keys are skipped, same as everywhere else
-    `x-` is treated as an extension-field marker.
+    including one literally named `x-web` (see `_sweep_document`).
+
+    Two of the service's own top-level keys are skipped rather than swept,
+    because compose2pod never reads their contents: `build` (accepted, but
+    `image_for` never reads its contents -- see
+    architecture/supported-subset.md) and any `x-`-prefixed key (an
+    extension field whose value is arbitrary user payload, by design, same
+    as everywhere else `x-` is skipped). Everything else is swept
+    recursively, since every other service key's value compose2pod either
+    reads structurally or emits into the generated script.
     """
     where = f"service {name!r}"
     require_string_keys(where, svc)
     for key, value in svc.items():
-        if key.startswith("x-"):
+        if key == "build" or key.startswith("x-"):
             continue
         _require_string_keys_deep(f"{where}.{key}", value)
 
 
 def _sweep_document(compose: dict[str, Any]) -> None:
-    """Require every mapping key, at every depth of `compose`, to be a string.
+    """Require every mapping key to be a string, but only in regions `validate()` actually reads.
 
-    Behaves like calling `_require_string_keys_deep("compose document",
-    compose)` directly, with one correction: the `services` mapping's own
-    keys (service *names*), and each top-level `secrets`/`configs`
-    definition's own name, are always swept regardless of what the name
-    looks like, rather than treated as extension-field markers when they
-    start with `x-`. `validate()` iterates `services.items()` with no `x-`
-    filter, so a service literally named `x-web` is a real service, not an
-    extension field -- conflating a NAME with a content key let such a
-    service's whole body escape the sweep entirely (see `_sweep_service`).
-    `stores._validate_def` accepts a store name matching
-    `[a-zA-Z0-9][a-zA-Z0-9_.-]*`, which does not exclude one starting `x-`
-    either, so the same correction applies there.
+    Every later check that reads a mapping's keys directly (`sorted()`,
+    `.startswith()`) or f-string-interpolates one into a flag value can
+    assume every key it sees is a string -- provided it only ever reads a
+    region swept here.
+
+    Swept:
+
+    - The top-level document's own keys.
+    - The `services` mapping's own keys (service *names*): always, and
+      regardless of what a name looks like. `validate()` iterates
+      `services.items()` with no `x-` filter, so a service literally named
+      `x-web` is a real service, not an extension field -- conflating a
+      NAME with a content key is exactly the bug this function exists to
+      not repeat (see `_sweep_service`).
+    - Each service's body (`_sweep_service`), except `build`'s contents and
+      the service's own `x-`-prefixed keys -- neither is ever read.
+    - Each top-level `secrets`/`configs` definition's body: read by
+      `stores.py`. Swept by name (like `services`, not by the generic
+      `x-`-skipping walk), for the same reason -- `stores._validate_def`
+      accepts a store name matching `[a-zA-Z0-9][a-zA-Z0-9_.-]*`, which
+      does not exclude one starting with `x-`, so a store's *name* must not
+      be conflated with a content key either.
+
+    Skipped, because compose2pod never reads or emits from them, so a
+    non-string key there can never reach the generated script: `x-` blocks
+    (top-level and per-service), `build`'s contents, and the ignored
+    top-level `networks`/`volumes` blocks (accepted, but never read --
+    see architecture/supported-subset.md).
     """
     require_string_keys("compose document", compose)
     services = compose.get("services")
@@ -293,10 +316,6 @@ def _sweep_document(compose: dict[str, Any]) -> None:
             for def_name, definition in defs.items():
                 if isinstance(definition, dict):
                     _require_string_keys_deep(f"compose document.{top_key}.{def_name}", definition)
-    for key, value in compose.items():
-        if key in ("services", "secrets", "configs") or key.startswith("x-"):
-            continue
-        _require_string_keys_deep(f"compose document.{key}", value)
 
 
 def _validate_depends_on(services: dict[str, Any]) -> None:
