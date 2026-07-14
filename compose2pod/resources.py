@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Expand, Token, is_number
+from compose2pod.keys import Expand, Token, is_number, require_string_keys
 
 
 # deploy.resources.limits.<field> -> (podman flag, conflicting legacy key)
@@ -22,6 +22,7 @@ def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # no
     if not isinstance(limits, dict):
         msg = f"service {name!r}: deploy.resources.limits must be a mapping"
         raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: deploy.resources.limits", limits)
     unknown = set(limits) - set(_LIMITS)
     if unknown:
         msg = f"service {name!r}: deploy.resources.limits: unsupported keys {sorted(unknown)}"
@@ -40,6 +41,7 @@ def _validate_reservations(name: str, svc: dict[str, Any], reservations: Any) ->
     if not isinstance(reservations, dict):
         msg = f"service {name!r}: deploy.resources.reservations must be a mapping"
         raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: deploy.resources.reservations", reservations)
     unknown = set(reservations) - {"cpus", "memory", "devices"}
     if unknown:
         msg = f"service {name!r}: deploy.resources.reservations: unsupported keys {sorted(unknown)}"
@@ -63,6 +65,7 @@ def validate_deploy(name: str, svc: dict[str, Any]) -> None:
     if not isinstance(deploy, dict):
         msg = f"service {name!r}: 'deploy' must be a mapping"
         raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: deploy", deploy)
     unknown = set(deploy) - {"resources"}
     if unknown:
         msg = f"service {name!r}: deploy: only 'resources' is supported (got {sorted(unknown)})"
@@ -73,6 +76,7 @@ def validate_deploy(name: str, svc: dict[str, Any]) -> None:
     if not isinstance(resources, dict):
         msg = f"service {name!r}: deploy.resources must be a mapping"
         raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: deploy.resources", resources)
     unknown = set(resources) - {"limits", "reservations"}
     if unknown:
         msg = f"service {name!r}: deploy.resources: unsupported keys {sorted(unknown)}"

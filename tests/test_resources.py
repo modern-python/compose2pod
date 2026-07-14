@@ -95,6 +95,29 @@ class TestValidateDeploy:
     def test_null_reservations_is_noop(self) -> None:
         validate_deploy("app", _svc({"resources": {"reservations": None}}))
 
+    def test_deploy_mixed_type_unknown_keys_do_not_crash_raw(self) -> None:
+        # sorted(unknown) used to crash raw (TypeError: '<' not supported
+        # between instances of 'str' and 'int') once 'deploy's unrecognized
+        # keys mixed a non-string key with a string one.
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app': deploy: key 1 must be a string"):
+            validate_deploy("app", _svc({"resources": {}, 1: "x", "y": "z"}))
+
+    def test_resources_mixed_type_unknown_keys_do_not_crash_raw(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app': deploy\.resources: key 1 must be a string"):
+            validate_deploy("app", _svc({"resources": {1: "x", "y": "z"}}))
+
+    def test_limits_mixed_type_unknown_keys_do_not_crash_raw(self) -> None:
+        with pytest.raises(
+            UnsupportedComposeError, match=r"service 'app': deploy\.resources\.limits: key 1 must be a string"
+        ):
+            validate_deploy("app", _svc({"resources": {"limits": {1: "x", "y": "z"}}}))
+
+    def test_reservations_mixed_type_unknown_keys_do_not_crash_raw(self) -> None:
+        with pytest.raises(
+            UnsupportedComposeError, match=r"service 'app': deploy\.resources\.reservations: key 1 must be a string"
+        ):
+            validate_deploy("app", _svc({"resources": {"reservations": {1: "x", "y": "z"}}}))
+
 
 class TestDeployResourceFlags:
     def test_no_deploy_no_flags(self) -> None:
