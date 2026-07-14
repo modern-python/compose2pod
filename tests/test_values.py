@@ -3,6 +3,7 @@ import pytest
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.values import (
     has_variable,
+    validate_count,
     validate_duration,
     validate_integer,
     validate_number,
@@ -25,7 +26,7 @@ def test_has_variable_false(value: object) -> None:
 # A `${VAR}` value is never grammar-checked: its runtime value is unknowable here.
 @pytest.mark.parametrize(
     "validate",
-    [validate_size, validate_number, validate_integer, validate_duration],
+    [validate_size, validate_number, validate_integer, validate_duration, validate_count],
 )
 def test_variable_value_skips_grammar(validate) -> None:  # noqa: ANN001
     validate("app", "k", "${VAR}")
@@ -42,17 +43,31 @@ def test_validate_size_rejects(value: object) -> None:
         validate_size("app", "mem_limit", value)
 
 
-def test_validate_size_int_only_rejects_float() -> None:
+def test_validate_size_int_only_rejects_fractional_float() -> None:
     with pytest.raises(UnsupportedComposeError, match="mem_swappiness"):
-        validate_size("app", "mem_swappiness", 1.5, allow_float=False)
+        validate_size("app", "mem_swappiness", 1.5, allow_fractional=False)
 
 
 def test_validate_size_int_only_accepts_int() -> None:
-    validate_size("app", "mem_swappiness", 60, allow_float=False)
+    validate_size("app", "mem_swappiness", 60, allow_fractional=False)
 
 
 def test_validate_size_int_only_accepts_int_string() -> None:
-    validate_size("app", "mem_swappiness", "60", allow_float=False)
+    validate_size("app", "mem_swappiness", "60", allow_fractional=False)
+
+
+# Measured against `docker compose config` v5.1.2: `mem_swappiness: 60.0` and
+# `mem_reservation: 60.0` are ACCEPTED (a whole-valued float casts cleanly to
+# Docker's int64 field); only a fractional float ("must be a integer") is
+# refused. The constraint is an integral *value*, not the absence of a float type.
+def test_validate_size_int_only_accepts_whole_float() -> None:
+    validate_size("app", "mem_swappiness", 60.0, allow_fractional=False)
+
+
+def test_validate_size_int_only_rejects_fractional_float_string_unaffected() -> None:
+    # The string branch is ungated by allow_fractional -- "1.5" is a valid size
+    # string regardless (matches the pre-existing allow_fractional=True case).
+    validate_size("app", "mem_swappiness", "1.5", allow_fractional=False)
 
 
 # C1: every Docker size unit accepts, but Docker has no exabyte unit -- 'e'/'eb' is not
@@ -84,7 +99,7 @@ def test_validate_size_accepts_digit_grouping(value: str) -> None:
 
 
 def test_validate_size_int_only_accepts_digit_grouping() -> None:
-    validate_size("app", "mem_swappiness", "1_0", allow_float=False)
+    validate_size("app", "mem_swappiness", "1_0", allow_fractional=False)
 
 
 @pytest.mark.parametrize("value", [0.5, 2, -1, "0.5", "2", 1.5])
@@ -111,6 +126,30 @@ def test_validate_number_accepts_digit_grouping() -> None:
     validate_number("app", "cpus", "1_000")
 
 
+# validate_count: cpu_shares/cpu_quota/cpu_period/pids_limit. Measured against
+# `docker compose config` v5.1.2 -- the *native* number is cast leniently (a
+# float is fine), but the *string* form goes through Go's strconv.ParseInt,
+# which is a strict integer: no decimal point, no exponent, no digit-grouping
+# underscore. `cpus` does not share this grammar (it stays on validate_number,
+# a genuine ParseFloat field) -- measured `cpus: "0.5"` is accepted.
+@pytest.mark.parametrize("value", [2, 0.5, -1, "2", "-3", "0"])
+def test_validate_count_accepts(value: object) -> None:
+    validate_count("app", "cpu_shares", value)
+
+
+@pytest.mark.parametrize("value", ["0.5", "1e3", "1_000", "", "abc", [], {}, True])
+def test_validate_count_rejects(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="cpu_shares"):
+        validate_count("app", "cpu_shares", value)
+
+
+# C2: Docker's JSON decoder refuses NaN/Infinity outright, same as validate_number.
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_validate_count_rejects_non_finite(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="cpu_shares"):
+        validate_count("app", "cpu_shares", value)
+
+
 @pytest.mark.parametrize("value", [100, -500, "100"])
 def test_validate_integer_accepts(value: object) -> None:
     validate_integer("app", "oom_score_adj", value)
@@ -128,6 +167,26 @@ def test_validate_integer_rejects(value: object) -> None:
 def test_validate_integer_rejects_digit_grouping(value: str) -> None:
     with pytest.raises(UnsupportedComposeError, match="oom_score_adj"):
         validate_integer("app", "oom_score_adj", value)
+
+
+# Measured against `docker compose config` v5.1.2: ulimits' int64 field rejects
+# any float outright ("invalid type float64 for external"), whole or fractional
+# -- unlike oom_score_adj/mem_swappiness/mem_reservation. Strict is the default
+# so a bare `validate_integer` call (as `_validate_ulimits` makes) stays exact.
+def test_validate_integer_default_rejects_whole_float() -> None:
+    with pytest.raises(UnsupportedComposeError, match="nofile"):
+        validate_integer("app", "nofile", 60.0)
+
+
+# oom_score_adj opts in: `oom_score_adj: 1000.0` is ACCEPTED by Docker, only a
+# fractional float ("must be a integer") is refused.
+def test_validate_integer_allow_whole_float_accepts_whole() -> None:
+    validate_integer("app", "oom_score_adj", 1000.0, allow_whole_float=True)
+
+
+def test_validate_integer_allow_whole_float_still_rejects_fractional() -> None:
+    with pytest.raises(UnsupportedComposeError, match="oom_score_adj"):
+        validate_integer("app", "oom_score_adj", 0.5, allow_whole_float=True)
 
 
 @pytest.mark.parametrize("value", ["0-3", "0,1", "", "abc"])

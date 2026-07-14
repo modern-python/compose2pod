@@ -39,6 +39,12 @@ _SIZE = re.compile(
 # Docker refuses a bare `90` with "missing unit in duration".
 _DURATION = re.compile(r"^[+-]?(?:[0-9]+(?:\.[0-9]+)?(?:ns|us|µs|ms|s|m|h))+$")
 
+# Go's strconv.ParseInt grammar, used for the *string* form of an int64 field
+# (cpu_shares/cpu_quota/cpu_period/pids_limit): an optional sign then digits
+# only -- no decimal point, no exponent, no digit-grouping underscore. The
+# *native* number form of these fields is far more permissive (see validate_count).
+_STRICT_INT_STRING = re.compile(r"^[+-]?[0-9]+$")
+
 # The highest valid TCP/UDP port number, per Docker's own bound.
 _MAX_PORT = 65535
 
@@ -72,11 +78,21 @@ def _is_int(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped YA
     return not isinstance(value, bool) and isinstance(value, int)
 
 
-def validate_size(name: str, key: str, value: Any, *, allow_float: bool = True) -> None:  # noqa: ANN401 - untyped YAML
-    """Check `value` is a byte size: a number, or a string like '512m' / '1gb' / '1e3'."""
+def validate_size(name: str, key: str, value: Any, *, allow_fractional: bool = True) -> None:  # noqa: ANN401 - untyped YAML
+    """Check `value` is a byte size: a number, or a string like '512m' / '1gb' / '1e3'.
+
+    `allow_fractional=False` (mem_reservation, mem_swappiness) mirrors Docker's
+    own int64-cast fields: a native float is accepted only if it has no
+    fractional part -- `60.0` is fine, `0.5` is "must be a integer" -- measured
+    against `docker compose config` v5.1.2. The *string* branch is ungated by
+    this flag: a size string like `"1.5"` or `"512m"` is accepted either way,
+    because Docker's size-string grammar has no such restriction.
+    """
     if has_variable(value):
         return
-    if _is_int(value) or (allow_float and isinstance(value, float) and math.isfinite(value)):
+    if _is_int(value):
+        return
+    if isinstance(value, float) and math.isfinite(value) and (allow_fractional or value.is_integer()):
         return
     if isinstance(value, str) and _SIZE.match(value):
         return
@@ -102,11 +118,49 @@ def validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - 
     raise UnsupportedComposeError(msg)
 
 
-def validate_integer(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    """Check `value` is an integer, or a string that parses as one (a float is refused)."""
+def validate_count(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Check `value` is an int64 count field: cpu_shares, cpu_quota, cpu_period, pids_limit.
+
+    Measured against `docker compose config` v5.1.2, this family has a
+    native/string asymmetry `validate_number` does not capture: the *native*
+    number is cast leniently (`cpu_shares: 0.5` is accepted), but the
+    *string* form goes through Go's strconv.ParseInt -- a strict integer, no
+    decimal point, no exponent, no digit-grouping underscore. `"0.5"`,
+    `"1e3"`, and `"1_000"` are all refused as strings even though the
+    identical native value is fine. `cpus` is not one of these fields -- it
+    is a genuine float (ParseFloat) and stays on `validate_number`.
+    """
+    if has_variable(value):
+        return
+    if _is_int(value) or (isinstance(value, float) and math.isfinite(value)):
+        return
+    if isinstance(value, str) and _STRICT_INT_STRING.match(value):
+        return
+    msg = f"service {name!r}: {key!r} must be an integer"
+    raise UnsupportedComposeError(msg)
+
+
+def validate_integer(
+    name: str,
+    key: str,
+    value: Any,  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    *,
+    allow_whole_float: bool = False,
+) -> None:
+    """Check `value` is an integer, or a string that parses as one (a fractional value is refused).
+
+    Default (`allow_whole_float=False`) matches ulimits' int64 field, which
+    Docker's own decoder refuses for *any* float -- whole or fractional
+    ("invalid type float64 for external"), measured against `docker compose
+    config` v5.1.2. `oom_score_adj` opts in with `allow_whole_float=True`: its
+    Go field casts a whole-valued JSON number leniently (`1000.0` is
+    accepted), and refuses only a fractional one (`0.5`).
+    """
     if has_variable(value):
         return
     if _is_int(value):
+        return
+    if isinstance(value, float) and math.isfinite(value) and allow_whole_float and value.is_integer():
         return
     # Go's ParseInt (used for oom_score_adj etc.) does not permit the digit-grouping
     # underscores its float parser allows; unlike Python's int(), it is "invalid syntax".

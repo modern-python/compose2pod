@@ -202,9 +202,16 @@ def _scalar_of(flag: str, validate: Callable[[str, str, Any], None]) -> KeySpec:
     return KeySpec(validate=validate, emit=emit)
 
 
-def _size(flag: str, *, allow_float: bool = True) -> KeySpec:
+def _size(flag: str, *, allow_fractional: bool = True) -> KeySpec:
     def validate(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
-        values.validate_size(name, key, value, allow_float=allow_float)
+        values.validate_size(name, key, value, allow_fractional=allow_fractional)
+
+    return _scalar_of(flag, validate)
+
+
+def _integer(flag: str, *, allow_whole_float: bool = False) -> KeySpec:
+    def validate(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+        values.validate_integer(name, key, value, allow_whole_float=allow_whole_float)
 
     return _scalar_of(flag, validate)
 
@@ -334,19 +341,27 @@ SERVICE_KEYS: dict[str, KeySpec] = {
     "ulimits": KeySpec(validate=_validate_ulimits, emit=_emit_ulimits, merge=_merge_map),
     "mem_limit": _size("--memory"),
     "memswap_limit": _size("--memory-swap"),
-    # allow_float=False: measured against `docker compose config` v5.1.2 --
-    # mem_reservation rejects a native float, same as mem_swappiness/oom_score_adj
-    # (the design's own grammar table says so; the brief's code sample omitted it).
-    "mem_reservation": _size("--memory-reservation", allow_float=False),
-    "mem_swappiness": _size("--memory-swappiness", allow_float=False),
+    # allow_fractional=False: measured against `docker compose config` v5.1.2 --
+    # mem_reservation/mem_swappiness accept a *whole* native float (60.0) but
+    # refuse a fractional one (0.5); the string branch is unaffected either way.
+    "mem_reservation": _size("--memory-reservation", allow_fractional=False),
+    "mem_swappiness": _size("--memory-swappiness", allow_fractional=False),
     "cpus": _scalar_of("--cpus", values.validate_number),
-    "cpu_shares": _scalar_of("--cpu-shares", values.validate_number),
-    "cpu_quota": _scalar_of("--cpu-quota", values.validate_number),
-    "cpu_period": _scalar_of("--cpu-period", values.validate_number),
+    # validate_count, not validate_number: cpu_shares/cpu_quota/cpu_period/pids_limit
+    # cast a native number leniently but their *string* form is Go's strict
+    # ParseInt -- "0.5"/"1e3"/"1_000" are refused as strings even though the
+    # identical native value is accepted. cpus is a genuine float field and
+    # keeps validate_number.
+    "cpu_shares": _scalar_of("--cpu-shares", values.validate_count),
+    "cpu_quota": _scalar_of("--cpu-quota", values.validate_count),
+    "cpu_period": _scalar_of("--cpu-period", values.validate_count),
     "cpuset": _scalar_of("--cpuset-cpus", values.validate_string),
-    "pids_limit": _scalar_of("--pids-limit", values.validate_number),
+    "pids_limit": _scalar_of("--pids-limit", values.validate_count),
     "shm_size": _size("--shm-size"),
-    "oom_score_adj": _scalar_of("--oom-score-adj", values.validate_integer),
+    # allow_whole_float=True: measured -- oom_score_adj accepts a whole native
+    # float (1000.0) but refuses a fractional one (0.5), unlike ulimits' strict
+    # int64 field (validate_integer's default), which refuses any float.
+    "oom_score_adj": _integer("--oom-score-adj", allow_whole_float=True),
     "oom_kill_disable": _bool("--oom-kill-disable"),
 }
 
