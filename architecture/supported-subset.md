@@ -370,7 +370,10 @@ exception in this group, validated as an actual bool like
   (`"2m"`), and milliseconds (`"500ms"`). Compound durations (`"1h30m"`)
   and hour suffixes (`"1h"`) are not parsed — each raises rather than being
   silently truncated or misinterpreted. An explicit `null` (or an absent
-  `interval`) defaults to 1 second.
+  `interval`) defaults to 1 second. The result floors at 1 second: the
+  interval only paces the script's `podman healthcheck run` polling loop,
+  which has no sub-second resolution, so `"500ms"` and `0` both poll once a
+  second.
 - **`timeout`, `retries`, `start_period`:** each must be a number (int or
   float), a string, or `null` when present. A mapping or list raises
   rather than reaching its `--health-*` flag as a literal Python `repr()`.
@@ -434,8 +437,10 @@ The prefix keeps a config from ever colliding with a same-named secret.
   `content` (configs only) inline literal text. `external: true` gets its
   own rejection message (this package has no analogue to Compose's "must
   already exist" store); any other unrecognized key raises generically.
-- **Per-service references:** short form (`- name`) or long form (a mapping
-  with `source` and optionally `target`, `uid`, `gid`, `mode`). `source`
+- **Per-service references:** the key's value must be a list — a bare string
+  raises. Each entry is short form (`- name`) or long form (a mapping with
+  `source` and optionally `target`, `uid`, `gid`, `mode`), and a long-form
+  `source` must be a string. `source`
   must name a top-level definition of the same kind; an unknown `source`
   raises. An unrecognized long-form key raises. When present, `target` must
   be a string; `uid`/`gid`/`mode` must each be an int or string, not a bool
