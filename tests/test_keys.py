@@ -5,10 +5,10 @@ from compose2pod.keys import (
     SERVICE_KEYS,
     STRUCTURAL_KEYS,
     Expand,
-    _concat_list,
     _merge_map,
     _validate_list,
     _validate_ulimits,
+    concat_list,
     pairs_to_mapping,
     require_string_keys,
     validate_map,
@@ -167,19 +167,19 @@ class TestMergeCallables:
 
     extends.py (Task 2) will call these through SERVICE_KEYS[key].merge, but
     that wiring doesn't exist yet — these tests exercise every branch of
-    _concat_list/_as_list/_merge_map/pairs_to_mapping on their own so Task 1
+    concat_list/as_list/_merge_map/pairs_to_mapping on their own so Task 1
     is fully covered without depending on Task 2.
     """
 
     def test_concat_list_merges_list_forms(self) -> None:
-        assert _concat_list("web", "cap_add", ["NET_ADMIN"], ["SYS_TIME"]) == ["NET_ADMIN", "SYS_TIME"]
+        assert concat_list("web", "cap_add", ["NET_ADMIN"], ["SYS_TIME"]) == ["NET_ADMIN", "SYS_TIME"]
 
     def test_concat_list_normalizes_scalar_string_form(self) -> None:
-        assert _concat_list("web", "cap_add", "NET_ADMIN", ["SYS_TIME"]) == ["NET_ADMIN", "SYS_TIME"]
+        assert concat_list("web", "cap_add", "NET_ADMIN", ["SYS_TIME"]) == ["NET_ADMIN", "SYS_TIME"]
 
     def test_concat_list_refuses_incompatible_form(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="cannot merge 'cap_add' across incompatible forms"):
-            _concat_list("web", "cap_add", ["NET_ADMIN"], {"bad": "shape"})
+            concat_list("web", "cap_add", ["NET_ADMIN"], {"bad": "shape"})
 
     def test_merge_map_merges_dict_forms(self) -> None:
         assert _merge_map("web", "labels", {"team": "core"}, {"tier": "web"}) == {"team": "core", "tier": "web"}

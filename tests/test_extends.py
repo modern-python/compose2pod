@@ -305,3 +305,32 @@ class TestNonStringKeysAheadOfTheGate:
         }
         merged = resolve_extends(doc)
         assert merged["services"]["app"]["environment"] == {"A": "1", 3: "x"}
+
+
+class TestMergeErrorMessageOrder:
+    """The service name and the key must not be transposed in a merge error."""
+
+    def test_structural_concat_incompatible_form_names_service_then_key(self) -> None:
+        # 'volumes' is a structural concat key: it goes through extends' own
+        # list-normalizing path, not a KeySpec.merge. A swapped (name, key) would
+        # render "service 'volumes': cannot merge 'app'" and go unnoticed.
+        doc = {
+            "services": {
+                "base": {"image": "x", "volumes": ["./a:/a"]},
+                "app": {"extends": {"service": "base"}, "volumes": {"not": "a list"}},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError) as excinfo:
+            resolve_extends(doc)
+        assert str(excinfo.value) == "service 'app': cannot merge 'volumes' across incompatible forms"
+
+    def test_structural_concat_merges_scalar_and_list_forms(self) -> None:
+        # The normalize-then-concat path itself: a scalar string on one side.
+        doc = {
+            "services": {
+                "base": {"image": "x", "env_file": "base.env"},
+                "app": {"extends": {"service": "base"}, "env_file": ["local.env"]},
+            }
+        }
+        merged = resolve_extends(doc)
+        assert merged["services"]["app"]["env_file"] == ["base.env", "local.env"]
