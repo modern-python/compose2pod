@@ -50,6 +50,16 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", "/builds/x")
         assert flags[4:8] == ["-e", Expand(value="PASSTHRU"), "-e", Expand(value="SET=v")]
 
+    def test_env_map_boolean_value_normalizes_like_docker(self) -> None:
+        # `environment: {DEBUG: true}` is valid Compose; `docker compose config`
+        # normalizes it to the string "true". Before this fix, this either
+        # emitted the raw Python repr "-e DEBUG=True" (silent corruption) or,
+        # after list/map hardening, was rejected outright (an over-rejection
+        # regression) -- the maintainer's ruling is to normalize, like Docker.
+        svc = {"image": "x", "environment": {"DEBUG": True, "VERBOSE": False}}
+        flags = run_flags("app", svc, "p", "/builds/x")
+        assert flags[4:8] == ["-e", Expand(value="DEBUG=true"), "-e", Expand(value="VERBOSE=false")]
+
     def test_env_file_and_volume_resolved_against_project_dir(self) -> None:
         svc = {"image": "x", "env_file": "tests.env", "volumes": [".:/srv/www/"]}
         flags = run_flags("app", svc, "p", "/builds/chats")
@@ -98,6 +108,22 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "healthcheck": {"test": "true"}}, "p", "/builds/x")
         assert flags[4:6] == ["--health-cmd", Expand(value="true")]
         assert "--health-timeout" not in flags
+
+    def test_healthcheck_explicit_null_scalars_omit_flags(self) -> None:
+        # An explicit `null` means unset, matching `docker compose config`
+        # and how this package treats null everywhere else (environment/
+        # volumes/command). Before the fix: keyed off key *presence*
+        # (`"timeout" in healthcheck`), not the value, so an explicit null
+        # emitted the literal string 'None' as the flag value.
+        svc = {
+            "image": "x",
+            "healthcheck": {"test": "true", "timeout": None, "retries": None, "start_period": None},
+        }
+        flags = run_flags("app", svc, "p", "/b")
+        assert "--health-timeout" not in flags
+        assert "--health-retries" not in flags
+        assert "--health-start-period" not in flags
+        assert "None" not in [str(f) for f in flags]
 
     def test_user_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "user": "1000:1000"}, "p", "/b")
@@ -162,6 +188,10 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "labels": {"empty": None}}, "p", "/b")
         assert flags[4:6] == ["--label", Expand(value="empty")]
 
+    def test_labels_boolean_value_normalizes_like_docker(self) -> None:
+        flags = run_flags("app", {"image": "x", "labels": {"enabled": True}}, "p", "/b")
+        assert flags[4:6] == ["--label", Expand(value="enabled=true")]
+
     def test_platform_flag(self) -> None:
         flags = run_flags("app", {"image": "x", "platform": "linux/amd64"}, "p", "/b")
         assert flags[4:6] == ["--platform", Expand(value="linux/amd64")]
@@ -177,6 +207,10 @@ class TestRunFlags:
     def test_annotations_null_value_is_bare_key(self) -> None:
         flags = run_flags("app", {"image": "x", "annotations": {"marker": None}}, "p", "/b")
         assert flags[4:6] == ["--annotation", Expand(value="marker")]
+
+    def test_annotations_boolean_value_normalizes_like_docker(self) -> None:
+        flags = run_flags("app", {"image": "x", "annotations": {"enabled": False}}, "p", "/b")
+        assert flags[4:6] == ["--annotation", Expand(value="enabled=false")]
 
     def test_labels_still_emit_after_map_flags_refactor(self) -> None:
         flags = run_flags("app", {"image": "x", "labels": {"team": "api"}}, "p", "/b")
@@ -799,6 +833,88 @@ class TestPodNameValidation:
         script = emit_script(compose=doc, options=self._options("test-pod.1"))
         assert "podman pod create --name test-pod.1" in script
 
+    def test_referenced_variables_also_rejects_invalid_pod_names(self) -> None:
+        # Used to only be checked by emit_script; referenced_variables projects
+        # the same _plan traversal and skipped the check entirely.
+        doc = {"services": {"app": {"image": "x"}}}
+        with pytest.raises(UnsupportedComposeError, match="invalid pod name"):
+            referenced_variables(doc, self._options("bad name"))
+
+
+class TestArtifactValidation:
+    def _options(self, artifacts: list[str]) -> EmitOptions:
+        return EmitOptions(
+            target="application",
+            ci_image="ci:latest",
+            command="",
+            pod="test-pod",
+            project_dir=".",
+            artifacts=artifacts,
+            allow_exit_codes=[],
+        )
+
+    def test_artifact_without_colon_raises(self, chats_compose: dict) -> None:
+        # Used to escape as a raw ValueError: not enough values to unpack.
+        options = self._options(["nocolon"])
+        with pytest.raises(UnsupportedComposeError, match=r"artifact 'nocolon' must be in SRC:DST form"):
+            emit_script(compose=chats_compose, options=options)
+
+    def test_artifact_without_colon_also_raises_from_referenced_variables(self, chats_compose: dict) -> None:
+        # The other public entry point projects the same _plan traversal.
+        options = self._options(["nocolon"])
+        with pytest.raises(UnsupportedComposeError, match=r"artifact 'nocolon' must be in SRC:DST form"):
+            referenced_variables(chats_compose, options)
+
+    def test_non_string_artifact_raises_cleanly(self, chats_compose: dict) -> None:
+        # CLI-unreachable (argparse enforces str), but a library caller can
+        # pass EmitOptions directly -- a non-string artifact used to crash
+        # raw on the ':' membership test (TypeError: argument of type 'int'
+        # is not iterable) instead of failing clean.
+        options = self._options([3])  # ty: ignore[invalid-argument-type]
+        with pytest.raises(UnsupportedComposeError, match=r"artifact 3 must be in SRC:DST form"):
+            emit_script(compose=chats_compose, options=options)
+
+    def test_valid_artifact_still_emits_podman_cp(self, chats_compose: dict) -> None:
+        options = self._options(["/srv/out/junit.xml:junit.xml"])
+        script = emit_script(compose=chats_compose, options=options)
+        assert "podman cp test-pod-application:/srv/out/junit.xml junit.xml || true" in script
+
+
+class TestAllowExitCodesValidation:
+    def _options(self, allow_exit_codes: list[int]) -> EmitOptions:
+        return EmitOptions(
+            target="application",
+            ci_image="ci:latest",
+            command="",
+            pod="test-pod",
+            project_dir=".",
+            artifacts=[],
+            allow_exit_codes=allow_exit_codes,
+        )
+
+    def test_non_int_allow_exit_code_raises_cleanly(self, chats_compose: dict) -> None:
+        # CLI-unreachable (argparse enforces int), but a library caller can
+        # pass EmitOptions directly -- a non-int entry is interpolated
+        # unquoted into the generated `case "$rc" in ...)` pattern, so an
+        # unvalidated string is shell injection, not just a crash.
+        options = self._options(
+            ['0) ;; *) rm -rf / ;; esac; case "$rc" in 0']  # ty: ignore[invalid-argument-type]
+        )
+        with pytest.raises(UnsupportedComposeError, match=r"allow_exit_codes entry .* must be an int"):
+            emit_script(compose=chats_compose, options=options)
+
+    def test_bool_allow_exit_code_raises_cleanly(self, chats_compose: dict) -> None:
+        # bool is an int subclass in Python; True/False are not meaningful
+        # exit codes and must not slip past an isinstance(..., int) check.
+        options = self._options([True])
+        with pytest.raises(UnsupportedComposeError, match="allow_exit_codes entry True must be an int"):
+            emit_script(compose=chats_compose, options=options)
+
+    def test_valid_int_allow_exit_codes_still_accepted(self, chats_compose: dict) -> None:
+        options = self._options([1, 2, 5])
+        script = emit_script(compose=chats_compose, options=options)
+        assert "in\n  0|1|2|5) ;;" in script
+
 
 class TestPodmanVersionGuard:
     def _run_header(self, tmp_path: Path, podman_stub_body: str) -> "subprocess.CompletedProcess[str]":
@@ -836,3 +952,46 @@ class TestPodmanVersionGuard:
         result = self._run_header(tmp_path, "exit 1")
         assert result.returncode == 0
         assert result.stderr == ""
+
+
+class TestPublicEntryPointsValidateWithoutBeingToldTo:
+    """Both public entry points must reject malformed input on their own.
+
+    emit_script/referenced_variables are public exports; a library caller may
+    call either directly, skipping validate(). Both project the same `_plan`
+    traversal, so `_plan` itself must gate malformed input -- these documents
+    used to reach a raw crash or (worse) silently corrupt output.
+    """
+
+    def _options(self, target: str = "web") -> EmitOptions:
+        return EmitOptions(
+            target=target,
+            ci_image="ci",
+            command="",
+            pod="p",
+            project_dir=".",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+
+    def test_missing_services_key_raises_cleanly_not_a_keyerror(self) -> None:
+        with pytest.raises(UnsupportedComposeError):
+            emit_script(compose={}, options=self._options())
+
+    def test_non_list_cap_add_raises_cleanly_not_a_typeerror(self) -> None:
+        compose = {"services": {"web": {"image": "a", "cap_add": 3}}}
+        with pytest.raises(UnsupportedComposeError):
+            emit_script(compose=compose, options=self._options())
+
+    def test_non_string_user_is_rejected_not_silently_stringified(self) -> None:
+        # Before the _plan gate, this silently emitted the Python repr of the
+        # dict as the --user value: --user "{'a': 1}" -- corruption, not a crash.
+        compose = {"services": {"web": {"image": "a", "user": {"a": 1}}}}
+        with pytest.raises(UnsupportedComposeError):
+            emit_script(compose=compose, options=self._options())
+
+    def test_referenced_variables_is_equally_guarded(self) -> None:
+        # referenced_variables projects the same _plan traversal as emit_script
+        # and must reject malformed input identically.
+        with pytest.raises(UnsupportedComposeError):
+            referenced_variables({}, self._options())

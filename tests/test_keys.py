@@ -4,10 +4,13 @@ from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.keys import (
     SERVICE_KEYS,
     STRUCTURAL_KEYS,
+    Expand,
     _concat_list,
     _merge_map,
     _validate_list,
     _validate_ulimits,
+    pairs_to_mapping,
+    require_string_keys,
     validate_map,
 )
 from compose2pod.parsing import SUPPORTED_SERVICE_KEYS
@@ -15,6 +18,35 @@ from compose2pod.parsing import SUPPORTED_SERVICE_KEYS
 
 def test_registry_and_structural_keys_are_disjoint() -> None:
     assert not (set(SERVICE_KEYS) & STRUCTURAL_KEYS)
+
+
+class TestExpand:
+    """Expand is the chokepoint every emitted token flows through on its way to to_shell/variable_names."""
+
+    def test_string_value_is_accepted(self) -> None:
+        assert Expand(value="ok").value == "ok"
+
+    def test_non_string_value_raises_instead_of_reaching_shell_py_raw(self) -> None:
+        # Any per-key validator gap that lets a non-str leak into emit used to
+        # crash raw inside shell.py's re.finditer (a TypeError, not a clean
+        # UnsupportedComposeError). Guarding construction closes that whole
+        # class in one place, regardless of which key leaked it.
+        with pytest.raises(UnsupportedComposeError, match="must be a string"):
+            Expand(value=123)  # ty: ignore[invalid-argument-type]
+
+
+class TestRequireStringKeys:
+    """Shared guard against PyYAML's non-string mapping keys (int, or a YAML-1.1 bool)."""
+
+    def test_all_string_keys_pass(self) -> None:
+        require_string_keys("compose document", {"a": 1, "b": 2})
+
+    def test_empty_mapping_passes(self) -> None:
+        require_string_keys("compose document", {})
+
+    def test_non_string_key_raises_naming_the_key_and_location(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"compose document: key 3 must be a string"):
+            require_string_keys("compose document", {3: "x"})
 
 
 def test_supported_service_keys_snapshot() -> None:
@@ -84,6 +116,52 @@ def test_merge_present_iff_list_or_map_shaped(key: str) -> None:
     assert (spec.merge is not None) == is_list_or_map_shaped
 
 
+class TestElementLevelShapeChecks:
+    """_validate_list/validate_map used to only check the outer list/dict shape.
+
+    A non-string list element or non-scalar map value slipped through and got
+    str()'d/repr()'d straight into the emitted script -- exit 0, garbage
+    output, no error anywhere. The commonest trigger is the classic YAML slip
+    of mixing list and map form (`- KEY: value` instead of `- KEY=value`).
+    """
+
+    def test_validate_list_rejects_non_string_element(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'cap_add' entries must be strings"):
+            _validate_list("web", "cap_add", [{"NET_ADMIN": True}])
+
+    def test_validate_list_accepts_string_elements(self) -> None:
+        _validate_list("web", "cap_add", ["NET_ADMIN", "SYS_TIME"])
+
+    def test_validate_map_rejects_non_string_list_element(self) -> None:
+        # The realistic trigger: `environment: [{KEY: value}]` instead of `- KEY=value`.
+        with pytest.raises(UnsupportedComposeError, match="'environment' entries must be strings"):
+            validate_map("web", "environment", [{"POSTGRES_PASSWORD": "password"}])
+
+    def test_validate_map_rejects_non_scalar_map_value(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'labels' values must be"):
+            validate_map("web", "labels", {"team": {"nested": "dict"}})
+
+    def test_validate_map_rejects_list_valued_map_entry(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'labels' values must be"):
+            validate_map("web", "labels", {"team": ["a", "b"]})
+
+    def test_validate_map_accepts_null_value(self) -> None:
+        # environment: {KEY: null} -> host-passthrough; labels: {KEY: null} -> empty label.
+        validate_map("web", "environment", {"KEY": None})
+        validate_map("web", "labels", {"KEY": None})
+
+    def test_validate_map_accepts_numeric_value(self) -> None:
+        validate_map("web", "labels", {"version": 2})
+
+    def test_validate_map_accepts_string_list_elements(self) -> None:
+        validate_map("web", "labels", ["team=core", "BARE"])
+
+    def test_validate_map_accepts_boolean_value(self) -> None:
+        # docker compose config normalizes `DEBUG: true` to the string "true";
+        # a bool map value is valid Compose, not a shape to reject.
+        validate_map("web", "environment", {"DEBUG": True})
+
+
 class TestMergeCallables:
     """Direct tests of the merge policy functions, independent of any caller.
 
@@ -112,3 +190,14 @@ class TestMergeCallables:
     def test_merge_map_refuses_incompatible_form(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="cannot merge 'labels' across incompatible forms"):
             _merge_map("web", "labels", {"team": "core"}, 5)
+
+    def test_pairs_to_mapping_rejects_non_string_list_element(self) -> None:
+        # Before this fix, a non-string element was str()'d into a mapping
+        # *key* instead of rejected -- laundering a malformed list-of-mapping
+        # value into a well-formed-looking mapping that validate() then
+        # accepted and emit rendered as a literal Python repr.
+        with pytest.raises(UnsupportedComposeError, match="'labels' entries must be strings"):
+            pairs_to_mapping("web", "labels", [{"BAD": "x"}])
+
+    def test_pairs_to_mapping_accepts_string_list_elements(self) -> None:
+        assert pairs_to_mapping("web", "labels", ["team=core", "BARE"]) == {"team": "core", "BARE": None}

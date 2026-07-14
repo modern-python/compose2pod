@@ -165,6 +165,16 @@ class TestResolveExtends:
         with pytest.raises(UnsupportedComposeError, match="unsupported 'extends' keys"):
             resolve_extends(doc)
 
+    def test_unknown_extends_keys_with_mixed_types_do_not_crash_raw(self) -> None:
+        # `sorted(unknown)` used to crash raw -- TypeError: '<' not supported
+        # between instances of 'str' and 'int' -- once `unknown` held keys of
+        # more than one incomparable type (a non-string key mixed with a
+        # string one is exactly what a hostile/malformed 'extends' mapping
+        # can produce, since 'extends' is read ahead of validate()'s gate).
+        doc = {"services": {"web": {"extends": {"service": "base", 1: "x", "y": "z"}}, "base": {"image": "x"}}}
+        with pytest.raises(UnsupportedComposeError, match="unsupported 'extends' keys"):
+            resolve_extends(doc)
+
     def test_non_string_service_is_refused(self) -> None:
         doc = {"services": {"web": {"extends": {"service": 5}}}}
         with pytest.raises(UnsupportedComposeError, match="extends 'service' must be a string"):
@@ -215,6 +225,37 @@ class TestResolveExtends:
         assert "extends" not in result["services"]["web"]
         assert result["services"]["base"] is None
 
+    def test_depends_on_list_with_mapping_entry_raises_instead_of_crashing_raw(self) -> None:
+        # Without extends, graph.depends_on's own element check catches this
+        # cleanly. extends.py has its own merge-time normalization
+        # (_as_mapping) that runs ahead of that check and, before this fix,
+        # crashed raw building `{dep: {} for dep in value}` -- a dict list
+        # element isn't hashable.
+        doc = {
+            "services": {
+                "db": {"image": "pg"},
+                "base": {"image": "a", "depends_on": [{"db": {"condition": "service_healthy"}}]},
+                "web": {"extends": {"service": "base"}, "depends_on": ["db"]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry .* must be a string"):
+            resolve_extends(doc)
+
+    def test_labels_list_with_mapping_entry_raises_instead_of_laundering(self) -> None:
+        # Before this fix, a non-string labels list element on the extending
+        # (child) side survived the merge: pairs_to_mapping str()'d the dict
+        # element into a mapping *key* instead of rejecting it, so the merged
+        # service came out well-formed enough for validate() to accept and
+        # emit to render the literal --label "{'BAD': 'x'}".
+        doc = {
+            "services": {
+                "base": {"image": "a", "labels": {"OK": "1"}},
+                "web": {"extends": {"service": "base"}, "labels": [{"BAD": "x"}]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match="'labels' entries must be strings"):
+            resolve_extends(doc)
+
     def test_incompatible_structural_concat_form_is_refused(self) -> None:
         doc = {
             "services": {
@@ -224,3 +265,43 @@ class TestResolveExtends:
         }
         with pytest.raises(UnsupportedComposeError, match="cannot merge 'env_file' across incompatible forms"):
             resolve_extends(doc)
+
+
+class TestNonStringKeysAheadOfTheGate:
+    """resolve_extends() runs before validate()'s document-wide string-key sweep.
+
+    validate() closes non-string mapping keys as a class (see
+    parsing._require_string_keys_deep), but it never gets a turn if
+    resolve_extends() crashes raw on the same input first. None of these
+    hostile shapes involve a value resolve_extends interprets as anything
+    other than an opaque dict key or dict value, so each should pass through
+    unchanged for validate() to reject afterward -- not crash here.
+    """
+
+    def test_non_string_service_name_passes_through(self) -> None:
+        doc = {"services": {True: {"image": "j"}, "app": {"image": "i"}}}
+        assert resolve_extends(doc) == doc
+
+    def test_non_string_key_in_non_extending_service_body_passes_through(self) -> None:
+        doc = {"services": {"app": {"image": "i", 3: "x"}}}
+        assert resolve_extends(doc) == doc
+
+    def test_non_string_key_in_extends_base_body_passes_through(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "j", True: "y"},
+                "app": {"extends": {"service": "base"}, "image": "i"},
+            }
+        }
+        merged = resolve_extends(doc)
+        assert merged["services"]["app"][True] == "y"
+
+    def test_non_string_key_merged_into_environment_across_extends_passes_through(self) -> None:
+        doc = {
+            "services": {
+                "base": {"image": "j", "environment": {"A": "1"}},
+                "app": {"extends": {"service": "base"}, "environment": {3: "x"}},
+            }
+        }
+        merged = resolve_extends(doc)
+        assert merged["services"]["app"]["environment"] == {"A": "1", 3: "x"}

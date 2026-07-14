@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Token
+from compose2pod.keys import Token, require_string_keys
 from compose2pod.shell import to_shell, variable_names
 
 
@@ -66,6 +66,7 @@ def _validate_def(name: str, definition: Any, kind: StoreKind) -> None:  # noqa:
     if not isinstance(definition, dict):
         msg = f"{kind.label} {name!r} must be a mapping"
         raise UnsupportedComposeError(msg)
+    require_string_keys(f"{kind.label} {name!r}", definition)
     unknown = set(definition) - kind.sources
     if unknown:
         if "external" in unknown:
@@ -95,6 +96,9 @@ def _check_long_form_scalars(name: str, ref: dict[str, Any], kind: StoreKind) ->
 
 
 def _check_target(name: str, ref: dict[str, Any], kind: StoreKind) -> None:
+    if "target" in ref and not isinstance(ref["target"], str):
+        msg = f"service {name!r}: {kind.label} target must be a string"
+        raise UnsupportedComposeError(msg)
     if kind.require_absolute_target and isinstance(ref.get("target"), str) and not ref["target"].startswith("/"):
         msg = f"service {name!r}: {kind.label} target {ref['target']!r} must be an absolute path"
         raise UnsupportedComposeError(msg)
@@ -106,6 +110,7 @@ def _ref_source(name: str, ref: Any, kind: StoreKind) -> str:  # noqa: ANN401 - 
     if not isinstance(ref, dict):
         msg = f"service {name!r}: {kind.label} entry must be a string or mapping"
         raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: {kind.label} entry", ref)
     unknown = set(ref) - _LONG_FORM_KEYS
     if unknown:
         msg = f"service {name!r}: unsupported {kind.label} keys {sorted(unknown)}"
@@ -125,6 +130,7 @@ def _validate_kind(compose: dict[str, Any], kind: StoreKind) -> None:
         msg = f"top-level {kind.top_key!r} must be a mapping"
         raise UnsupportedComposeError(msg)
     defs = defs or {}
+    require_string_keys(f"top-level {kind.top_key!r}", defs)
     for name, definition in defs.items():
         _validate_def(name, definition, kind)
     for name, svc in (compose.get("services") or {}).items():

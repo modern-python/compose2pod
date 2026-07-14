@@ -6,15 +6,110 @@ loudly rather than silently dropping behavior. `validate()`
 warns (ignored, behavior-neutral inside a single pod) or raises
 `UnsupportedComposeError`.
 
+`emit_script()` (exported from `compose2pod`) and `referenced_variables()`
+(public as `compose2pod.emit.referenced_variables`) both project the same
+internal `_plan` traversal; `_plan` calls `validate()` itself, before reading
+anything else out of `compose`, and discards the returned warnings (the CLI
+surfaces its own copy from its own `validate()` call). A library caller
+therefore cannot
+reach either public entry point with a document `validate()` would reject —
+calling `emit_script()`/`referenced_variables()` directly, without calling
+`validate()` first, is exactly as safe as the CLI path, by construction of
+the shared `_plan` call site, not by convention.
+
 ## Top-level keys
 
-- **Supported:** `services` (required, non-empty), `version`, `name`,
-  `networks`, `volumes`, `secrets`, `configs`.
+- **Supported:** `services` (required, non-empty mapping of service name to
+  service definition — a non-mapping `services` value, e.g. a bare string or
+  list, raises inside `validate()` itself), `version`, `name`, `networks`,
+  `volumes`, `secrets`, `configs`.
 - **Ignored (warns):** `networks` — all services share the pod's single
   network namespace, so top-level network definitions have no effect.
 - **Extension fields:** any key prefixed `x-` is accepted and ignored
   silently, per the Compose spec. This is what lets a document hold shared
   config in a top-level `x-*` block for reuse via YAML anchors.
+- **Every mapping key must be a string, in every region `validate()`
+  actually reads from or emits into.** PyYAML routinely produces a
+  non-string key — a bare `3:` parses as an int, and under YAML 1.1 a bare
+  `on:`/`off:`/`yes:`/`no:` parses as a bool. `validate()` sweeps these
+  regions once, recursively, before running any other check
+  (`_sweep_document`/`_sweep_service`/`_require_string_keys_deep`,
+  `compose2pod/parsing.py`, built on `require_string_keys`,
+  `compose2pod/keys.py`) and rejects a non-string key found in any of
+  them — `UnsupportedComposeError` names the offending key and its
+  location. Swept: the top-level document's own keys; the `services`
+  mapping's own keys (service *names*) — always, regardless of what a name
+  looks like, since `validate()` treats every entry in `services` as a real
+  service with no `x-` filter (a service literally named `x-web` is swept
+  like any other service, not skipped as an extension field); each
+  service's body — every structural key, `healthcheck`, `deploy` and its
+  nested `resources`/`limits`/`reservations`, per-service `secrets`/
+  `configs` references, and so on — except `build`'s own contents and the
+  service's own `x-`-prefixed keys; and each top-level `secrets`/`configs`
+  definition (read by `stores.py`), by name, for the same reason a service
+  name is swept regardless of what it looks like.
+
+  Three service keys key their mapping form by another entity's
+  *identifier* rather than by content — `depends_on` (a dependency's
+  service name), `networks` (a network's name), and `ulimits` (a
+  resource-limit category's name) — and get the identical name-not-content
+  treatment (`_sweep_identifier_map`, `compose2pod/parsing.py`): each
+  identifier is checked regardless of what it looks like (a dependency
+  literally named `x-dep` is a real identifier, not an extension field), and
+  only *its* value — ordinary content from that point on, e.g. `ulimits`'
+  nested `{soft, hard}` mapping — is swept with the ordinary `x-`-skipping
+  walk.
+
+  **Skipped**, because compose2pod never reads or emits from these
+  regions, so a non-string key inside one can never reach the generated
+  script: `x-` blocks (top-level and per-service) — Compose extension
+  fields legitimately hold arbitrary payloads (e.g. YAML anchor sources
+  reused via `<<:`) that compose2pod accepts and ignores by design, so
+  their contents are never walked (the `x-` key itself is still checked,
+  trivially — its own name has to look like `x-...`); `build`'s own
+  contents (`context`/`dockerfile`/`args`, never read — see `build` below);
+  and the ignored top-level `networks`/`volumes` blocks (accepted, but
+  their contents are never read — see Volumes below and the Pod-level
+  options section for why top-level `networks` has no effect).
+
+  Two distinct downstream consumer classes motivate rejecting a non-string
+  key up front rather than one key at a time within a swept region:
+  mapping-key readers that crash raw otherwise (`sorted()`,
+  `str.startswith`, the secret/config name regex), and mapping-key
+  consumers that don't crash but f-string-interpolate the key straight into
+  a flag value, silently leaking a bool's or int's Python repr into the
+  emitted script instead (`keys.key_value_pairs` — `environment`/
+  `labels`/`annotations`, `keys.extra_host_pairs` — `extra_hosts`,
+  `keys._ulimit_args` — `ulimits`, `pod._sysctl_pairs` — `sysctls`). The
+  second class is silent corruption, not a crash.
+
+  This is a deliberate divergence from Docker for keys that *are* swept:
+  `environment: {3306: db}` is valid Compose and Docker accepts it, but
+  compose2pod refuses it. Docker parses Compose as YAML 1.2, where a bare
+  `3306`/`on`/`off` stays the string it looks like, so Docker never
+  observes a non-string key at all. Normalizing Python's `int`/`bool` back
+  into a key string here would not reproduce that: unlike a boolean *value*
+  (`DEBUG: true`, normalized to the string `"true"` like Docker does — see
+  `_render_scalar` below), a boolean or int *key* has no single correct
+  string form to normalize to (`True` → `"on"`? `"true"`? `"True"`?). A
+  non-string key is a YAML-1.1 accident, not intentional Compose; anyone
+  who means the literal string `on` writes `"on"`. Docker also accepts a
+  non-string key in `build`'s `args` or a top-level `volumes` block's
+  `driver_opts` — since compose2pod never reads either, it accepts them
+  too, matching Docker rather than diverging from it there.
+
+  A handful of module entry points that are also called directly (not only
+  reached through `validate()`) keep their own `require_string_keys` call
+  in addition to the sweep, as defense at their own boundary and as
+  belt-and-braces for two service-level checks the sweep also covers:
+  `_validate_service` and `_validate_service_healthcheck`
+  (`compose2pod/parsing.py`), `resources.validate_deploy`'s four checks
+  (`deploy` and its nested `resources`/`limits`/`reservations`), and
+  `stores.py`'s three checks (a secret/config definition's keys, a
+  long-form reference's keys, and the top-level `secrets`/`configs`
+  block's own keys). These are redundant only when reached through
+  `validate()`; each is still load-bearing for a caller that invokes that
+  function directly.
 - Everything else raises.
 
 ## Service keys
@@ -40,15 +135,65 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   The remaining keys documented below are **structural keys**, handled
   outside the registry because their `emit` needs `project_dir`, spans
   multiple keys, or occupies the image/command slot.
+  The list-shaped registry keys (`group_add`, `cap_add`, `cap_drop`,
+  `security_opt`, `devices`) share one validator, `keys._validate_list`; the
+  map-shaped ones (`labels`, `annotations`) and the pod-level `extra_hosts`
+  share `keys.validate_map`. Both require every list element to be a string
+  and every mapping value to be a string, number, boolean, or null — a
+  non-string element or a non-scalar value (e.g. `cap_add: [{NET_ADMIN:
+  true}]`, a list entry that is itself a mapping) is rejected rather than
+  `str()`'d/`repr()`'d straight into the flag value. A boolean mapping value
+  (`labels: {enabled: true}`) is deliberately accepted, not rejected: it is
+  normalized the way `docker compose config` normalizes it, rendered as the
+  lowercase string `true`/`false` (`keys._render_scalar`, shared by
+  `key_value_pairs` and `extra_host_pairs`) rather than Python's
+  `str(True) == "True"`.
+- **`image`:** a string; `image_for` (`compose2pod/emit.py`) reads it verbatim
+  when the service has no `build`. A service must set at least one of `image`
+  or `build`; a service with neither, or a non-string `image` while `build` is
+  absent, raises at the gate (`_validate_image`, `compose2pod/parsing.py`). A
+  non-string `image` alongside `build` is accepted, since `image_for` never
+  reads it in that case — the CI image always wins.
+- **`command`:** string or list. List form is argv tokens; string form runs
+  via `/bin/sh -c`. Any other shape (e.g. a mapping) raises at the gate
+  (`_validate_command`, `compose2pod/parsing.py`) — a mapping is rejected
+  outright rather than reaching `podman run` with only its keys emitted as
+  bare tokens and its values silently discarded. Each list element must
+  itself be a string; a non-string element (e.g. `command: [{run: tests}]`,
+  the same list/map YAML slip that trips up `environment`) raises the same
+  way, rather than being `str()`'d into a single mangled argv token.
+  `command: null` is accepted, treated the same as an absent `command` —
+  unlike `entrypoint: null` (see below), a narrower pre-existing divergence
+  between the two keys.
 - **`environment`:** list form (`- KEY=value`, `- KEY`) or mapping form
   (`KEY: value`, `KEY:`). A null mapping value (`KEY:`) means "pass `KEY`
   through from the host", emitted as a bare `-e KEY` exactly like the list
   form `- KEY`.
+  The key itself must be a list or mapping; any other shape (e.g. a bare
+  string) raises at the gate. List elements must themselves be strings, and
+  mapping values must be a string, number, boolean, or null; the commonest
+  violation is the classic YAML slip of mixing list and map form
+  (`environment: [{KEY: value}]` instead of `- KEY=value`), rejected rather
+  than emitting the literal `-e "{'KEY': 'value'}"` — both rules are
+  enforced by the shared `keys.validate_map` (`compose2pod/keys.py`). A
+  boolean mapping value (`DEBUG: true`) is valid Compose and is normalized
+  like Docker: emitted as `-e DEBUG=true` (lowercase), not the Python repr
+  `-e DEBUG=True`.
+- **`env_file`:** a string or a list. Any other shape raises
+  (`_validate_env_file`, `compose2pod/parsing.py`). Each list element must
+  itself be a string; a non-string element (e.g. `env_file: [5]`) raises the
+  same way. Each resolved path is passed through `--project-dir` when
+  relative, then emitted as a `--env-file` flag (`compose2pod/emit.py`).
 - **`entrypoint`:** string or list. List form is exec form; string form is
   shell form (`/bin/sh -c <string>`), mirroring `command`. Emitted as
   `--entrypoint <first-token>` with the remaining tokens placed ahead of the
   command after the image, so `podman run --entrypoint a IMAGE b <command>`
-  runs `a b <command>` -- no JSON needed. A string (shell-form) entrypoint
+  runs `a b <command>` -- no JSON needed. Each list element must itself be a
+  string, the same rule and rejection as `command`'s list form. Unlike
+  `command`, `entrypoint: null` raises rather than being treated as absent —
+  a pre-existing, narrower divergence in how the two keys' validators handle
+  an explicit `null` (`_validate_command` checks for `None` first and treats
+  it as "absent"; `_validate_entrypoint` does not). A string (shell-form) entrypoint
   ignores the service `command`, matching Docker; `validate()` warns when both
   are set. The target's `--command` override still applies as explicit intent,
   but when the target has a string entrypoint, the override tokens land after
@@ -82,7 +227,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   `--ulimit nproc=65535`, podman sets soft = hard) or a `{soft, hard}` mapping
   (`nofile: {soft, hard}` → `--ulimit nofile=soft:hard`). A mapping value must
   have exactly `soft` and `hard`, each an int or string; other shapes are
-  rejected. (`sysctls`, by
+  rejected. A boolean scalar or a boolean `soft`/`hard` bound is rejected too
+  — `bool` is technically an `int` in Python, so a naive `isinstance(spec,
+  int | str)` would otherwise let one through and emit the literal
+  `--ulimit nofile=True`. Unlike `environment`'s boolean (normalized to a
+  string, see above), a boolean ulimit has no sensible Docker-equivalent
+  normalization, so it is rejected rather than coerced. (`sysctls`, by
   contrast, is pod-level rather than per-container — see the
   Pod-level options section below.)
 - **`labels`:** list (`- KEY=value` / `- KEY`) or mapping (`KEY: value` / `KEY:`),
@@ -94,9 +244,11 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   `podman run --tmpfs <value>` — Compose's short syntax maps directly onto
   podman's own `--tmpfs CONTAINER-DIR[:OPTIONS]` flag, so no translation is
   needed. The key itself must be a string or list — a non-string/non-list
-  value (e.g. a mapping) raises; no format validation beyond that, so a
-  malformed option string inside an accepted string/list surfaces as a podman
-  error at run time.
+  value (e.g. a mapping) raises; each list element must itself be a string, a
+  non-string element (e.g. `tmpfs: [5]`) raises the same way
+  (`_validate_tmpfs`, `compose2pod/parsing.py`). No format validation beyond
+  shape, so a malformed option string inside an accepted string/list surfaces
+  as a podman error at run time.
 - **`hostname` and `container_name`:** both are made resolvable to
   `127.0.0.1` like a network alias (added to the shared `--add-host` set), so
   other services can reach the service by either name. The pod shares the UTS
@@ -113,8 +265,12 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   contribute). The key must be a list or mapping — anything else raises. A
   long-form *value* that isn't itself a mapping (e.g. `networks: {default:
   true}`) is lenient, not rejected: it simply contributes no aliases, since
-  only a mapping value can carry an `aliases` list (`_host_names`,
-  `compose2pod/graph.py`).
+  only a mapping value can carry an `aliases` list. When present, `aliases`
+  itself must be a list of strings — a non-list value (e.g. a bare string)
+  would otherwise be destructured character-wise into the resolvable-name
+  set, and a non-string element crashes downstream the same way a malformed
+  `volumes`/`tmpfs` element does; both raise at the gate instead
+  (`_host_names`, `compose2pod/graph.py`).
 - **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty`, `stop_signal`,
   `stop_grace_period`, `profiles` — meaningless or irrelevant inside a single
   shared-namespace pod. `stop_signal`/`stop_grace_period` are inert because the
@@ -167,10 +323,19 @@ warns (ignored, behavior-neutral inside a single pod) or raises
   list-form `environment`/`depends_on`, or a sequence-concatenate key that is
   neither a list nor a scalar string.
 - **Divergences from Compose:**
-  - Only `environment` and `depends_on` accept list form for the
-    mapping-merge; the other mapping-merge keys (`labels`, `annotations`,
-    `extra_hosts`, `ulimits`, `healthcheck`) in list form on a merged side are
-    refused as an incompatible form rather than silently coerced.
+  - `environment` and `depends_on` accept list form directly in extends.py's
+    own merge (`_as_mapping`, `compose2pod/extends.py`); `extra_hosts` and
+    `healthcheck` do not — list form on a merged side is refused as an
+    incompatible form for those two. `labels`, `annotations`, and `ulimits`
+    instead route through their own `SERVICE_KEYS` merge policy
+    (`_merge_map`, `compose2pod/keys.py`), which uses the same
+    list-accepting `pairs_to_mapping` normalizer that `environment` uses —
+    so list form on a merged side *is* coerced to a mapping for these three,
+    not refused. Every one of these normalizers rejects a non-string list
+    element (e.g. `labels: [{BAD: "x"}]`) rather than laundering it into a
+    mapping key via `str()`: `pairs_to_mapping` (`compose2pod/keys.py`) is
+    the single function both paths share, so this rule holds identically
+    whichever merge route a key takes.
   - Short-form `volumes` are concatenated rather than merged by target path;
     podman resolves duplicate mounts at run time rather than compose2pod
     deduplicating them at generation time.
@@ -289,23 +454,44 @@ honors both, refusing loudly on overlap rather than picking a precedence.
 
 - **Supported:** `test`, `interval`, `timeout`, `retries`, `start_period`.
 - A `healthcheck` value that isn't a mapping raises
-  (`_validate_service_healthcheck`, `compose2pod/parsing.py`) — previously a
-  non-mapping healthcheck reached `.get()` calls downstream and crashed raw
-  instead of failing at the gate.
+  (`_validate_service_healthcheck`, `compose2pod/parsing.py`).
+- **`test`:** a bare string (shell form), `"NONE"` / `["NONE"]` (disabled),
+  `["CMD", ...]` (exec form), or `["CMD-SHELL", <string>]`. `health_cmd`
+  (`compose2pod/healthcheck.py`) is the sole reader and the sole validator —
+  `_validate_service_healthcheck` (`compose2pod/parsing.py`) calls it at
+  `validate()` time purely for its shape check (the returned `--health-cmd`
+  value is discarded there; `emit.py` calls it again to get the value for
+  real). Any other shape raises, including a `CMD-SHELL` whose argument isn't
+  a string and a `CMD` whose trailing elements aren't all strings (e.g.
+  `["CMD-SHELL", ["curl", "-f"]]`).
 - **`interval`:** parsed to whole seconds by `interval_seconds`
   (`compose2pod/healthcheck.py`). Supported forms: a bare number of seconds
   (`30`, `"30"`, `"30s"`), minutes (`"2m"`), and milliseconds (`"500ms"`).
   Compound durations (`"1h30m"`) and hour suffixes (`"1h"`) are not parsed —
   each is rejected with an `UnsupportedComposeError` rather than silently
-  truncated or misinterpreted.
+  truncated or misinterpreted. An explicit `null` (or an absent `interval`)
+  defaults to 1 second.
+- **`timeout`, `retries`, `start_period`:** each must be a number (int or
+  float), a string, or `null` when present — the same shape `keys.is_number`
+  enforces for the legacy resource-limit keys, plus `null`. A mapping or list
+  (e.g. `retries: {a: 1}`) raises at the gate (`_validate_service_healthcheck`,
+  `compose2pod/parsing.py`) rather than reaching its `--health-*` flag as a
+  literal Python `repr()`. An explicit `null` is treated the same as an
+  absent key -- unset, so its `--health-*` flag is omitted entirely
+  (`_health_flags`, `compose2pod/emit.py`, keyed off the *value*, not key
+  presence). This matches `docker compose config`, which treats an
+  explicitly-null key as unset, and is the same treatment this package
+  already gives a null `environment`/`volumes`/`command` value elsewhere.
 - **Extension fields:** any `x-`-prefixed healthcheck key is accepted and
   ignored silently.
 - Everything else raises.
 
 ## Volumes
 
-Short syntax only; the long mapping form raises. A `source:target` entry is
-one of two kinds, told apart by whether `source` starts with `.` or `/`:
+Short syntax only; the long mapping form raises. The `volumes` key itself
+must be a list — a bare string raises, rather than being destructured one
+character at a time. A `source:target` entry is one of two kinds, told
+apart by whether `source` starts with `.` or `/`:
 
 - **Bind mount** (`source` starts with `.` or `/`): the host path, resolved
   against `--project-dir` when relative.
@@ -364,8 +550,8 @@ colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
   `podman run`, assembled per service by `stores.flags` (`compose2pod/stores.py`,
   called from `emit_script`, `compose2pod/emit.py`), where `target` defaults
   to the secret's own name when the reference doesn't give one (short form,
-  or long form without `target`). `uid`/`gid`/`mode` are only added when the
-  long form gives them explicitly; `mode` renders as a 4-digit octal string
+  or long form without `target`). When present, `target` must be a string.
+  `uid`/`gid`/`mode` are only added when the long form gives them explicitly; `mode` renders as a 4-digit octal string
   when given as a Python int (`0o400` becomes `"0400"`) and passes through
   verbatim when given as a string (`_flags_for`, `compose2pod/stores.py`). When
   `uid`/`gid`/`mode` are omitted, podman itself applies its own defaults: the
@@ -427,7 +613,7 @@ colon-less entry that is not absolute (e.g. `./cache`) is malformed and raises.
   Unlike a secret, whose default `target` is its own name (mounted by podman
   under `/run/secrets/<target>`), a config's default `target` is the
   container-root absolute path `/<name>` (`CONFIG.default_target`,
-  `compose2pod/stores.py`). A long-form `target` must be an absolute path
+  `compose2pod/stores.py`). When present, `target` must be a string. A long-form `target` must be an absolute path
   (start with `/`); a relative target raises
   (`CONFIG.require_absolute_target`, checked by `_check_target`,
   `compose2pod/stores.py`). `uid`/`gid`/`mode` behave exactly as for secrets:
@@ -460,6 +646,15 @@ time. `to_shell()` (`compose2pod/shell.py`) instead re-encodes each
 interpolated string leaf into a double-quoted POSIX-shell fragment with the
 variable references left live, so the generated script's own shell expands
 them against its runtime environment when the script runs.
+
+`Expand` (`compose2pod/keys.py`) is a frozen dataclass wrapping the `str`
+value every interpolated field carries; it rejects a non-`str` value at
+construction (`__post_init__`) with `UnsupportedComposeError`, since
+`to_shell()`/`variable_names()` both assume a `str` and crash raw otherwise.
+This is a chokepoint, not a substitute for validating each key's shape at
+`validate()` time: it only converts an already-malformed value into a clean
+error one step later, at `emit_script()`, instead of leaving it to crash
+inside `shell.py`'s regex matching.
 
 The interpolated set is exactly what `Expand(...)` wraps in
 `compose2pod/emit.py` and `compose2pod/keys.py` — there is no separate list
@@ -500,7 +695,19 @@ check. A braced reference whose text after the name is not one of these
 operators (e.g. `${FOO!bar}`) is malformed and raises
 `UnsupportedComposeError` rather than silently dropping the trailing text.
 Tool/CLI-supplied values (`--project-dir`, `--image`, the pod name,
-the `--command` override) are literal and never interpolated. The pod
+the `--command` override) are literal and never interpolated.
+`--artifact` must be a string in `SRC:DST` form; a non-string value or one
+with no `:` raises `UnsupportedComposeError` (`_validate_options`,
+`compose2pod/emit.py`), guarding library callers of both `emit_script` and
+`referenced_variables` as well as the CLI (the CLI itself always supplies a
+string — this guards a direct `EmitOptions` construction). `allow_exit_codes`
+entries must each be an `int` (not `bool`, which is an `int` subclass in
+Python but not a meaningful exit code) — `_validate_options` rejects
+anything else, since each entry is interpolated unquoted into the generated
+`case "$rc" in ...)` pattern; the CLI's `argparse` `type=int` already
+guarantees this, so the check exists for a library caller passing
+`EmitOptions` directly, where an unvalidated string would be shell injection,
+not just a crash. The pod
 name is embedded into the pod-create line, the single-quoted `EXIT`
 trap, and the `<pod>-<name>` store names (some of them unquoted), so it
 must be a shell-inert identifier — `emit_script` validates it against
@@ -527,7 +734,28 @@ names (short form, each defaulting to `service_started`) or a mapping of
 service name to a per-dependency mapping (long form, read for `condition`).
 Anything else — a bare string, a number, a mapping whose value isn't itself a
 mapping — raises `UnsupportedComposeError` at the gate instead of failing
-later with a raw `AttributeError`/`TypeError` when the shape is walked.
+later with a raw `AttributeError`/`TypeError` when the shape is walked. Each
+short-form list element must itself be a string; a non-string element (e.g.
+`depends_on: [{db: {condition: service_healthy}}]`, the same list/map YAML
+slip that trips up `environment`/`command`) raises the same way, instead of
+crashing raw (`TypeError: unhashable type`) from inside `validate()` itself
+when the list was passed to `dict.fromkeys`. `extends.py`'s own
+list-to-mapping normalization (`_as_mapping`, used when merging a
+list-form `depends_on` across `extends`) enforces the identical
+element-must-be-a-string check before `validate()` ever runs — `extends`
+resolution happens ahead of the gate (see Extends, above), so without its
+own check this same malformed input crashed raw there instead.
+
+The long form's `condition` value gets the same treatment: it must be a
+string (`graph.depends_on`), so a mapping or list condition (e.g. `depends_on:
+{db: {condition: {a: 1}}}`) raises `UnsupportedComposeError` there instead of
+crashing raw (`TypeError: cannot use 'dict' as a set element -- unhashable
+type: 'dict'`) at the `condition not in DEPENDS_ON_CONDITIONS` set-membership
+check that follows it in `parsing._validate_depends_on` — `in` against a
+`set` hashes its operand, and only a `str` condition ever reaches that check.
+This is checked in `graph.py`, not `parsing.py`, so every caller of
+`depends_on` — not only `validate()` — gets the same protection, matching
+every other depends_on shape check, which already lives there.
 
 ## YAML anchors and merge keys
 

@@ -11,6 +11,7 @@ from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, Expand, Token, key_value_pairs
+from compose2pod.parsing import validate
 from compose2pod.pod import pod_create_flags
 from compose2pod.resources import deploy_resource_flags
 from compose2pod.shell import to_shell, variable_names
@@ -53,11 +54,17 @@ def _health_flags(healthcheck: dict[str, Any]) -> list[Token]:
     cmd = health_cmd(healthcheck.get("test"))
     if cmd is not None:
         flags += ["--health-cmd", Expand(value=cmd)]
-        if "timeout" in healthcheck:
+        # An explicit `null` scalar means unset, not "emit the literal string
+        # 'None'" -- the same treatment `environment`/`volumes`/`command`
+        # give a null value elsewhere in this package, and matching `docker
+        # compose config`, which treats an explicitly-null key as absent.
+        # Keyed off value, not presence, so `timeout: null` and an omitted
+        # `timeout` behave identically.
+        if healthcheck.get("timeout") is not None:
             flags += ["--health-timeout", str(healthcheck["timeout"])]
-        if "start_period" in healthcheck:
+        if healthcheck.get("start_period") is not None:
             flags += ["--health-start-period", str(healthcheck["start_period"])]
-        if "retries" in healthcheck:
+        if healthcheck.get("retries") is not None:
             flags += ["--health-retries", str(healthcheck["retries"])]
     return flags
 
@@ -221,6 +228,26 @@ def _emit_target(lines: list[str], tokens: list[Token], options: EmitOptions) ->
     lines.append("esac")
 
 
+def _validate_options(options: EmitOptions) -> None:
+    """Check option values emit destructures or interpolates unquoted.
+
+    CLI-unreachable (argparse enforces `artifact` as `str` and
+    `allow_exit_codes` as `int`) but a library caller can pass `EmitOptions`
+    directly: a non-string `artifact` would crash raw on the ':' membership
+    test below, and a non-int `allow_exit_codes` entry is interpolated
+    unquoted into the generated `case "$rc" in ...)` pattern -- shell
+    injection, not just a crash.
+    """
+    for artifact in options.artifacts:
+        if not isinstance(artifact, str) or ":" not in artifact:
+            msg = f"artifact {artifact!r} must be in SRC:DST form"
+            raise UnsupportedComposeError(msg)
+    for code in options.allow_exit_codes:
+        if isinstance(code, bool) or not isinstance(code, int):
+            msg = f"allow_exit_codes entry {code!r} must be an int"
+            raise UnsupportedComposeError(msg)
+
+
 def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     """Walk the target's dependency closure once, building the script and its variables.
 
@@ -228,7 +255,22 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     service's `run_tokens` and the `pod_create_flags` render into lines *and*
     have their `Expand` variables collected, so the script and the variable
     list cannot disagree about what the script expands at run time.
+
+    `emit_script` and `referenced_variables` are both public entry points that
+    project this traversal, so a library caller can reach either one without
+    ever calling `validate()` first. Validating `compose` here -- and nowhere
+    else -- makes both safe by construction: this is the one place a caller
+    cannot route around. `cli.py` also calls `validate()` itself (to surface
+    warnings), so this repeats that pass; `validate()` only reads `compose`
+    and returns warnings, so the repeat is side-effect-free. The warnings from
+    this pass have no channel to reach a caller here -- `cli.py` surfaces its
+    own copy from its own call -- so they are discarded on purpose.
     """
+    _validate_options(options)
+    _ = validate(compose)  # re-validate; warnings already surfaced by the caller, if any
+    if not POD_NAME_PATTERN.fullmatch(options.pod):
+        msg = f"invalid pod name {options.pod!r}"
+        raise UnsupportedComposeError(msg)
     services = compose["services"]
     hosts = hostnames(services)
     order = startup_order(services, options.target)
@@ -275,9 +317,6 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
 
 def emit_script(compose: dict[str, Any], options: EmitOptions) -> str:
     """Render the full pod test script for `target` and its dependency closure."""
-    if not POD_NAME_PATTERN.fullmatch(options.pod):
-        msg = f"invalid pod name {options.pod!r}"
-        raise UnsupportedComposeError(msg)
     return _plan(compose, options).script
 
 

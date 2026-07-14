@@ -60,6 +60,21 @@ class TestMain:
         assert out.out.startswith("#!/bin/sh")
         assert "podman pod create" in out.out
         assert "compose2pod:" in out.err
+        # main() calls validate() once for its own warnings, and emit_script /
+        # referenced_variables each call validate() again internally (closing
+        # the gate for direct library callers) -- each warning must still
+        # appear exactly once, not once per internal validate() call.
+        err_lines = out.err.splitlines()
+        expected_warnings = [
+            "compose2pod: service 'application': ignoring 'ports'",
+            "compose2pod: service 'application': ignoring 'restart'",
+            "compose2pod: service 'application': ignoring 'stdin_open'",
+            "compose2pod: service 'application': ignoring 'tty'",
+            "compose2pod: service 'db': ignoring 'ports'",
+            "compose2pod: service 'db': ignoring 'restart'",
+        ]
+        for warning in expected_warnings:
+            assert err_lines.count(warning) == 1, err_lines
 
     def test_yaml_stdin_success(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
         yaml_text = "services:\n  app:\n    image: x\n"
@@ -221,6 +236,32 @@ class TestMain:
         assert rc == EXIT_USAGE_ERROR
         assert "must be a mapping" in capsys.readouterr().err
 
+    def test_non_string_key_survives_extends_and_is_rejected_cleanly(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # resolve_extends() runs before validate(); confirms the merged
+        # non-string key reaches validate()'s sweep and fails clean (exit 2)
+        # instead of crashing raw somewhere in extends.py.
+        yaml_text = (
+            "services:\n"
+            "  base:\n    image: j\n    environment:\n      A: '1'\n"
+            "  app:\n    extends: {service: base}\n    environment:\n      on: '2'\n"
+        )
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "key True must be a string" in capsys.readouterr().err
+
+    def test_non_string_service_name_rejected_cleanly(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # F2: a non-string service name reached --add-host/--name verbatim
+        # (e.g. `podman run --name test-pod-True ...`) instead of being
+        # rejected at the gate.
+        yaml_text = "services:\n  app:\n    image: i\n  on:\n    image: j\n"
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "compose document.services: key True must be a string" in capsys.readouterr().err
+
     def test_yaml_anchor_extension_fields_convert(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -231,6 +272,19 @@ class TestMain:
         out = capsys.readouterr()
         assert rc == 0
         assert "podman pod create" in out.out
+
+    def test_non_string_key_from_x_block_anchor_merged_into_service_is_rejected(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # PyYAML resolves anchors/merge keys at load time, so content whose
+        # *source* lived in a skipped x- block lands in the service body as
+        # ordinary content once merged -- it must still be swept there.
+        yaml_text = (
+            "x-common: &common\n  environment:\n    on: 1\nservices:\n  app:\n    image: alpine\n    <<: *common\n"
+        )
+        rc = run_main(yaml_text, ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "key True must be a string" in capsys.readouterr().err
 
 
 class TestModuleEntrypoint:

@@ -42,6 +42,15 @@ class TestValidatePodOptions:
         with pytest.raises(UnsupportedComposeError, match="'sysctls' must be a mapping or a list"):
             validate_pod_options("app", {"image": "x", "sysctls": "net.x=1"})
 
+    def test_extra_hosts_list_of_mapping_rejected(self) -> None:
+        # Used to be silently accepted and str()'d straight into --add-host.
+        with pytest.raises(UnsupportedComposeError, match="'extra_hosts' entries must be strings"):
+            validate_pod_options("app", {"image": "x", "extra_hosts": [{"db": "10.0.0.5"}]})
+
+    def test_extra_hosts_map_non_scalar_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'extra_hosts' values must be"):
+            validate_pod_options("app", {"image": "x", "extra_hosts": {"db": ["10.0.0.5"]}})
+
 
 class TestUsesPodOptions:
     def test_true_when_declared(self) -> None:
@@ -114,6 +123,12 @@ class TestAddHostFlags:
     def test_extra_hosts_mapping_form(self) -> None:
         services = {"a": {"extra_hosts": {"db": "10.0.0.5"}}}
         assert pod_create_flags(services, ["a"], []) == ["--add-host", Expand(value="db:10.0.0.5")]
+
+    def test_extra_hosts_boolean_value_normalizes_like_docker(self) -> None:
+        # Same boolean-map-value normalization as environment/labels/annotations,
+        # applied uniformly since extra_hosts is also a validate_map-shaped key.
+        services = {"a": {"extra_hosts": {"db": True}}}
+        assert pod_create_flags(services, ["a"], []) == ["--add-host", Expand(value="db:true")]
 
     def test_extra_hosts_ipv6_value_keeps_colons(self) -> None:
         services = {"a": {"extra_hosts": {"myhost": "2001:db8::1"}}}

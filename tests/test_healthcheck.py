@@ -42,6 +42,16 @@ class TestHealthCmd:
         with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck test"):
             health_cmd(["CMD"])
 
+    def test_cmd_shell_non_string_argument_raises(self) -> None:
+        # A nested list where a string is expected: used to reach emit and
+        # crash raw when the non-string was wrapped in Expand.
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck test"):
+            health_cmd(["CMD-SHELL", ["curl", "-f"]])
+
+    def test_cmd_non_string_argument_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck test"):
+            health_cmd(["CMD", "keydb-cli", 123])
+
 
 class TestIntervalSeconds:
     def test_seconds_suffix(self) -> None:

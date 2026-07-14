@@ -9,6 +9,10 @@ def depends_on(svc: dict[str, Any]) -> dict[str, str]:
     """Normalize dependencies of a service to a name -> condition mapping."""
     deps = svc.get("depends_on") or {}
     if isinstance(deps, list):
+        for dep in deps:
+            if not isinstance(dep, str):
+                msg = f"depends_on entry {dep!r} must be a string"
+                raise UnsupportedComposeError(msg)
         return cast(dict[str, str], dict.fromkeys(deps, "service_started"))
     if not isinstance(deps, dict):
         msg = "'depends_on' must be a list or mapping"
@@ -18,7 +22,20 @@ def depends_on(svc: dict[str, Any]) -> dict[str, str]:
         if not isinstance(spec, dict):
             msg = f"depends_on entry {dep!r} must be a mapping"
             raise UnsupportedComposeError(msg)
-        result[dep] = spec.get("condition", "service_started")
+        condition = spec.get("condition", "service_started")
+        if not isinstance(condition, str):
+            # Callers (parsing._validate_depends_on) test membership in a
+            # `set` of known condition strings -- `x in a_set` hashes `x`,
+            # so an unhashable condition (a dict or list) would otherwise
+            # crash raw with `TypeError: unhashable type` instead of failing
+            # clean. Checked here, not there: this function already owns
+            # every other depends_on shape check (list vs mapping, spec must
+            # be a mapping), so a bad condition type belongs with them, and
+            # every caller of `depends_on` -- not just validate() -- gets the
+            # same protection.
+            msg = f"depends_on entry {dep!r}: condition must be a string"
+            raise UnsupportedComposeError(msg)
+        result[dep] = condition
     return result
 
 
@@ -39,7 +56,14 @@ def _host_names(name: str, svc: dict[str, Any]) -> list[str]:
     if isinstance(networks, dict):
         for network in networks.values():
             if isinstance(network, dict):
-                result.extend(network.get("aliases") or [])
+                aliases = network.get("aliases")
+                if aliases is None:
+                    continue
+                # A string would be iterated character-wise by extend() below.
+                if not isinstance(aliases, list) or not all(isinstance(alias, str) for alias in aliases):
+                    msg = f"service {name!r}: aliases must be a list of strings"
+                    raise UnsupportedComposeError(msg)
+                result.extend(aliases)
     return result
 
 

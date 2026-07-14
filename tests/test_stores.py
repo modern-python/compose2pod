@@ -60,6 +60,28 @@ class TestValidateSecretKind:
         with pytest.raises(UnsupportedComposeError, match="top-level 'secrets' must be a mapping"):
             stores.validate({"services": {"app": {"image": "x"}}, "secrets": ["a"]})
 
+    def test_non_string_secret_name_raises_instead_of_crashing_raw(self) -> None:
+        # PyYAML can produce a non-string mapping key (e.g. an unquoted `1:`).
+        # Used to crash raw: TypeError: expected string or bytes-like object,
+        # got 'int', from _NAME.fullmatch(name).
+        with pytest.raises(UnsupportedComposeError, match="key 1 must be a string"):
+            stores.validate(_doc("secrets", {1: {"file": "./s"}}))
+
+    def test_definition_mixed_type_unknown_keys_do_not_crash_raw(self) -> None:
+        # sorted(unknown) used to crash raw (TypeError: '<' not supported
+        # between instances of 'str' and 'int') once a secret/config
+        # definition's unrecognized keys mixed a non-string key with a
+        # string one. require_string_keys now catches the non-string key
+        # before the unknown-keys check is even reached.
+        with pytest.raises(UnsupportedComposeError, match=r"secret 'a': key 1 must be a string"):
+            stores.validate(_doc("secrets", {"a": {"file": "./a", 1: "x", "y": "z"}}, ["a"]))
+
+    def test_long_form_reference_mixed_type_unknown_keys_do_not_crash_raw(self) -> None:
+        # Same class as above, for a long-form service reference's own
+        # unrecognized keys.
+        with pytest.raises(UnsupportedComposeError, match=r"secret entry: key 1 must be a string"):
+            stores.validate(_doc("secrets", {"a": {"file": "./a"}}, [{"source": "a", 1: "x", "y": "z"}]))
+
     def test_non_string_or_mapping_reference_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="entry must be a string or mapping"):
             stores.validate(_doc("secrets", {"a": {"file": "./a"}}, [123]))
@@ -93,6 +115,12 @@ class TestValidateSecretKind:
         with pytest.raises(UnsupportedComposeError, match="must be an int or string"):
             stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "uid": [1]}]))
 
+    def test_non_string_target_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="secret target"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "target": 5}]))
+        with pytest.raises(UnsupportedComposeError, match="secret target"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "target": ["t"]}]))
+
     def test_content_in_secret_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
             stores.validate(_doc("secrets", {"a": {"content": "x"}}))
@@ -108,6 +136,12 @@ class TestValidateConfigKind:
     def test_relative_long_form_target_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"config target 'c.conf' must be an absolute path"):
             stores.validate(_doc("configs", {"c": {"file": "./c"}}, [{"source": "c", "target": "c.conf"}]))
+
+    def test_non_string_target_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="config target"):
+            stores.validate(_doc("configs", {"c": {"file": "./c"}}, [{"source": "c", "target": 5}]))
+        with pytest.raises(UnsupportedComposeError, match="config target"):
+            stores.validate(_doc("configs", {"c": {"file": "./c"}}, [{"source": "c", "target": ["/etc"]}]))
 
     def test_external_rejected_with_config_wording(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="external configs are not supported"):

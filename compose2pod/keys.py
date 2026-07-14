@@ -17,12 +17,42 @@ PULL_POLICY_MAP: dict[str, str] = {
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class Expand:
-    """A token whose Compose variable references expand at script-run time."""
+    """A token whose Compose variable references expand at script-run time.
+
+    Every emitted `Expand` eventually reaches `shell.to_shell`/`variable_names`,
+    both of which assume `value` is a `str` (they run a compiled regex over
+    it) and crash raw (a `TypeError`, not `UnsupportedComposeError`) otherwise.
+    Rather than trust every call site across keys.py/emit.py/pod.py/
+    resources.py to have cast or validated first, this is the one chokepoint:
+    a non-str value is rejected right here, so any per-key validator gap
+    becomes a clean error instead of a raw crash downstream, no matter which
+    key leaked it. This is defense-in-depth, not a substitute for validating
+    shape at the gate -- it only turns an otherwise-unhandled crash into a
+    clean one; it can't catch a non-str value that a caller has already
+    coerced to str() (see the silent str()/repr() corruption class instead).
+    """
 
     value: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, str):
+            msg = f"internal: Expand.value must be a string, got {type(self.value).__name__}: {self.value!r}"
+            raise UnsupportedComposeError(msg)
+
 
 Token = str | Expand
+
+
+def _render_scalar(value: Any) -> str:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Render a map scalar value the way `docker compose config` does.
+
+    A bool renders lowercase ('true'/'false'), matching Docker's own
+    normalization -- Python's str(True) == 'True' would otherwise leak into
+    the emitted flag value verbatim.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 def key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
@@ -33,7 +63,7 @@ def key_value_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     """
     if isinstance(value, list):
         return value
-    return [key if val is None else f"{key}={val}" for key, val in value.items()]
+    return [key if val is None else f"{key}={_render_scalar(val)}" for key, val in value.items()]
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -61,22 +91,60 @@ def is_number(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped 
     return not isinstance(value, bool) and isinstance(value, int | float | str)
 
 
+def require_string_keys(where: str, mapping: dict[Any, Any]) -> None:
+    """Check every key of a raw YAML/JSON mapping is a string.
+
+    PyYAML routinely produces non-string keys (a bare `3:` is an int; under
+    YAML 1.1, a bare `on:`/`off:` is a bool). Every mapping-key consumer
+    downstream (`sorted()`, `str.startswith`, a compiled regex) assumes
+    `str` and crashes raw otherwise. This is the one shared check the gate
+    runs before it reads any of `mapping`'s keys, so a non-string key fails
+    clean regardless of which mapping it turned up in.
+    """
+    for key in mapping:
+        if not isinstance(key, str):
+            msg = f"{where}: key {key!r} must be a string"
+            raise UnsupportedComposeError(msg)
+
+
 def _validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     if not is_number(value):
         msg = f"service {name!r}: '{key}' must be a number or string"
         raise UnsupportedComposeError(msg)
 
 
+def _validate_list_elements(name: str, key: str, value: list[Any]) -> None:
+    """Check every list element is a string, so emit can't str() a non-string into the script."""
+    for item in value:
+        if not isinstance(item, str):
+            msg = f"service {name!r}: '{key}' entries must be strings"
+            raise UnsupportedComposeError(msg)
+
+
+def _validate_map_values(name: str, key: str, value: dict[str, Any]) -> None:
+    """Check every map value is a scalar or null, so emit can't repr() a dict/list into the script."""
+    for val in value.values():
+        if val is not None and not is_number(val) and not isinstance(val, bool):
+            msg = f"service {name!r}: '{key}' values must be a string, number, boolean, or null"
+            raise UnsupportedComposeError(msg)
+
+
 def _validate_list(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     if not isinstance(value, list):
         msg = f"service {name!r}: '{key}' must be a list"
         raise UnsupportedComposeError(msg)
+    _validate_list_elements(name, key, value)
 
 
 def validate_map(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    if not isinstance(value, list | dict):
-        msg = f"service {name!r}: '{key}' must be a list or mapping"
-        raise UnsupportedComposeError(msg)
+    if isinstance(value, list):
+        _validate_list_elements(name, key, value)
+        return
+    if isinstance(value, dict):
+        _validate_map_values(name, key, value)
+        return
+    msg = f"service {name!r}: '{key}' must be a list or mapping"
+    raise UnsupportedComposeError(msg)
 
 
 def _as_list(name: str, key: str, value: Any) -> list[Any]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
@@ -101,7 +169,10 @@ def pairs_to_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa
     if isinstance(value, list):
         result: dict[str, Any] = {}
         for item in value:
-            pair_key, sep, pair_value = str(item).partition("=")
+            if not isinstance(item, str):
+                msg = f"service {name!r}: '{key}' entries must be strings"
+                raise UnsupportedComposeError(msg)
+            pair_key, sep, pair_value = item.partition("=")
             result[pair_key] = pair_value if sep else None
         return result
     msg = f"service {name!r}: cannot merge {key!r} across incompatible forms"
@@ -158,7 +229,7 @@ def extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
     """Compose extra_hosts as 'host:ip' entries; map values keep their colons (IPv6-safe)."""
     if isinstance(value, list):
         return value
-    return [f"{host}:{ip}" for host, ip in value.items()]
+    return [f"{host}:{_render_scalar(ip)}" for host, ip in value.items()]
 
 
 def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
@@ -183,10 +254,17 @@ def _validate_ulimits(name: str, key: str, value: Any) -> None:  # noqa: ANN401 
             if set(spec) != {"soft", "hard"}:
                 msg = f"service {name!r}: ulimit {limit!r} mapping must have exactly 'soft' and 'hard'"
                 raise UnsupportedComposeError(msg)
-            if not isinstance(spec["soft"], int | str) or not isinstance(spec["hard"], int | str):
+            # bool IS an int in Python, so a plain `isinstance(..., int | str)`
+            # would silently let a boolean soft/hard value through.
+            if any(
+                isinstance(spec[bound], bool) or not isinstance(spec[bound], int | str) for bound in ("soft", "hard")
+            ):
                 msg = f"service {name!r}: ulimit {limit!r} 'soft' and 'hard' must be int or str"
                 raise UnsupportedComposeError(msg)
-        elif not isinstance(spec, int | str):
+        elif isinstance(spec, bool) or not isinstance(spec, int | str):
+            # A boolean ulimit is meaningless -- unlike environment's bool
+            # (which Docker normalizes to a string), there is no sensible
+            # normalization here, so it is rejected rather than coerced.
             msg = f"service {name!r}: ulimit {limit!r} must be an int or a soft/hard mapping"
             raise UnsupportedComposeError(msg)
 

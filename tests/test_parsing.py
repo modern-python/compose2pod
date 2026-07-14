@@ -84,13 +84,55 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="absolute"):
             validate({"services": {"app": {"image": "x", "volumes": ["./cache"]}}})
 
+    def test_string_volumes_rejected_at_gate(self) -> None:
+        # Used to be iterated character-wise: "/data:/data" reported the nonsense
+        # "anonymous volume 'd'", and "/" was silently accepted as -v "/".
+        with pytest.raises(UnsupportedComposeError, match=r"'volumes' must be a list"):
+            validate({"services": {"app": {"image": "x", "volumes": "/data:/data"}}})
+
+    def test_single_slash_string_volumes_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'volumes' must be a list"):
+            validate({"services": {"app": {"image": "x", "volumes": "/"}}})
+
+    def test_null_volumes_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "volumes": None}}}) == []
+
     def test_no_services_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="no services"):
             validate({"services": {}})
 
+    def test_non_mapping_services_rejected_at_gate(self) -> None:
+        # Used to reach services.items() inside validate() itself and crash raw
+        # with AttributeError: 'str'/'list' object has no attribute 'items'.
+        with pytest.raises(UnsupportedComposeError, match="'services' must be a mapping"):
+            validate({"services": "app"})
+        with pytest.raises(UnsupportedComposeError, match="'services' must be a mapping"):
+            validate({"services": ["app"]})
+
     def test_unknown_top_level_key_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="foo"):
             validate({"services": {"app": {"image": "x"}}, "foo": {}})
+
+    def test_non_string_top_level_key_raises_instead_of_crashing_raw(self) -> None:
+        # PyYAML routinely produces non-string keys (int, or a YAML-1.1 bool
+        # from a bare `on:`). Used to crash raw: AttributeError: 'int' object
+        # has no attribute 'startswith', from k.startswith("x-").
+        with pytest.raises(UnsupportedComposeError, match="key 3 must be a string"):
+            validate({3: "x", "services": {"app": {"image": "x"}}})  # ty: ignore[invalid-argument-type]
+
+    def test_non_string_service_key_raises_instead_of_crashing_raw(self) -> None:
+        # A non-string key *inside* a service mapping (an indent slip) used
+        # to crash raw: TypeError: '<' not supported between instances of
+        # 'int' and 'str', from sorted(svc).
+        with pytest.raises(UnsupportedComposeError, match="key 8080 must be a string"):
+            validate({"services": {"app": {"image": "x", 8080: 8080}}})
+
+    def test_non_string_healthcheck_key_raises_instead_of_crashing_raw(self) -> None:
+        # Same class as the service-key case, one level deeper: used to crash
+        # raw via sorted(healthcheck).
+        compose = {"services": {"app": {"image": "x", "healthcheck": {1: "x", "test": "true"}}}}
+        with pytest.raises(UnsupportedComposeError, match="key 1 must be a string"):
+            validate(compose)
 
     def test_top_level_networks_is_ignored_with_warning(self) -> None:
         warnings = validate({"services": {"app": {"image": "x"}}, "networks": {"default": None}})
@@ -148,6 +190,24 @@ class TestValidate:
         with pytest.raises(
             UnsupportedComposeError, match=r"service 'app': depends_on 'db' has unsupported condition 'service_ready'"
         ):
+            validate(compose)
+
+    def test_unhashable_depends_on_condition_raises_cleanly(self) -> None:
+        # Before the fix: `condition not in DEPENDS_ON_CONDITIONS`
+        # (parsing._validate_depends_on) crashed raw (TypeError: cannot use
+        # 'dict' as a set element -- unhashable type: 'dict') because
+        # DEPENDS_ON_CONDITIONS is a set and `in` hashes its operand;
+        # graph.depends_on checked the dependency's spec was a mapping but
+        # never the condition's own type. This is a mapping's *key* being
+        # a string -- the sweep's non-string-key check is irrelevant here,
+        # since `{"a": 1}` is a well-formed mapping with a string key.
+        compose = {
+            "services": {
+                "app": {"image": "x", "depends_on": {"db": {"condition": {"a": 1}}}},
+                "db": {"image": "y"},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
             validate(compose)
 
     def test_top_level_extension_key_is_accepted(self) -> None:
@@ -282,6 +342,18 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": [1, 2], "hard": 3}}}}})
 
+    def test_ulimits_boolean_scalar_raises(self) -> None:
+        # bool IS an int in Python, so isinstance(spec, int | str) let it
+        # through and emit rendered the literal --ulimit "nofile=True". A
+        # boolean ulimit is meaningless -- unlike environment's bool (which
+        # Docker normalizes), there is no sensible ulimit normalization.
+        with pytest.raises(UnsupportedComposeError, match="must be an int or a soft/hard mapping"):
+            validate({"services": {"app": {"image": "x", "ulimits": {"nofile": True}}}})
+
+    def test_ulimits_boolean_soft_hard_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
+            validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": True, "hard": 100}}}}})
+
     def test_pull_policy_null_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "pull_policy": None}}}) == []
 
@@ -297,9 +369,80 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
             validate(compose)
 
+    def test_healthcheck_scalars_accept_ints_and_strings(self) -> None:
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "healthcheck": {"test": "true", "retries": 15, "timeout": "5s", "start_period": "10s"},
+                }
+            }
+        }
+        assert validate(compose) == []
+
+    def test_healthcheck_scalars_accept_explicit_null(self) -> None:
+        # A null scalar is treated as unset (see emit._health_flags), same
+        # ruling `environment`/`volumes`/`command` already get for a null
+        # value -- it must not raise at the gate.
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "healthcheck": {"test": "true", "retries": None, "timeout": None, "start_period": None},
+                }
+            }
+        }
+        assert validate(compose) == []
+
+    def test_healthcheck_retries_mapping_rejected_at_gate(self) -> None:
+        # Used to be silently accepted and mis-emitted as the literal
+        # --health-retries "{'a': 1}".
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "retries": {"a": 1}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'retries' must be a number or string"):
+            validate(compose)
+
+    def test_healthcheck_timeout_list_rejected_at_gate(self) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "timeout": [5]}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'timeout' must be a number or string"):
+            validate(compose)
+
+    def test_healthcheck_start_period_mapping_rejected_at_gate(self) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "start_period": {"a": 1}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'start_period' must be a number or string"):
+            validate(compose)
+
+    def test_healthcheck_test_cmd_shell_nested_list_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash raw: health_cmd() returned test[1]
+        # (the nested list) unchecked, and it hit shell.py's re.finditer.
+        compose = {
+            "services": {"app": {"image": "x", "healthcheck": {"test": ["CMD-SHELL", ["curl", "-f"]]}}},
+        }
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck test"):
+            validate(compose)
+
+    def test_healthcheck_test_cmd_non_string_argument_rejected_at_gate(self) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": ["CMD", 123]}}}}
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck test"):
+            validate(compose)
+
+    def test_healthcheck_test_forms_still_accepted(self) -> None:
+        for test in ("true", "NONE", ["NONE"], ["CMD", "a", "b"], ["CMD-SHELL", "some string"]):
+            assert validate({"services": {"app": {"image": "x", "healthcheck": {"test": test}}}}) == []
+
     def test_tmpfs_non_string_or_list_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="tmpfs must be a string or list"):
+        with pytest.raises(UnsupportedComposeError, match="'tmpfs' must be a string or list"):
             validate({"services": {"app": {"image": "x", "tmpfs": {"a": "b"}}}})
+
+    def test_tmpfs_list_with_non_string_entry_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError (shell.py to_shell/variable_names
+        # expects a str) -- the same element-level gap already fixed for env_file.
+        with pytest.raises(UnsupportedComposeError, match="'tmpfs' entry must be a string"):
+            validate({"services": {"app": {"image": "x", "tmpfs": [5]}}})
+
+    def test_tmpfs_string_and_list_of_strings_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "tmpfs": "/tmp"}}}) == []  # noqa: S108
+        assert validate({"services": {"app": {"image": "x", "tmpfs": ["/tmp", "/run"]}}}) == []  # noqa: S108
+        assert validate({"services": {"app": {"image": "x", "tmpfs": None}}}) == []
 
     def test_non_string_hostname_raises_at_gate(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="hostname must be a string"):
@@ -312,6 +455,19 @@ class TestValidate:
     def test_malformed_depends_on_raises_at_gate(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="'depends_on' must be a list or mapping"):
             validate({"services": {"app": {"image": "x", "depends_on": "db"}}})
+
+    def test_depends_on_list_with_mapping_entry_raises_at_gate(self) -> None:
+        # Same list/map YAML slip as `environment`/`command`. Used to crash
+        # raw (TypeError: unhashable type: 'dict') from inside validate()
+        # itself, via graph.depends_on's dict.fromkeys.
+        compose = {
+            "services": {
+                "app": {"image": "x", "depends_on": [{"db": {"condition": "service_healthy"}}]},
+                "db": {"image": "x"},
+            },
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry .* must be a string"):
+            validate(compose)
 
     def test_valid_networks_forms_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "networks": ["n1"]}}}) == []
@@ -356,3 +512,400 @@ class TestValidate:
         svc = {"image": "x", "deploy": {"resources": {"reservations": {"cpus": "0.5"}}}}
         with pytest.raises(UnsupportedComposeError, match=r"reservations.cpus is not supported"):
             validate({"services": {"app": svc}})
+
+    def test_string_environment_rejected_at_gate(self) -> None:
+        # Structural key with no KeySpec: used to reach emit and crash with
+        # AttributeError: 'str' object has no attribute 'items'.
+        with pytest.raises(UnsupportedComposeError, match=r"'environment' must be a list or mapping"):
+            validate({"services": {"app": {"image": "x", "environment": "FOO=bar"}}})
+
+    def test_null_environment_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "environment": None}}}) == []
+
+    def test_environment_list_of_mapping_rejected_at_gate(self) -> None:
+        # The commonest Compose YAML slip: `- KEY: value` (list + mapping)
+        # instead of `- KEY=value`. Used to be silently accepted and emit the
+        # literal `-e "{'POSTGRES_PASSWORD': 'password'}"` -- exit 0, garbage.
+        compose = {"services": {"app": {"image": "x", "environment": [{"POSTGRES_PASSWORD": "password"}]}}}
+        with pytest.raises(UnsupportedComposeError, match="'environment' entries must be strings"):
+            validate(compose)
+
+    def test_environment_list_and_map_forms_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "environment": ["KEY=value", "BARE"]}}}) == []
+        assert validate({"services": {"app": {"image": "x", "environment": {"KEY": "value", "BARE": None}}}}) == []
+
+    def test_environment_boolean_map_value_accepted(self) -> None:
+        # docker compose config normalizes `DEBUG: true` to the string "true";
+        # rejecting a bool value here would be an over-rejection, not a fix.
+        assert validate({"services": {"app": {"image": "x", "environment": {"DEBUG": True}}}}) == []
+
+    def test_labels_annotations_list_of_mapping_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'labels' entries must be strings"):
+            validate({"services": {"app": {"image": "x", "labels": [{"team": "core"}]}}})
+
+    def test_labels_map_non_scalar_value_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'labels' values must be"):
+            validate({"services": {"app": {"image": "x", "labels": {"team": {"nested": "dict"}}}}})
+
+    def test_labels_null_and_numeric_map_values_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "labels": {"empty": None, "version": 2}}}}) == []
+
+    def test_cap_add_list_of_mapping_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'cap_add' entries must be strings"):
+            validate({"services": {"app": {"image": "x", "cap_add": [{"NET_ADMIN": True}]}}})
+
+    def test_non_string_non_list_env_file_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError: 'int' object is not iterable.
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' must be a string or list"):
+            validate({"services": {"app": {"image": "x", "env_file": 5}}})
+
+    def test_string_and_list_env_file_are_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "env_file": "tests.env"}}}) == []
+        assert validate({"services": {"app": {"image": "x", "env_file": ["a.env", "b.env"]}}}) == []
+        assert validate({"services": {"app": {"image": "x", "env_file": None}}}) == []
+
+    def test_env_file_list_with_non_string_entry_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError: argument should be a str or an os.PathLike object.
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' entry must be a string"):
+            validate({"services": {"app": {"image": "x", "env_file": [5]}}})
+
+    def test_service_with_neither_image_nor_build_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with KeyError: 'image' (image_for).
+        with pytest.raises(UnsupportedComposeError, match=r"must set 'image' or 'build'"):
+            validate({"services": {"app": {}}})
+
+    def test_service_with_build_and_no_image_is_accepted(self) -> None:
+        # The normal CI case: --image replaces a build section's own image.
+        assert validate({"services": {"app": {"build": {"context": "."}}}}) == []
+
+    def test_non_string_image_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError: expected string or bytes-like object, got 'int'.
+        with pytest.raises(UnsupportedComposeError, match=r"'image' must be a string"):
+            validate({"services": {"app": {"image": 5}}})
+
+    def test_non_string_image_with_build_present_is_accepted(self) -> None:
+        # image_for never reads svc['image'] when 'build' is present, so a
+        # malformed image alongside 'build' cannot crash emit.
+        assert validate({"services": {"app": {"image": 5, "build": {"context": "."}}}}) == []
+
+    def test_command_string_or_list_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "command": "run me"}}}) == []
+        assert validate({"services": {"app": {"image": "x", "command": ["run", "me"]}}}) == []
+
+    def test_missing_command_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x"}}}) == []
+
+    def test_non_string_or_list_command_rejected_at_gate(self) -> None:
+        # Used to reach emit and crash with TypeError: 'int' object is not iterable.
+        with pytest.raises(UnsupportedComposeError, match=r"'command' must be a string or list"):
+            validate({"services": {"app": {"image": "x", "command": 5}}})
+
+    def test_mapping_command_rejected_at_gate(self) -> None:
+        # Used to be silently accepted and mis-emitted: only the mapping's key
+        # ('run') reached podman run, the value ('tests') was dropped.
+        with pytest.raises(UnsupportedComposeError, match=r"'command' must be a string or list"):
+            validate({"services": {"app": {"image": "x", "command": {"run": "tests"}}}})
+
+    def test_null_command_is_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "command": None}}}) == []
+
+    def test_command_list_with_mapping_entry_rejected_at_gate(self) -> None:
+        # Used to be silently accepted: str({'run': 'tests'}) reached podman
+        # run as a single mangled argv token, e.g. "{'run': 'tests'}".
+        with pytest.raises(UnsupportedComposeError, match="'command' entries must be strings"):
+            validate({"services": {"app": {"image": "x", "command": [{"run": "tests"}]}}})
+
+    def test_entrypoint_list_with_non_string_entry_rejected_at_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'entrypoint' entries must be strings"):
+            validate({"services": {"app": {"image": "x", "entrypoint": [{"run": "tests"}]}}})
+
+    def test_command_and_entrypoint_list_of_strings_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "command": ["run", "me"]}}}) == []
+
+
+class TestRequireStringKeysDeep:
+    """validate()'s document-wide recursive non-string-mapping-key sweep.
+
+    F1: a non-string key in a mapping that gets f-string-interpolated into a
+    flag value (environment/labels/annotations/sysctls/extra_hosts/ulimits)
+    used to leak Python's bool/int repr into the emitted script rather than
+    crash -- the hand-placed require_string_keys call sites never covered
+    these because none of them sorted() or startswith()'d that key. F2: a
+    non-string *service name* (a key of the `services` mapping itself) was
+    never checked at all. Both are closed by one recursive sweep instead of
+    hand-placing more calls -- see _require_string_keys_deep.
+    """
+
+    def test_environment_non_string_key_rejected(self) -> None:
+        # YAML 1.1: a bare `on:` parses as the Python bool True.
+        compose = {"services": {"app": {"image": "x", "environment": {True: "1"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"environment: key True must be a string"):
+            validate(compose)
+
+    def test_labels_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "labels": {True: "v"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"labels: key True must be a string"):
+            validate(compose)
+
+    def test_annotations_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "annotations": {False: "v"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"annotations: key False must be a string"):
+            validate(compose)
+
+    def test_sysctls_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "sysctls": {True: 1}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"sysctls: key True must be a string"):
+            validate(compose)
+
+    def test_extra_hosts_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "extra_hosts": {True: "1.2.3.4"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"extra_hosts: key True must be a string"):
+            validate(compose)
+
+    def test_ulimits_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "ulimits": {True: 100}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"ulimits: key True must be a string"):
+            validate(compose)
+
+    def test_ulimits_nested_soft_hard_non_string_key_rejected(self) -> None:
+        compose = {"services": {"app": {"image": "x", "ulimits": {"nofile": {True: 1024, "hard": 4096}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"ulimits\.nofile: key True must be a string"):
+            validate(compose)
+
+    def test_non_string_service_name_rejected(self) -> None:
+        # F2: the `services` mapping's own keys (service names) were never
+        # checked -- an int/bool name reaches --add-host and --name verbatim.
+        compose = {"services": {"app": {"image": "i"}, True: {"image": "j"}}}
+        with pytest.raises(UnsupportedComposeError, match=r"compose document\.services: key True must be a string"):
+            validate(compose)
+
+    def test_deploy_resources_limits_non_string_key_via_full_pipeline(self) -> None:
+        # A deeper structural key, reached only by walking the whole
+        # document -- confirms the sweep isn't limited to the sites the old
+        # hand-placed calls were wired into.
+        compose = {"services": {"app": {"image": "x", "deploy": {"resources": {"limits": {True: "1"}}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"deploy\.resources\.limits: key True must be a string"):
+            validate(compose)
+
+    def test_secret_definition_non_string_name_via_full_pipeline(self) -> None:
+        compose = {"services": {"app": {"image": "x"}}, "secrets": {1: {"file": "./a"}}}
+        with pytest.raises(UnsupportedComposeError, match=r"compose document\.secrets: key 1 must be a string"):
+            validate(compose)
+
+    def test_top_level_extension_subtree_with_non_string_keys_is_accepted(self) -> None:
+        # x- extension fields legitimately hold arbitrary payloads (e.g.
+        # YAML-anchor sources); their contents are never walked.
+        compose = {"x-anchors": {1: {"a": "b"}}, "services": {"app": {"image": "x"}}}
+        assert validate(compose) == []
+
+    def test_service_level_extension_subtree_with_non_string_keys_is_accepted(self) -> None:
+        compose = {"services": {"app": {"image": "x", "x-meta": {True: [1, {2: "z"}]}}}}
+        assert validate(compose) == []
+
+    def test_ulimits_soft_hard_mapping_still_accepted(self) -> None:
+        compose = {"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": 1024, "hard": 4096}}}}}
+        assert validate(compose) == []
+
+    def test_sysctls_mapping_still_accepted(self) -> None:
+        compose = {"services": {"app": {"image": "x", "sysctls": {"net.core.somaxconn": 1024}}}}
+        assert any("pod-wide" in w for w in validate(compose))
+
+    def test_extra_hosts_map_and_list_forms_still_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x", "extra_hosts": {"db": "10.0.0.1"}}}})
+        assert validate({"services": {"app": {"image": "x", "extra_hosts": ["db:10.0.0.1"]}}})
+
+    def test_environment_null_int_float_bool_values_still_accepted(self) -> None:
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "environment": {"A": None, "B": 1, "C": 1.5, "D": True},
+                }
+            }
+        }
+        assert validate(compose) == []
+
+    def test_normal_service_names_with_dots_dashes_underscores_accepted(self) -> None:
+        compose = {"services": {"app.v1": {"image": "x"}, "app-two": {"image": "y"}, "app_3": {"image": "z"}}}
+        assert validate(compose) == []
+        assert validate({"services": {"app": {"image": "x", "entrypoint": ["run", "me"]}}}) == []
+
+    def test_deep_x_prefixed_key_skip_is_load_bearing(self) -> None:
+        # Mutant check: deleting `if key.startswith("x-"): continue` from
+        # _require_string_keys_deep makes this raise (it would recurse into
+        # the x- key's value and hit the non-string key 3). The existing
+        # x- tests only cover a top-level x- block (never walked) and a
+        # service-level x- key (skipped by _sweep_service before it ever
+        # reaches _require_string_keys_deep) -- neither exercises the skip
+        # *inside* the deep walk itself, at a nesting level the walk (not
+        # _sweep_service) is the one doing the skipping.
+        compose = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "healthcheck": {"test": "true", "x-note": {3: 4}},
+                }
+            }
+        }
+        assert validate(compose) == []
+
+
+class TestIdentifierKeyedServiceKeysNotTreatedAsExtensionFields:
+    """depends_on/networks/ulimits key their mapping form by an *identifier*, not a content key.
+
+    _require_string_keys_deep's `x-` skip is only correct for content keys
+    (see its docstring) -- an identifier that happens to start with `x-` is
+    still a real identifier (a dependency, a network, a ulimit category),
+    the same distinction that matters for a service literally named
+    `x-web` (see TestSweepServiceNamedExtensionPrefix). Fed directly to the
+    deep walk, these identifier-keyed maps would let a malformed subtree
+    under an `x-`-prefixed identifier escape the sweep entirely -- closed by
+    _sweep_identifier_map, which checks the identifiers themselves (no `x-`
+    skip) before handing each identifier's own value to the ordinary
+    (`x-`-skipping) deep walk.
+    """
+
+    def test_dependency_named_extension_prefix_content_rejected(self) -> None:
+        compose = {
+            "services": {
+                "x-dep": {"image": "a"},
+                "web": {"image": "b", "depends_on": {"x-dep": {3: 4}}},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on\.x-dep: key 3 must be a string"):
+            validate(compose)
+
+    def test_network_named_extension_prefix_content_rejected(self) -> None:
+        compose = {"services": {"web": {"image": "a", "networks": {"x-net": {3: 4}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"networks\.x-net: key 3 must be a string"):
+            validate(compose)
+
+    def test_ulimit_named_extension_prefix_content_rejected(self) -> None:
+        compose = {"services": {"web": {"image": "a", "ulimits": {"x-lim": {3: 4}}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"ulimits\.x-lim: key 3 must be a string"):
+            validate(compose)
+
+    def test_dependency_named_extension_prefix_well_formed_is_accepted(self) -> None:
+        # The identifier itself starting with x- is not rejected -- only a
+        # malformed subtree under it is.
+        compose = {
+            "services": {
+                "x-dep": {"image": "a"},
+                "web": {"image": "b", "depends_on": ["x-dep"]},
+            }
+        }
+        assert validate(compose) == []
+
+
+class TestSweepServiceNamedExtensionPrefix:
+    """A service literally named `x-web` is a real service, not an extension field.
+
+    `validate()` iterates `services.items()` with no `x-` filter, so a
+    service named `x-web` is planned and emitted like any other service.
+    The sweep's `x-` skip is syntactic (`key.startswith("x-")`) but its
+    rationale is semantic ("a subtree we ignore"); on the `services`
+    mapping's own keys those two diverge, since a service name is an
+    identifier, not an extension-field marker. This regression let such a
+    service's whole body escape the sweep -- see _sweep_service/_sweep_document.
+    """
+
+    def test_top_level_body_non_string_key_rejected_cleanly(self) -> None:
+        # Before the fix: _validate_service's own sorted(svc) crashed raw
+        # (`TypeError: '<' not supported between instances of 'int' and
+        # 'str'`) because the sweep skipped this service's body entirely.
+        compose = {"services": {"x-web": {"image": "alpine", 3306: "db"}}}
+        with pytest.raises(UnsupportedComposeError, match=r"service 'x-web': key 3306 must be a string"):
+            validate(compose)
+
+    def test_healthcheck_non_string_key_rejected_cleanly(self) -> None:
+        # Same escape, reached via _validate_service_healthcheck's own
+        # sorted(healthcheck) instead.
+        compose = {"services": {"x-web": {"image": "alpine", "healthcheck": {3: "x"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"service 'x-web'\.healthcheck: key 3 must be a string"):
+            validate(compose)
+
+    def test_nested_map_non_string_key_rejected_cleanly(self) -> None:
+        # Before the fix: validate() returned [] (no warnings, no raise) and
+        # emit_script rendered `-e "True=1" --label "True=v"` -- the Python
+        # repr of the YAML-1.1 bareword keys `on`/`yes`, leaked verbatim.
+        compose = {
+            "services": {
+                "x-web": {"image": "alpine", "environment": {True: 1}, "labels": {True: "v"}},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"service 'x-web'\.environment: key True must be a string"):
+            validate(compose)
+
+    def test_well_formed_is_accepted_as_a_real_service(self) -> None:
+        compose = {"services": {"x-web": {"image": "alpine"}}}
+        assert validate(compose) == []
+
+
+class TestSweepSkipsUnreadRegions:
+    """`build`'s contents and the ignored top-level `networks`/`volumes` blocks are never read.
+
+    compose2pod accepts these regions but never inspects their contents (see
+    architecture/supported-subset.md), so a non-string key inside them can
+    never reach the generated script and must not be rejected -- Docker
+    itself accepts them. The `environment`/other emitted-map divergence
+    (`{3306: db}` rejected) is unaffected: those keys do reach the script.
+    """
+
+    def test_build_contents_non_string_key_accepted(self) -> None:
+        compose = {"services": {"app": {"build": {"context": ".", "args": {True: 1}}}}}
+        assert validate(compose) == []
+
+    def test_top_level_volumes_contents_non_string_key_accepted(self) -> None:
+        compose = {
+            "services": {"app": {"image": "alpine"}},
+            "volumes": {"data": {"driver_opts": {True: 1}}},
+        }
+        assert any("ignoring top-level 'volumes'" in w for w in validate(compose))
+
+    def test_top_level_networks_contents_non_string_key_accepted(self) -> None:
+        compose = {
+            "services": {"app": {"image": "alpine"}},
+            "networks": {"net1": {"driver_opts": {True: 1}}},
+        }
+        assert any("ignoring top-level 'networks'" in w for w in validate(compose))
+
+    def test_environment_non_string_key_still_rejected(self) -> None:
+        # The `environment: {3306: db}` divergence from Docker stands: that
+        # key does reach the emitted script, unlike build/top-level
+        # networks/volumes above.
+        compose = {"services": {"app": {"image": "x", "environment": {3306: "db"}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"environment: key 3306 must be a string"):
+            validate(compose)
+
+    def test_top_level_secrets_and_configs_stay_swept(self) -> None:
+        # Unlike build/top-level networks/volumes, secrets and configs ARE
+        # read (stores.py) and must stay swept, at both the definition and
+        # the service-reference sides.
+        compose = {
+            "services": {"app": {"image": "x", "secrets": [{"source": "s", True: "bogus"}]}},
+            "secrets": {"s": {"file": "./a"}},
+        }
+        with pytest.raises(UnsupportedComposeError):
+            validate(compose)
+
+
+class TestSweepListRecursion:
+    """The sweep must recurse into a list of mappings, not just nested dicts.
+
+    Regression-proofing for a coverage gap: the sweep's
+    `elif isinstance(node, list)` branch was reachable but nothing asserted
+    on its effect, so removing it left all other tests green. This asserts
+    the sweep's own message specifically (produced only by the list branch
+    recursing into the ref dict before stores.py's independent,
+    differently-worded check gets a turn) -- deleting the list branch turns
+    this test red even though `validate()` still raises overall (via
+    stores.py), because the raised message no longer matches.
+    """
+
+    def test_non_string_key_nested_in_a_list_is_caught_by_the_sweep_itself(self) -> None:
+        compose = {
+            "services": {"app": {"image": "x", "secrets": [{"source": "mysecret", 1: "bogus"}]}},
+            "secrets": {"mysecret": {"file": "./a"}},
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app'\.secrets: key 1 must be a string"):
+            validate(compose)
