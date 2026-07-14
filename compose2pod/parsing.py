@@ -205,7 +205,7 @@ def _require_string_keys_deep(where: str, node: Any) -> None:  # noqa: ANN401 - 
     - Mapping-key consumers that don't crash but f-string-interpolate the key
       straight into a flag value, silently leaking the Python repr of a bool
       or int into the emitted script (`keys.key_value_pairs` -- environment/
-      labels/annotations, `keys.extra_host_pairs`, `keys._ulimit_args`,
+      labels/annotations, `keys.extra_host_entries`, `keys._ulimit_args`,
       `pod._sysctl_pairs`). This class is corruption, not a crash, and is the
       one the old hand-placed `require_string_keys` call sites never covered
       -- they were only wired into mappings whose keys get sorted or

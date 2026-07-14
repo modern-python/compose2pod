@@ -225,11 +225,38 @@ def _map(flag: str) -> KeySpec:
     return KeySpec(validate=validate_map, emit=emit, merge=_merge_map)
 
 
-def extra_host_pairs(value: list[Any] | dict[str, Any]) -> list[Any]:
-    """Compose extra_hosts as 'host:ip' entries; map values keep their colons (IPv6-safe)."""
-    if isinstance(value, list):
-        return value
-    return [f"{host}:{_render_scalar(ip)}" for host, ip in value.items()]
+def split_extra_host(entry: str) -> tuple[str, str]:
+    """Split an `extra_hosts` entry into (host, address).
+
+    Compose documents the separator as '=' ('somehost=162.242.195.82') and also
+    accepts the legacy 'host:ip'. '=' wins when present, because an IPv6 address
+    is itself full of colons and splitting on the first one would tear it apart:
+    'myhostv6=::1' -> ('myhostv6', '::1'). The colon form splits on the *first*
+    colon only, so 'myhost:::1' -> ('myhost', '::1') still works.
+
+    The one shared reader for every site that parses an entry -- the gate, the
+    emitter, and the `extends` merge -- so they cannot disagree about where an
+    entry divides.
+    """
+    separator = "=" if "=" in entry else ":"
+    host, _sep, address = entry.partition(separator)
+    return host, address
+
+
+def extra_host_entries(value: list[Any] | dict[str, Any]) -> list[tuple[str, str]]:
+    """Compose extra_hosts as (host, address) pairs, from either form.
+
+    The mapping form arrives already divided, so it is read straight through;
+    only the list form needs splitting. Joining a mapping into 'host:address'
+    and re-splitting it would be lossy -- an address containing '=' would then
+    re-divide at the wrong character.
+    """
+    if isinstance(value, dict):
+        # `_render_scalar` so a boolean address normalizes like `docker compose
+        # config` ('true', not Python's 'True') -- the same rule every other map
+        # value follows.
+        return [(str(host), _render_scalar(address)) for host, address in value.items()]
+    return [split_extra_host(str(item)) for item in value]
 
 
 def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped

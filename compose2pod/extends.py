@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import SERVICE_KEYS, as_list, pairs_to_mapping
+from compose2pod.keys import SERVICE_KEYS, as_list, pairs_to_mapping, split_extra_host
 
 
 # Merge policy for keys with a SERVICE_KEYS KeySpec comes from spec.merge (see
@@ -49,16 +49,17 @@ def _extends_target(name: str, ext: Any) -> str:  # noqa: ANN401 - Compose value
 def _extra_hosts_to_mapping(name: str, value: list[Any]) -> dict[str, Any]:
     """Normalize list-form `extra_hosts` ('host:ip') to a mapping.
 
-    Separated by a colon, not '=', so `pairs_to_mapping` would mangle the whole
-    entry into a single `{'host:ip': None}` key. Split on the *first* colon only:
-    an IPv6 address is itself full of them (`myhost:::1` -> `{'myhost': '::1'}`).
+    `pairs_to_mapping` would mangle an entry into a single `{'host:ip': None}`
+    key, since it splits on '=' only. `keys.split_extra_host` is the one shared
+    reader -- Compose's documented `host=ip` and the legacy `host:ip` both work,
+    and an IPv6 address keeps its colons.
     """
     result: dict[str, Any] = {}
     for item in value:
-        if not isinstance(item, str) or ":" not in item:
-            msg = f"service {name!r}: extra_hosts entries must be 'host:ip' strings"
+        if not isinstance(item, str) or ("=" not in item and ":" not in item):
+            msg = f"service {name!r}: extra_hosts entries must be 'host=ip' or 'host:ip' strings"
             raise UnsupportedComposeError(msg)
-        host, _sep, address = item.partition(":")
+        host, address = split_extra_host(item)
         result[host] = address
     return result
 
