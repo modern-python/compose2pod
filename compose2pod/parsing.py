@@ -23,6 +23,21 @@ SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks", "volumes"
 DEPENDS_ON_CONDITIONS = {"service_started", "service_healthy", "service_completed_successfully"}
 
 
+def _reject_null_healthcheck_values(name: str, healthcheck: dict[str, Any]) -> None:
+    """Refuse a null in any healthcheck position -- `docker compose config` refuses each.
+
+    A bare `test:` would silently drop the healthcheck entirely. A bare `timeout:`
+    drops nothing by itself, but the document carrying it is one `docker compose`
+    will not run, and compose2pod is a drop-in replacement for it -- so emitting a
+    script for such a file would turn a hard error into a false green. An *omitted*
+    key is a different thing and stays fine: podman's default applies.
+    """
+    for key in ("test", "interval", *_HEALTHCHECK_SCALAR_KEYS):
+        if key in healthcheck and healthcheck[key] is None:
+            msg = f"service {name!r}: healthcheck {key!r} must not be null"
+            raise UnsupportedComposeError(msg)
+
+
 def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
     """Check healthcheck is a mapping with supported keys and a parseable interval."""
     healthcheck = svc.get("healthcheck")
@@ -42,6 +57,7 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
         if key not in SUPPORTED_HEALTHCHECK_KEYS:
             msg = f"service {name!r}: unsupported healthcheck key '{key}'"
             raise UnsupportedComposeError(msg)
+    _reject_null_healthcheck_values(name, healthcheck)
     if "interval" in healthcheck:
         interval_seconds(healthcheck["interval"])
     if "test" in healthcheck:
@@ -50,7 +66,7 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
         # again for the actual --health-cmd value at emit time).
         health_cmd(healthcheck["test"])
     for key in _HEALTHCHECK_SCALAR_KEYS:
-        if key in healthcheck and healthcheck[key] is not None and not is_number(healthcheck[key]):
+        if key in healthcheck and not is_number(healthcheck[key]):
             msg = f"service {name!r}: healthcheck {key!r} must be a number or string"
             raise UnsupportedComposeError(msg)
 
@@ -400,6 +416,18 @@ def _validate_depends_on(services: dict[str, Any]) -> None:
                 raise UnsupportedComposeError(msg)
 
 
+def _reject_null_top_level_blocks(compose: dict[str, Any]) -> None:
+    """Refuse a bare top-level block -- `docker compose config` refuses each.
+
+    `services` has its own message ("no services defined"); `version`/`name` are
+    scalars, not blocks.
+    """
+    for key in ("networks", "volumes", "secrets", "configs"):
+        if key in compose and compose[key] is None:
+            msg = f"top-level {key!r} must not be null"
+            raise UnsupportedComposeError(msg)
+
+
 def validate(compose: dict[str, Any]) -> list[str]:
     """Check the compose document against the supported subset.
 
@@ -419,6 +447,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
     if unknown_top:
         msg = f"unsupported top-level keys: {sorted(unknown_top)}"
         raise UnsupportedComposeError(msg)
+    _reject_null_top_level_blocks(compose)
     if "networks" in compose:
         warnings.append("ignoring top-level 'networks' (all services share the pod namespace)")
     if "volumes" in compose:

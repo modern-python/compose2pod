@@ -95,6 +95,19 @@ emit nothing, so it is refused rather than silently dropped
 rather than a per-key decision to keep in sync. `x-` extension keys are exempt:
 their contents are arbitrary user payload compose2pod never reads.
 
+The same rule holds **wherever a null can appear** — the healthcheck sub-keys,
+`deploy.resources` and its `limits`/`reservations`, and the top-level
+`networks:`/`volumes:`/`secrets:`/`configs:` blocks. compose2pod is a drop-in
+replacement for `docker compose` on rootless runners: the file it converts is
+the file the developer runs locally. So a document `docker compose` will not run
+must not pass green here — accepting a null it refuses would emit a script for a
+file that is already broken upstream, turning a hard error into a false green.
+Parity on *refusal* is what the drop-in role demands; it is not parity for its
+own sake, and the package keeps its documented divergences elsewhere. A null
+*inside* a value is a different thing and stays accepted, because Docker accepts
+it too: `environment: {KEY: null}` is host-passthrough, `labels: {KEY: null}` an
+empty label.
+
 - **Supported:** `image`, `build`, `command`, `entrypoint`, `environment`,
   `env_file`, `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
   `container_name`, `tmpfs`, `secrets`, `configs`, plus the declarative
@@ -424,13 +437,15 @@ exception in this group, validated as an actual bool like
   which has no sub-second resolution, so `"500ms"` and `0` both poll once a
   second.
 - **`timeout`, `retries`, `start_period`:** each must be a number (int or
-  float), a string, or `null` when present. A mapping or list raises
-  rather than reaching its `--health-*` flag as a literal Python `repr()`.
-  **An explicit `null` scalar means unset** — its `--health-*` flag is
-  omitted entirely, keyed off the *value*, not key presence, so `timeout:
-  null` and an omitted `timeout` behave identically. This matches `docker
-  compose config`, and is the same treatment this package already gives a
-  null `environment`/`volumes`/`command` value elsewhere.
+  float) or a string. A mapping or list raises rather than reaching its
+  `--health-*` flag as a literal Python `repr()`.
+- **A null raises in every healthcheck position** — `test`, `interval`,
+  `timeout`, `retries`, `start_period` — because `docker compose config`
+  refuses each. A bare `test:` would silently drop the healthcheck entirely;
+  a bare `timeout:` drops nothing on its own, but the document carrying it is
+  one `docker compose` will not run, and compose2pod is a drop-in replacement
+  for it — so passing CI green on such a file would be a false green. An
+  *omitted* key is a different thing and stays fine: podman's default applies.
 - **Extension fields:** any `x-`-prefixed healthcheck key is accepted and
   ignored silently.
 - Everything else raises.
