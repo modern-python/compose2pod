@@ -291,3 +291,30 @@ def test_validate_ports_accepts_bounds(value: object) -> None:
 def test_validate_ports_rejects_out_of_bounds(value: object) -> None:
     with pytest.raises(UnsupportedComposeError, match="ports"):
         validate_ports("app", "ports", value)
+
+
+# Measured against `docker compose config` v5.1.2: a long-form entry is Docker's
+# business except for one hard requirement -- a 'target' key -- which "docker
+# compose config" refuses to omit ("is missing a target port"). Everything else
+# inside the mapping stays unchecked; compose2pod never reads `ports` at all.
+@pytest.mark.parametrize(
+    "value",
+    [
+        [{"target": 80}],
+        [{"target": 80, "published": "8080"}],
+    ],
+)
+def test_validate_ports_accepts_long_form_with_target(value: object) -> None:
+    validate_ports("app", "ports", value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [{"published": "8080"}],
+        [{"a": 1}],
+    ],
+)
+def test_validate_ports_rejects_long_form_missing_target(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="missing a target port"):
+        validate_ports("app", "ports", value)

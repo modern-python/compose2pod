@@ -232,7 +232,15 @@ def _ranges_compatible(host: str | None, container: str) -> bool:
 def _validate_port_entry(name: str, key: str, entry: Any) -> None:  # noqa: ANN401 - Compose values are untyped
     if isinstance(entry, dict):
         # Long form ({target, published, ...}); compose2pod ignores `ports`
-        # entirely, so its inner keys are Docker's business, not ours.
+        # entirely, so every other inner key is Docker's business, not ours --
+        # except 'target', which Docker refuses to omit ("is missing a target
+        # port", measured against `docker compose config` v5.1.2). The dict's
+        # own keys are already guaranteed strings by validate()'s sweep
+        # (`_require_string_keys_deep`, which runs ahead of every other check),
+        # so a plain `in` check here is safe.
+        if "target" not in entry:
+            msg = f"service {name!r}: {key!r} entry {entry!r} is missing a target port"
+            raise UnsupportedComposeError(msg)
         return
     if has_variable(entry):
         return

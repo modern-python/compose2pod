@@ -1063,6 +1063,49 @@ def test_build_must_be_string_or_mapping() -> None:
     validate({"services": {"app": {"build": {"context": "."}}}})
 
 
+def test_build_mapping_rejects_unknown_keys() -> None:
+    # Measured against `docker compose config` v5.1.2: `build` is a strict
+    # JSON schema -- an unrecognized key is refused ("additional properties
+    # '<key>' not allowed") even though compose2pod itself never reads any of
+    # build's contents.
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate({"services": {"app": {"build": {"a": "b"}}}})
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate({"services": {"app": {"build": {"context": ".", "bogus": 1}}}})
+
+
+def test_build_mapping_accepts_full_known_key_set_and_x_prefix() -> None:
+    # `context` is deliberately not required: `build: {dockerfile: ...}` alone
+    # is accepted (measured).
+    known = {
+        "additional_contexts": {},
+        "args": {},
+        "cache_from": [],
+        "cache_to": [],
+        "context": ".",
+        "dockerfile": "Dockerfile",
+        "dockerfile_inline": "FROM x",
+        "entitlements": [],
+        "extra_hosts": {},
+        "isolation": "default",
+        "labels": {},
+        "network": "host",
+        "no_cache": True,
+        "platforms": [],
+        "privileged": True,
+        "pull": True,
+        "secrets": [],
+        "shm_size": "64m",
+        "ssh": [],
+        "tags": [],
+        "target": "build",
+        "ulimits": {},
+        "x-custom": 1,
+    }
+    validate({"services": {"app": {"build": known}}})
+    validate({"services": {"app": {"build": {"dockerfile": "Dockerfile"}}}})
+
+
 def test_image_rejects_empty_string() -> None:
     with pytest.raises(UnsupportedComposeError, match="image"):
         validate({"services": {"app": {"image": ""}}})
@@ -1083,3 +1126,26 @@ def test_service_network_must_be_declared_top_level() -> None:
     with pytest.raises(UnsupportedComposeError, match="undefined network"):
         validate(_doc(networks=["backend"]))
     validate({"services": {"app": {"image": "nginx", "networks": ["backend"]}}, "networks": {"backend": None}})
+
+
+def test_service_network_list_entry_must_be_a_string() -> None:
+    # Same list/map YAML slip as `depends_on`/`command`/`environment`. Used to
+    # crash raw (TypeError: unhashable type: 'dict') from inside validate()
+    # itself, via `network not in declared` hashing a dict.
+    with pytest.raises(UnsupportedComposeError, match="'networks' entries must be strings"):
+        validate(_doc(networks=[{"a": 1}]))
+
+
+def test_service_network_list_entry_non_string_hashable_still_rejected_cleanly() -> None:
+    with pytest.raises(UnsupportedComposeError, match="'networks' entries must be strings"):
+        validate(_doc(networks=[5]))
+
+
+def test_top_level_networks_list_form_rejected() -> None:
+    # `docker compose config` refuses a list here ("networks must be a
+    # mapping"). Also the same hashing hazard as the per-service check above:
+    # `declared = set(compose.get("networks") or {})` would crash raw on an
+    # unhashable list entry before this guard existed.
+    compose = {"services": {"app": {"image": "nginx"}}, "networks": [{"a": 1}]}
+    with pytest.raises(UnsupportedComposeError, match="top-level 'networks' must be a mapping"):
+        validate(compose)

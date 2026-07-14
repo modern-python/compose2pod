@@ -21,9 +21,14 @@ the shared `_plan` call site, not by convention.
   mapping raises "no services defined"), `version`, `name`, `networks`,
   `volumes`, `secrets`, `configs` (see Stores, below).
 - **Ignored (warns):** `networks` — every service shares the pod's single
-  network namespace, so top-level network definitions have no effect.
-  `volumes` — podman creates named volumes implicitly on first reference, so
-  the top-level block's drivers/options are never read (see Volumes, below).
+  network namespace, so top-level network definitions have no effect. Its
+  *shape* is still checked, though: it must be a mapping when present, as
+  Docker requires ("networks must be a mapping") — a list crashed raw
+  (`TypeError: unhashable type`) before this check existed, when a list entry
+  was itself a dict (see Per-service `networks`, below, for the matching
+  per-service hazard). `volumes` — podman creates named volumes implicitly on
+  first reference, so the top-level block's drivers/options are never read
+  (see Volumes, below).
 - **Extension fields:** any key prefixed `x-` is accepted and ignored
   silently, per the Compose spec — including a top-level `x-*` block used to
   hold shared config reused via YAML anchors.
@@ -123,7 +128,12 @@ empty label.
   supplied via `--image` for any service that has one.
 - **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty`,
   `stop_signal`, `stop_grace_period`, `profiles` — meaningless or irrelevant
-  inside a single shared-namespace pod. `stop_signal`/`stop_grace_period`
+  inside a single shared-namespace pod. `ports` is still shape-checked
+  (`values.validate_ports`): a long-form (mapping) entry must carry a
+  `target` key — Docker refuses to omit one ("is missing a target port",
+  measured against `docker compose config` v5.1.2) — but every other
+  long-form field is left unchecked, since compose2pod never reads `ports`
+  at all. `stop_signal`/`stop_grace_period`
   are inert because the script force-removes the pod (`podman pod rm -f`)
   rather than gracefully stopping a container. `profiles` is inert because
   the run set is fixed by `--target` plus its `depends_on` closure, not by
@@ -194,7 +204,19 @@ slot (`architecture/glossary.md`).
   `image_for` never reads it.
 - **`build`:** a string or mapping — its contents are never read (see
   `image`, above), only the shape, since a document `docker compose config`
-  refuses (e.g. `build: 3`) must still be refused here.
+  refuses (e.g. `build: 3`) must still be refused here. A mapping's own
+  top-level *key names* are checked against Docker's schema for it too
+  (`_DOCKER_BUILD_KEYS`, `compose2pod/parsing.py` — 22 keys plus any
+  `x-`-prefixed extension key, measured against `docker compose config`
+  v5.1.2 by probing each key individually): `additional_contexts`, `args`,
+  `cache_from`, `cache_to`, `context`, `dockerfile`, `dockerfile_inline`,
+  `entitlements`, `extra_hosts`, `isolation`, `labels`, `network`,
+  `no_cache`, `platforms`, `privileged`, `pull`, `secrets`, `shm_size`,
+  `ssh`, `tags`, `target`, `ulimits`. `context` is not required —
+  `build: {dockerfile: Dockerfile}` alone is accepted. Only the key names
+  are checked; a key's *value* is never read or validated, since checking it
+  would risk over-rejecting a file Docker runs for no benefit — compose2pod
+  never uses it.
 - **`command`:** string or list, each list element a string. String form
   runs via `/bin/sh -c`; list form is argv tokens. Any other shape (e.g. a
   mapping, or a list containing one — the classic YAML list/map slip)
@@ -252,7 +274,11 @@ slot (`architecture/glossary.md`).
   ("refers to undefined network") — the top-level block's *contents* are
   still ignored (see Top-level keys, above), only the reference is checked,
   because a document naming an undeclared network is one `docker compose
-  config` refuses.
+  config` refuses. A short (list) form's entry must itself be a string
+  before that membership check runs — a still-unvalidated entry (e.g. a
+  dict, the same list/map YAML slip `depends_on`/`command`/`environment` all
+  suffer) used to hash straight into a `set` and crash raw (`TypeError:
+  unhashable type`) instead of failing clean.
 
 ## Extends
 

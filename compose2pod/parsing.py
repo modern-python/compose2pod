@@ -138,13 +138,56 @@ def _validate_image(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
+# Docker's own schema for the long-form `build` mapping -- not compose2pod's:
+# compose2pod never reads any of build's contents (`image_for` always uses the
+# CI image), so nothing here is enumerated because compose2pod cares about it.
+# It exists solely so a bogus key -- a document `docker compose config`
+# refuses ("additional properties '<key>' not allowed") -- is still refused
+# here. Measured against `docker compose config` v5.1.2, each key probed
+# individually. `context` is deliberately not required: `build: {dockerfile:
+# Dockerfile}` alone is accepted. Only the key *names* are checked; the values
+# are never read or validated -- doing so would risk over-rejecting a file
+# Docker runs, for no benefit to compose2pod.
+_DOCKER_BUILD_KEYS = {
+    "additional_contexts",
+    "args",
+    "cache_from",
+    "cache_to",
+    "context",
+    "dockerfile",
+    "dockerfile_inline",
+    "entitlements",
+    "extra_hosts",
+    "isolation",
+    "labels",
+    "network",
+    "no_cache",
+    "platforms",
+    "privileged",
+    "pull",
+    "secrets",
+    "shm_size",
+    "ssh",
+    "tags",
+    "target",
+    "ulimits",
+}
+
+
 def _validate_build(name: str, svc: dict[str, Any]) -> None:
-    """Check build is a string or mapping. Its contents are never read -- only its shape is Docker's business."""
+    """Check build is a string or mapping; its contents are never read -- only its shape and key names are checked."""
     if "build" not in svc:
         return
-    if not isinstance(svc["build"], str | dict):
+    build = svc["build"]
+    if not isinstance(build, str | dict):
         msg = f"service {name!r}: 'build' must be a string or mapping"
         raise UnsupportedComposeError(msg)
+    if isinstance(build, dict):
+        require_string_keys(f"service {name!r}: build", build)
+        unknown = {key for key in build if key not in _DOCKER_BUILD_KEYS and not key.startswith("x-")}
+        if unknown:
+            msg = f"service {name!r}: build: unsupported keys {sorted(unknown)}"
+            raise UnsupportedComposeError(msg)
 
 
 def _validate_argv_list(name: str, key: str, value: list[Any]) -> None:
@@ -468,10 +511,27 @@ def _validate_network_references(compose: dict[str, Any], services: dict[str, An
     service's `networks` is a list or mapping (or absent), so `svc.get("networks")
     or {}` here is safe to iterate -- a still-unvalidated string would be walked
     character by character and produce the wrong error message.
+
+    Both membership checks below hash their left-hand side into a `set` (`network
+    not in declared`) -- the same hazard as `graph.depends_on`'s `dict.fromkeys`
+    (see its docstring): an untrusted, still-unchecked value that happens to be
+    unhashable (a dict or list, from the same list/map YAML slip `depends_on`/
+    `command`/`environment` all suffer) crashes raw with `TypeError: unhashable
+    type` instead of failing clean. So each side is type-checked before it is
+    ever hashed: the top-level block must be a mapping (Docker's own verdict,
+    measured -- a list is "networks must be a mapping"), and each per-service
+    list-form entry must be a string (Docker: "must be a string").
     """
-    declared = set(compose.get("networks") or {})
+    top_networks = compose.get("networks")
+    if top_networks is not None and not isinstance(top_networks, dict):
+        msg = "top-level 'networks' must be a mapping"
+        raise UnsupportedComposeError(msg)
+    declared = set(top_networks or {})
     for name, svc in services.items():
         for network in svc.get("networks") or {}:
+            if not isinstance(network, str):
+                msg = f"service {name!r}: 'networks' entries must be strings"
+                raise UnsupportedComposeError(msg)
             if network not in declared:
                 msg = f"service {name!r}: refers to undefined network {network!r}"
                 raise UnsupportedComposeError(msg)
