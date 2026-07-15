@@ -493,12 +493,6 @@ def _validate_tmpfs(name: str, svc: dict[str, Any]) -> None:
     _validate_string_or_string_list(name, "tmpfs", svc.get("tmpfs"))
 
 
-def _validate_environment(name: str, svc: dict[str, Any]) -> None:
-    """Check environment is a list or mapping (a bare string would be walked as .items())."""
-    if svc.get("environment") is not None:
-        validate_map(name, "environment", svc["environment"])
-
-
 def _validate_env_file(name: str, svc: dict[str, Any]) -> None:
     """Check env_file is a string or list of strings (emit iterates it)."""
     _validate_string_or_string_list(name, "env_file", svc.get("env_file"))
@@ -553,7 +547,6 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     _validate_entrypoint(name, svc)
     _validate_command(name, svc)
     _validate_tmpfs(name, svc)
-    _validate_environment(name, svc)
     _validate_env_file(name, svc)
     validate_deploy(name, svc)
     validate_pod_options(name, svc)

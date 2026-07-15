@@ -342,6 +342,7 @@ def _emit_ulimits(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values a
 
 
 SERVICE_KEYS: dict[str, KeySpec] = {
+    "environment": _map("-e"),
     "user": _scalar("--user"),
     "working_dir": _scalar("--workdir"),
     "platform": _scalar("--platform"),
@@ -388,7 +389,7 @@ STRUCTURAL_KEYS: set[str] = {
     "build",
     "command",
     "entrypoint",
-    "environment",
+    # "environment" removed — now a SERVICE_KEYS registry key (_map("-e")).
     "env_file",
     "volumes",
     "tmpfs",

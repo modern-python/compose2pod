@@ -269,6 +269,7 @@ boolean mapping value (`labels: {enabled: true}`) is normalized like
 | `devices` | `--device` (repeated) | list of strings |
 | `labels` | `--label` (repeated; null value → bare `KEY`) | list or mapping |
 | `annotations` | `--annotation` (repeated; null value → bare `KEY`) | list or mapping |
+| `environment` | `-e` (repeated; null value → bare `KEY`, i.e. host passthrough) | list or mapping |
 | `pull_policy` | `--pull` (`if_not_present` → `missing`, rest verbatim) | enum: `always`/`never`/`missing`/`if_not_present` |
 | `ulimits` | `--ulimit` (`name=value` or `name=soft:hard`) | mapping, see below |
 
@@ -365,12 +366,6 @@ slot (`architecture/glossary.md`).
   the same Docker shell-form `ENTRYPOINT` semantic, not a
   compose2pod-specific limitation. Use a list (exec-form) entrypoint, or
   none, if the override needs to actually run.
-- **`environment`:** list (`- KEY=value`, `- KEY`) or mapping (`KEY: value`,
-  `KEY:`) — the same shape rule as the registry's map-shaped keys. A null
-  mapping value means "pass `KEY` through from the host", emitted as a bare
-  `-e KEY`, same as the list form `- KEY`. A boolean value (`DEBUG: true`)
-  is normalized like Docker: `-e DEBUG=true`, not the Python repr `-e
-  DEBUG=True`.
 - **`env_file`:** a string or list of strings. Each resolved path passes
   through `--project-dir` when relative, then is emitted as `--env-file`.
 - **`tmpfs`:** a string or list of strings, each `<path>` or
@@ -877,7 +872,7 @@ truth if this enumeration ever appears to drift:
 
 - **Structural fields:** `image` (only when the service has no `build`
   override — otherwise the CI image is used, not the compose value),
-  `command`, `entrypoint`, `environment`, `env_file`, `volumes`, `tmpfs`,
+  `command`, `entrypoint`, `env_file`, `volumes`, `tmpfs`,
   the healthcheck `test` command, and the pod-level
   `dns`/`dns_search`/`dns_opt`/`sysctls`/`extra_hosts` values.
 - **Registry fields** whose spec wraps its value in `Expand` — every
