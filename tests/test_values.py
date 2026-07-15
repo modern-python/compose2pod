@@ -102,6 +102,31 @@ def test_validate_size_int_only_accepts_digit_grouping() -> None:
     validate_size("app", "mem_swappiness", "1_0", allow_fractional=False)
 
 
+# string_only: deploy.resources.limits.memory / reservations.memory are typed
+# as a Go string field, unlike mem_limit/mem_reservation -- a native number is
+# refused outright, only a size *string* is accepted. Measured against
+# `docker compose config` v5.1.2.
+@pytest.mark.parametrize("value", [512, 1073741824, 1.5, 60, True])
+def test_validate_size_string_only_rejects_native_number(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match=r"limits\.memory"):
+        validate_size("app", "limits.memory", value, string_only=True)
+
+
+@pytest.mark.parametrize("value", ["512", "512m", "512M", "512mb", "1.5", "1e3"])
+def test_validate_size_string_only_accepts_size_string(value: object) -> None:
+    validate_size("app", "limits.memory", value, string_only=True)
+
+
+@pytest.mark.parametrize("value", ["", "somevalue", "abc"])
+def test_validate_size_string_only_rejects_non_size_string(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match=r"limits\.memory"):
+        validate_size("app", "limits.memory", value, string_only=True)
+
+
+def test_validate_size_string_only_skips_variable() -> None:
+    validate_size("app", "limits.memory", "${MEM}", string_only=True)
+
+
 @pytest.mark.parametrize("value", [0.5, 2, -1, "0.5", "2", 1.5])
 def test_validate_number_accepts(value: object) -> None:
     validate_number("app", "cpus", value)

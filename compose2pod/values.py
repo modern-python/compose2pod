@@ -78,7 +78,14 @@ def _is_int(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped YA
     return not isinstance(value, bool) and isinstance(value, int)
 
 
-def validate_size(name: str, key: str, value: Any, *, allow_fractional: bool = True) -> None:  # noqa: ANN401 - untyped YAML
+def validate_size(
+    name: str,
+    key: str,
+    value: Any,  # noqa: ANN401 - untyped YAML
+    *,
+    allow_fractional: bool = True,
+    string_only: bool = False,
+) -> None:
     """Check `value` is a byte size: a number, or a string like '512m' / '1gb' / '1e3'.
 
     `allow_fractional=False` (mem_reservation, mem_swappiness) mirrors Docker's
@@ -87,16 +94,28 @@ def validate_size(name: str, key: str, value: Any, *, allow_fractional: bool = T
     against `docker compose config` v5.1.2. The *string* branch is ungated by
     this flag: a size string like `"1.5"` or `"512m"` is accepted either way,
     because Docker's size-string grammar has no such restriction.
+
+    `string_only=True` (deploy.resources.limits.memory,
+    deploy.resources.reservations.memory) mirrors a Go field typed as a plain
+    string rather than a size-or-string union: a native number is refused
+    outright ("must be a string"), even though the *legacy* `mem_limit`/
+    `mem_reservation` keys accept one -- measured against `docker compose
+    config` v5.1.2. `allow_fractional` has no effect when `string_only` is set,
+    since no native number is ever accepted either way.
     """
     if has_variable(value):
         return
-    if _is_int(value):
-        return
-    if isinstance(value, float) and math.isfinite(value) and (allow_fractional or value.is_integer()):
-        return
+    if not string_only:
+        if _is_int(value):
+            return
+        if isinstance(value, float) and math.isfinite(value) and (allow_fractional or value.is_integer()):
+            return
     if isinstance(value, str) and _SIZE.match(value):
         return
-    msg = f"service {name!r}: {key!r} must be a size (a number, or a string like '512m')"
+    if string_only:
+        msg = f"service {name!r}: {key!r} must be a size string (e.g. '512m')"
+    else:
+        msg = f"service {name!r}: {key!r} must be a size (a number, or a string like '512m')"
     raise UnsupportedComposeError(msg)
 
 

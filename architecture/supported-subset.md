@@ -512,7 +512,11 @@ non-boolean ones:
   `mem_reservation`/`mem_swappiness` additionally refuse a *native* float
   with a fractional part (`0.5` — Docker: "must be a integer"; `60.0` is
   fine); the string branch (`"1.5"`) is unrestricted either way, since
-  Docker's size-string grammar has no such rule.
+  Docker's size-string grammar has no such rule. `string_only=True`
+  (`deploy.resources.limits.memory`/`reservations.memory`, below) refuses
+  *any* native number, whole or fractional — those two fields are typed as a
+  plain Go string, not the size-or-string union `mem_limit`/
+  `mem_reservation` are, so only a size string is ever accepted.
 - **number** (`validate_number`, `cpus` only): a number, or a string that
   parses as one — Docker's `ParseFloat`, unrestricted.
 - **count** (`validate_count`; `cpu_shares`/`cpu_quota`/`cpu_period`/
@@ -545,13 +549,23 @@ boolean-typed exception in this group, validated as an actual bool like
   `restart_policy`, ...) raises, and unrecognized keys within `resources`,
   `limits`, or `reservations` raise the same way. `limits.cpus`/
   `limits.memory`/`limits.pids` map to `--cpus`/`--memory`/`--pids-limit`;
-  `reservations.memory` maps to `--memory-reservation`. These four fields
-  are not registry entries and are not measured against the grammars above —
-  each still accepts the older, looser "a number, or any string"
-  (`resources._check_number`, built on `keys.is_number`) that the legacy
-  keys' own registry entries were tightened away from. `reservations.cpus`
-  and `reservations.devices` have no podman equivalent and are refused
-  outright, regardless of value.
+  `reservations.memory` maps to `--memory-reservation`. These four fields are
+  not registry entries, but each is measured against and carries its own
+  grammar from `values.py` above — nested position is not a reason to fall
+  back to a loose check:
+  - `limits.cpus` — **number** (`validate_number`), identical to the
+    top-level `cpus` key.
+  - `limits.pids` — **integer**, `allow_whole_float=True`
+    (`validate_integer`), identical to `oom_score_adj`.
+  - `limits.memory` / `reservations.memory` — **size**, `string_only=True`.
+    This is the field where nesting actually changes the grammar: Docker
+    types these two as a plain string, so a native number that the legacy
+    `mem_limit`/`mem_reservation` keys accept (`512`, `1.5`) is refused here
+    — only a size *string* (`"512m"`, `"1.5"`) passes. Measured against
+    `docker compose config` v5.1.2.
+
+  `reservations.cpus` and `reservations.devices` have no podman equivalent
+  and are refused outright, regardless of value.
 - **Refuse on conflict:** when a legacy key and its `deploy.resources`
   counterpart both set the same flag — `mem_limit`/`limits.memory`,
   `cpus`/`limits.cpus`, `pids_limit`/`limits.pids`, and

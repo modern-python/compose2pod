@@ -71,8 +71,50 @@ class TestValidateDeploy:
             validate_deploy("app", _svc({"resources": {"reservations": {"devices": []}}}))
 
     def test_limit_value_bool_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="must be a number or string"):
+        with pytest.raises(UnsupportedComposeError, match="must be a size string"):
             validate_deploy("app", _svc({"resources": {"limits": {"memory": True}}}))
+
+    # Per-field grammars, measured against `docker compose config` v5.1.2 (both
+    # oracles fed the same YAML text): limits.memory/reservations.memory are a
+    # Go *string* field -- a native number is refused, only a size string is
+    # accepted; limits.cpus is validate_number; limits.pids is validate_integer
+    # with the whole-float allowance (matches oom_score_adj).
+
+    @pytest.mark.parametrize("value", ["", "somevalue", 512, 1073741824, 1.5])
+    def test_limits_memory_rejects(self, value: object) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"deploy\.resources\.limits\.memory"):
+            validate_deploy("app", _svc({"resources": {"limits": {"memory": value}}}))
+
+    @pytest.mark.parametrize("value", ["512", "512m", "1.5", "1e3"])
+    def test_limits_memory_accepts(self, value: object) -> None:
+        validate_deploy("app", _svc({"resources": {"limits": {"memory": value}}}))
+
+    @pytest.mark.parametrize("value", ["", "abc"])
+    def test_limits_cpus_rejects(self, value: object) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"deploy\.resources\.limits\.cpus"):
+            validate_deploy("app", _svc({"resources": {"limits": {"cpus": value}}}))
+
+    @pytest.mark.parametrize("value", [2, 0.5, "0.5", "2"])
+    def test_limits_cpus_accepts(self, value: object) -> None:
+        validate_deploy("app", _svc({"resources": {"limits": {"cpus": value}}}))
+
+    @pytest.mark.parametrize("value", [0.5, "0.5", "1e3"])
+    def test_limits_pids_rejects(self, value: object) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"deploy\.resources\.limits\.pids"):
+            validate_deploy("app", _svc({"resources": {"limits": {"pids": value}}}))
+
+    @pytest.mark.parametrize("value", [100, "100", 100.0, -1])
+    def test_limits_pids_accepts(self, value: object) -> None:
+        validate_deploy("app", _svc({"resources": {"limits": {"pids": value}}}))
+
+    @pytest.mark.parametrize("value", ["", "somevalue", 512, 1.5])
+    def test_reservations_memory_rejects(self, value: object) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"deploy\.resources\.reservations\.memory"):
+            validate_deploy("app", _svc({"resources": {"reservations": {"memory": value}}}))
+
+    @pytest.mark.parametrize("value", ["512", "512m", "1.5", "1e3"])
+    def test_reservations_memory_accepts(self, value: object) -> None:
+        validate_deploy("app", _svc({"resources": {"reservations": {"memory": value}}}))
 
     def test_memory_conflict_rejected(self) -> None:
         deploy = {"resources": {"limits": {"memory": "256m"}}}
