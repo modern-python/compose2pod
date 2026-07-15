@@ -833,11 +833,18 @@ def _validate_build_secret_references(compose: dict[str, Any], services: dict[st
     refusing an undeclared name ('refers to undefined build secret'). Measured
     against `docker compose config` v5.1.2 for both forms.
 
-    Runs after `_validate_service` (each entry's own shape -- a string, or a
-    {source, target} mapping with a string `source` -- is already confirmed by
-    `_validate_build_secret_entry`) and after `stores.validate` (the top-level
-    `secrets:` block, if present, is already confirmed to be a mapping), so
-    both `entry["source"]` and `compose.get("secrets") or {}` are safe here.
+    Runs after `_validate_service` (each entry's own shape -- a string or a
+    mapping, with any *present* `source`/`target` confirmed to be a string --
+    is already confirmed by `_validate_build_secret_entry`) and after
+    `stores.validate` (the top-level `secrets:` block, if present, is already
+    confirmed to be a mapping), so `compose.get("secrets") or {}` is safe
+    here. `_validate_build_secret_entry` never *requires* `source` to be
+    present, though: a long-form entry with no `source` key (`{target: ...}`,
+    or `{}`) reaches here unguarded, so `entry["source"]` would raw-crash with
+    KeyError. Docker itself rejects a missing source (measured: "refers to
+    undefined build secret ''" -- treated as an empty, always-undeclared
+    name), so this falls through to the same undefined-secret rejection
+    below rather than requiring source as a separate schema check.
     """
     declared = set(compose.get("secrets") or {})
     for name, svc in services.items():
@@ -845,7 +852,7 @@ def _validate_build_secret_references(compose: dict[str, Any], services: dict[st
         if not isinstance(build, dict):
             continue
         for entry in build.get("secrets") or []:
-            source = entry if isinstance(entry, str) else entry["source"]
+            source = entry if isinstance(entry, str) else entry.get("source")
             if source not in declared:
                 msg = f"service {name!r}: build secrets refers to undefined secret {source!r}"
                 raise UnsupportedComposeError(msg)

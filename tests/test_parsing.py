@@ -1537,3 +1537,25 @@ def test_build_secrets_no_top_level_secrets_block_rejects_any_reference() -> Non
     doc = _build("secrets", ["declared"])
     with pytest.raises(UnsupportedComposeError, match="undefined secret"):
         validate(doc)
+
+
+def test_build_secrets_long_form_source_omitted_rejected_cleanly() -> None:
+    # Crash-class guard: a long-form entry with no 'source' key used to raw-crash
+    # (KeyError: 'source') from `_validate_build_secret_references` indexing
+    # `entry["source"]` unconditionally. Docker itself rejects this (measured,
+    # `docker compose config` v5.1.2: "refers to undefined build secret ''" --
+    # a missing source is treated as an empty, always-undeclared name), so this
+    # must raise UnsupportedComposeError, never KeyError.
+    doc = _build("secrets", [{"target": "/run/secrets/x"}])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)
+
+
+def test_build_secrets_empty_mapping_entry_rejected_cleanly() -> None:
+    # Same crash hazard, empty-mapping shape: measured against `docker compose
+    # config` v5.1.2 -- also REJECT ("refers to undefined build secret '').
+    doc = _build("secrets", [{}])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)
