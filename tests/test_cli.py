@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import compose2pod
-from compose2pod import cli
+from compose2pod import read as read_module
 from compose2pod.cli import main
 
 
@@ -92,7 +92,7 @@ class TestMain:
     def test_yaml_without_pyyaml_errors(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(cli, "_yaml", None)
+        monkeypatch.setattr(read_module, "_yaml", None)
         rc = run_main("services: {}", ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
         assert rc == EXIT_USAGE_ERROR
         assert "requires the 'yaml' extra" in capsys.readouterr().err
@@ -312,13 +312,13 @@ class TestYaml12Booleans:
     """
 
     def test_yaml_11_booleans_load_as_strings(self) -> None:
-        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml(  # noqa: SLF001 - the loader is the unit under test
             "k:\n  a: on\n  b: off\n  c: yes\n  d: no\n"
         )
         assert loaded["k"] == {"a": "on", "b": "off", "c": "yes", "d": "no"}
 
     def test_real_booleans_still_load_as_booleans(self) -> None:
-        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml(  # noqa: SLF001 - the loader is the unit under test
             "k:\n  t: true\n  f: false\n  T: True\n  F: FALSE\n"
         )
         assert loaded["k"] == {"t": True, "f": False, "T": True, "F": False}
@@ -326,7 +326,7 @@ class TestYaml12Booleans:
     def test_on_as_a_key_stays_a_string(self) -> None:
         # PyYAML 1.1 resolves this key to the bool True, and the gate's
         # string-key rule then refuses a document `docker compose` runs fine.
-        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml(  # noqa: SLF001 - the loader is the unit under test
             "environment:\n  on: 1\n  off: 2\n"
         )
         assert list(loaded["environment"]) == ["on", "off"]
@@ -362,14 +362,14 @@ class TestYaml12Floats:
     """
 
     def test_bare_exponent_loads_as_float(self) -> None:
-        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml(  # noqa: SLF001 - the loader is the unit under test
             "k:\n  a: 1e3\n  b: -1e3\n  c: 1E3\n"
         )
         assert loaded["k"] == {"a": 1000.0, "b": -1000.0, "c": 1000.0}
         assert all(isinstance(v, float) for v in loaded["k"].values())
 
     def test_dotted_and_special_floats_still_load_as_floats(self) -> None:
-        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml(  # noqa: SLF001 - the loader is the unit under test
             "k:\n  a: 1.5\n  b: .5\n  c: .inf\n  d: -.inf\n  e: .nan\n"
         )
         nan = loaded["k"].pop("e")
@@ -378,19 +378,19 @@ class TestYaml12Floats:
 
     def test_bare_int_still_loads_as_int(self) -> None:
         # The float regex must not swallow a plain integer: no dot, no exponent.
-        loaded = cli._load_yaml("k: 123\n")  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml("k: 123\n")  # noqa: SLF001 - the loader is the unit under test
         assert loaded == {"k": 123}
         assert isinstance(loaded["k"], int)
 
     def test_digit_grouped_int_is_unaffected(self) -> None:
         # Out of scope: only the float resolver moves, the int resolver is untouched.
-        loaded = cli._load_yaml("k: 1_000\n")  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml("k: 1_000\n")  # noqa: SLF001 - the loader is the unit under test
         assert loaded == {"k": 1000}
         assert isinstance(loaded["k"], int)
 
     def test_quoted_exponent_stays_a_string(self) -> None:
         # The whole point: quoting must still block float resolution.
-        loaded = cli._load_yaml('k: "1e3"\n')  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml('k: "1e3"\n')  # noqa: SLF001 - the loader is the unit under test
         assert loaded["k"] == "1e3"
         assert isinstance(loaded["k"], str)
 
@@ -422,21 +422,21 @@ class TestYaml11IntBoundaryForms:
     """
 
     def test_leading_zero_octal_still_loads_as_int(self) -> None:
-        loaded = cli._load_yaml("k: 007\n")  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml("k: 007\n")  # noqa: SLF001 - the loader is the unit under test
         assert loaded == {"k": 7}
         assert isinstance(loaded["k"], int)
 
     def test_hex_still_loads_as_int(self) -> None:
-        loaded = cli._load_yaml("k: 0x1A\n")  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml("k: 0x1A\n")  # noqa: SLF001 - the loader is the unit under test
         assert loaded == {"k": 26}
         assert isinstance(loaded["k"], int)
 
     def test_binary_still_loads_as_int(self) -> None:
-        loaded = cli._load_yaml("k: 0b101\n")  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml("k: 0b101\n")  # noqa: SLF001 - the loader is the unit under test
         assert loaded == {"k": 5}
         assert isinstance(loaded["k"], int)
 
     def test_sexagesimal_still_loads_as_int(self) -> None:
-        loaded = cli._load_yaml("k: 1:20\n")  # noqa: SLF001 - the loader is the unit under test
+        loaded = read_module._load_yaml("k: 1:20\n")  # noqa: SLF001 - the loader is the unit under test
         assert loaded == {"k": 80}
         assert isinstance(loaded["k"], int)
