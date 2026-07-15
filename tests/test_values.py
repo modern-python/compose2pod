@@ -225,14 +225,28 @@ def test_validate_string_rejects(value: object) -> None:
         validate_string("app", "cpuset", value)
 
 
-@pytest.mark.parametrize("value", ["1m30s", "90s", "1h", "500ms", "1h30m", "0s"])
+@pytest.mark.parametrize("value", ["1m30s", "90s", "1h", "500ms", "1h30m", "0s", "0"])
 def test_validate_duration_accepts(value: str) -> None:
     validate_duration("app", "stop_grace_period", value)
 
 
 # A bare number and a unitless string are both refused -- Docker: "missing unit in duration".
-@pytest.mark.parametrize("value", [90, "90", "", "abc", 1.5, True, []])
+# '0' is the one exception (Go's time.ParseDuration special-cases the zero literal); '30' is not.
+@pytest.mark.parametrize("value", [90, "90", "30", "", "abc", 1.5, True, []])
 def test_validate_duration_rejects(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="stop_grace_period"):
+        validate_duration("app", "stop_grace_period", value)
+
+
+# Measured against `docker compose config` v5.1.2: 'stop_grace_period: "0"' is accepted
+# (a pre-existing over-rejection this fix incidentally closes), while a native 0 and the
+# unitless '30' stay refused -- only the bare '0' string is special-cased.
+def test_validate_duration_accepts_bare_zero_string() -> None:
+    validate_duration("app", "stop_grace_period", "0")
+
+
+@pytest.mark.parametrize("value", [0, 30])
+def test_validate_duration_rejects_native_number(value: object) -> None:
     with pytest.raises(UnsupportedComposeError, match="stop_grace_period"):
         validate_duration("app", "stop_grace_period", value)
 

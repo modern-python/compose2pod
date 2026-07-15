@@ -1,7 +1,6 @@
 """Healthcheck translation: compose healthcheck -> podman --health-* values."""
 
 import json
-import math
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
@@ -41,19 +40,31 @@ def health_cmd(test: object) -> str | None:
 
 
 def interval_seconds(duration: object) -> int:
-    """Compose duration ('1s', '2m', '500ms', int) to whole seconds, minimum 1."""
+    """Compose duration ('1s', '2m', '500ms', '0') to whole seconds, minimum 1.
+
+    Docker's own field is a Go duration *string*: a native number and a
+    unitless string ('30') are both refused ("missing unit in duration"),
+    except the literal '0' zero-duration special case -- measured against
+    `docker compose config` v5.1.2. Compound durations ('1h30m') and the hour
+    unit ('1h') are refused here even though Docker accepts them; that is a
+    deliberate, deferred limitation (planning/deferred.md), not part of the
+    grammar this function otherwise enforces.
+    """
     if duration is None:
         return 1
-    if isinstance(duration, (int, float)) and math.isfinite(duration):
-        return max(int(duration), 1)
-    # Non-finite floats (inf/nan) fall through to the guarded parse below and are refused.
-    text = str(duration).strip()
+    msg = f"unsupported healthcheck interval {duration!r} (use forms like '30s', '2m', '500ms')"
+    if not isinstance(duration, str):
+        raise UnsupportedComposeError(msg)
+    text = duration.strip()
+    if text == "0":
+        return 1
     try:
         if text.endswith("ms"):
             return max(int(float(text[:-2]) / 1000), 1)
         if text.endswith("m"):
             return max(int(float(text[:-1])) * 60, 1)
-        return max(int(float(text.removesuffix("s"))), 1)
+        if text.endswith("s"):
+            return max(int(float(text.removesuffix("s"))), 1)
     except (ValueError, OverflowError):
-        msg = f"unsupported healthcheck interval {duration!r} (use forms like '30s', '2m', '500ms')"
         raise UnsupportedComposeError(msg) from None
+    raise UnsupportedComposeError(msg)

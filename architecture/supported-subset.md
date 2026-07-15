@@ -585,18 +585,28 @@ boolean-typed exception in this group, validated as an actual bool like
   (`compose2pod/healthcheck.py`) is the sole reader and validator. Any
   other shape raises, including a `CMD-SHELL` whose argument isn't a
   string and a `CMD` whose trailing elements aren't all strings.
-- **`interval`:** parsed to whole seconds by `interval_seconds`. Supported
-  forms: a bare number of seconds (`30`, `"30"`, `"30s"`), minutes
-  (`"2m"`), and milliseconds (`"500ms"`). Compound durations (`"1h30m"`)
-  and hour suffixes (`"1h"`) are not parsed — each raises rather than being
+- **`interval`, `timeout`, `start_period`:** a Go duration *string* with a
+  mandatory unit — `"30s"`, `"2m"`, `"500ms"`, `"1m30s"` — or the bare literal
+  `"0"` (Go's `time.ParseDuration` special-cases the zero duration; Docker
+  accepts it even though a unitless `"30"` is refused as "missing unit in
+  duration"). A native number (`30`, `1.5`, `0`) and any other unitless
+  string raise, matching `docker compose config` v5.1.2 — these used to be
+  silently accepted (`is_number`/`interval_seconds`'s bare-number fallback),
+  producing a script for a file Docker itself refuses.
+  `interval` is parsed to whole seconds by `interval_seconds`, which floors
+  at 1 second: the interval only paces the script's `podman healthcheck run`
+  polling loop, which has no sub-second resolution, so `"500ms"` and `"0"`
+  both poll once a second. `interval` additionally rejects compound
+  durations (`"1h30m"`) and the hour unit (`"1h"`) that `timeout` and
+  `start_period` accept — a deliberate, deferred limitation
+  (`planning/deferred.md`), not a grammar gap: each raises rather than being
   silently truncated or misinterpreted. An explicit `null` (or an absent
-  `interval`) defaults to 1 second. The result floors at 1 second: the
-  interval only paces the script's `podman healthcheck run` polling loop,
-  which has no sub-second resolution, so `"500ms"` and `0` both poll once a
-  second.
-- **`timeout`, `retries`, `start_period`:** each must be a number (int or
-  float) or a string. A mapping or list raises rather than reaching its
-  `--health-*` flag as a literal Python `repr()`.
+  `interval`) defaults to 1 second.
+- **`retries`:** an int64 count (`values.validate_count`): a native number
+  casts leniently (`0.5` is accepted), but a string form must be a strict
+  integer — no decimal point, no exponent (`"1.5"`, `"30s"` raise). A mapping
+  or list raises rather than reaching its `--health-retries` flag as a
+  literal Python `repr()`.
 - **A null raises in every healthcheck position** — `test`, `interval`,
   `timeout`, `retries`, `start_period` — because `docker compose config`
   refuses each. A bare `test:` would silently drop the healthcheck entirely;

@@ -377,17 +377,57 @@ class TestValidate:
         # Used to be silently accepted and mis-emitted as the literal
         # --health-retries "{'a': 1}".
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "retries": {"a": 1}}}}}
-        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'retries' must be a number or string"):
+        with pytest.raises(UnsupportedComposeError, match=r"'retries' must be an integer"):
             validate(compose)
 
     def test_healthcheck_timeout_list_rejected_at_gate(self) -> None:
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "timeout": [5]}}}}
-        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'timeout' must be a number or string"):
+        with pytest.raises(UnsupportedComposeError, match=r"'timeout' must be a duration with a unit"):
             validate(compose)
 
     def test_healthcheck_start_period_mapping_rejected_at_gate(self) -> None:
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "start_period": {"a": 1}}}}}
-        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'start_period' must be a number or string"):
+        with pytest.raises(UnsupportedComposeError, match=r"'start_period' must be a duration with a unit"):
+            validate(compose)
+
+    # Measured against `docker compose config` v5.1.2 (planning/changes/2026-07-15.05):
+    # timeout/start_period are a Go duration string -- a native number and a unitless
+    # string are both refused ("missing unit in duration"), except the bare '0' special
+    # case. interval shares the same grammar (through interval_seconds), with the
+    # additional deliberate/deferred rejection of compound and hour durations.
+    @pytest.mark.parametrize("key", ["timeout", "start_period"])
+    @pytest.mark.parametrize("value", ["30s", "1h30m", "1h", "500ms", "0s", "0"])
+    def test_healthcheck_duration_scalars_accept(self, key: str, value: str) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", key: value}}}}
+        assert validate(compose) == []
+
+    @pytest.mark.parametrize("key", ["timeout", "start_period"])
+    @pytest.mark.parametrize("value", [30, "30", 1.5, "1.5", 0, 3, "3", "somevalue"])
+    def test_healthcheck_duration_scalars_reject_false_greens(self, key: str, value: object) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", key: value}}}}
+        with pytest.raises(UnsupportedComposeError, match=rf"{key!r} must be a duration with a unit"):
+            validate(compose)
+
+    @pytest.mark.parametrize("value", ["30s", "500ms", "0"])
+    def test_healthcheck_interval_accepts(self, value: str) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "interval": value}}}}
+        assert validate(compose) == []
+
+    @pytest.mark.parametrize("value", [30, "30", 1.5, 0, 3, "3", 0.5, "somevalue"])
+    def test_healthcheck_interval_rejects_false_greens(self, value: object) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "interval": value}}}}
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+            validate(compose)
+
+    @pytest.mark.parametrize("value", [3, "3", 30, "30", 1.5, 0.5, 0, "0"])
+    def test_healthcheck_retries_accepts(self, value: object) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "retries": value}}}}
+        assert validate(compose) == []
+
+    @pytest.mark.parametrize("value", ["1.5", "30s", "1h30m", "somevalue"])
+    def test_healthcheck_retries_rejects_false_greens(self, value: object) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "retries": value}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"'retries' must be an integer"):
             validate(compose)
 
     def test_healthcheck_test_cmd_shell_nested_list_rejected_at_gate(self) -> None:

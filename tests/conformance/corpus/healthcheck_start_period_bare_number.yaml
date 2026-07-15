@@ -1,0 +1,6 @@
+services:
+  app:
+    image: nginx
+    healthcheck:
+      test: ["CMD", "true"]
+      start_period: 30

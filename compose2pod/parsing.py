@@ -7,7 +7,7 @@ from compose2pod import stores, values
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, health_cmd, interval_seconds
-from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS, is_number, require_string_keys, validate_map
+from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS, require_string_keys, validate_map
 from compose2pod.pod import uses_pod_options, validate_pod_options
 from compose2pod.resources import validate_deploy
 
@@ -49,6 +49,14 @@ IGNORED_SERVICE_KEYS: dict[str, Callable[[str, str, Any], None]] = {
 NULL_ALLOWED_KEYS = {"command", "entrypoint", "deploy"}
 SUPPORTED_HEALTHCHECK_KEYS = {"test", "interval", "timeout", "retries", "start_period"}
 _HEALTHCHECK_SCALAR_KEYS = ("timeout", "retries", "start_period")
+# timeout/start_period are a Go duration string (values.validate_duration); retries is
+# an int64 count (values.validate_count) -- measured against `docker compose config`
+# v5.1.2. Neither is the "any number or string" shape `is_number` used to accept.
+_HEALTHCHECK_SCALAR_VALIDATORS: dict[str, Callable[[str, str, Any], None]] = {
+    "timeout": values.validate_duration,
+    "start_period": values.validate_duration,
+    "retries": values.validate_count,
+}
 SUPPORTED_TOP_LEVEL_KEYS = {"services", "version", "name", "networks", "volumes", "secrets", "configs"}
 DEPENDS_ON_CONDITIONS = {"service_started", "service_healthy", "service_completed_successfully"}
 
@@ -96,9 +104,8 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
         # again for the actual --health-cmd value at emit time).
         health_cmd(healthcheck["test"])
     for key in _HEALTHCHECK_SCALAR_KEYS:
-        if key in healthcheck and not is_number(healthcheck[key]):
-            msg = f"service {name!r}: healthcheck {key!r} must be a number or string"
-            raise UnsupportedComposeError(msg)
+        if key in healthcheck:
+            _HEALTHCHECK_SCALAR_VALIDATORS[key](name, key, healthcheck[key])
 
 
 def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:

@@ -69,11 +69,10 @@ class TestIntervalSeconds:
     def test_milliseconds_above_one_second(self) -> None:
         assert interval_seconds("5000ms") == _FIVE_SECONDS
 
-    def test_int_value_passes_through(self) -> None:
-        assert interval_seconds(5) == _FIVE_SECONDS
-
-    def test_float_value_below_one_floors_to_one(self) -> None:
-        assert interval_seconds(0.4) == 1
+    def test_bare_zero_string_floors_to_one(self) -> None:
+        # Go's time.ParseDuration special-cases the literal '0' as a valid zero
+        # duration; the result still floors at 1 for the polling loop.
+        assert interval_seconds("0") == 1
 
     def test_unparseable_interval_raises(self) -> None:
         for bad in ("1h30m", "abc", "5x"):
@@ -83,6 +82,21 @@ class TestIntervalSeconds:
     def test_non_finite_interval_raises(self) -> None:
         # inf/nan are valid YAML floats; they must be refused, not crash raw.
         for bad in (float("inf"), float("nan"), "1e400"):
+            with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+                interval_seconds(bad)
+
+    # Measured against `docker compose config` v5.1.2: the interval field is a
+    # Go duration *string* -- a native number is refused outright ("missing unit
+    # in duration"), even a value that used to be silently accepted as bare seconds.
+    def test_native_number_raises(self) -> None:
+        for bad in (5, 0.4, 30, 0, 3, 0.5, True):
+            with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+                interval_seconds(bad)
+
+    # A unitless string is refused the same way -- Docker: "missing unit in
+    # duration" -- except the bare '0' special case covered above.
+    def test_unitless_string_raises(self) -> None:
+        for bad in ("30", "3", "1.5", "0.5", "somevalue"):
             with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
                 interval_seconds(bad)
 

@@ -206,10 +206,16 @@ def validate_string(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - 
 
 
 def validate_duration(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    """Check `value` is a Go duration string with a unit ('90s', '1m30s')."""
+    """Check `value` is a Go duration string with a unit ('90s', '1m30s').
+
+    The bare string '0' is the one unitless exception: Go's time.ParseDuration
+    special-cases the zero literal, and Docker accepts it (measured against
+    `docker compose config` v5.1.2) even though '30' -- or a native 0 -- is
+    refused as "missing unit in duration".
+    """
     if has_variable(value):
         return
-    if isinstance(value, str) and _DURATION.match(value):
+    if isinstance(value, str) and (value == "0" or _DURATION.match(value)):
         return
     msg = f"service {name!r}: {key!r} must be a duration with a unit (e.g. '90s', '1m30s')"
     raise UnsupportedComposeError(msg)
