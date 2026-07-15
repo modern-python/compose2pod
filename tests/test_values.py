@@ -390,11 +390,14 @@ def test_validate_ports_long_form_target_accepts(value: object) -> None:
     validate_ports("app", "ports", [{"target": value}])
 
 
-@pytest.mark.parametrize("value", [80.5, -1, "-5", "abc", True, "80-90"])
+@pytest.mark.parametrize("value", [80.5, -1, "-5", "abc", True, "80-90", "1_000", "  80  "])
 def test_validate_ports_long_form_target_rejects(value: object) -> None:
     # Docker casts a string target through Go's uint32 decoder: no fractional
     # float, no negative (native or string), no non-numeric string, no bool,
-    # and no range (unlike the string form's short-form grammar).
+    # and no range (unlike the string form's short-form grammar). "1_000" and
+    # "  80  " are digit-grouping/whitespace forms Python's own int() would
+    # accept but Go's strconv.Atoi refuses -- measured against `docker compose
+    # config` v5.1.2.
     with pytest.raises(UnsupportedComposeError, match="target"):
         validate_ports("app", "ports", [{"target": value}])
 
@@ -418,13 +421,26 @@ def test_validate_ports_long_form_published_rejects(value: object) -> None:
         validate_ports("app", "ports", _port(published=value))
 
 
-@pytest.mark.parametrize("value", ["1.2.3.4", "255.255.255.255", "0.0.0.0", "::1", "2001:db8::1"])  # noqa: S104 - a real Compose value, not a bind address
+@pytest.mark.parametrize(
+    "value",
+    ["1.2.3.4", "255.255.255.255", "0.0.0.0", "::1", "2001:db8::1", "::ffff:1.2.3.4"],  # noqa: S104 - a real Compose value, not a bind address
+)
 def test_validate_ports_long_form_host_ip_accepts(value: object) -> None:
+    # ::ffff:1.2.3.4 is an IPv4-mapped IPv6 literal -- measured, Docker accepts
+    # it against `docker compose config` v5.1.2, same as stdlib `ipaddress`.
     validate_ports("app", "ports", _port(host_ip=value))
 
 
-@pytest.mark.parametrize("value", ["localhost", "1.2.3", "1.2.3.4.5", "[::1]", "", 3])
+@pytest.mark.parametrize(
+    "value",
+    ["localhost", "1.2.3", "1.2.3.4.5", "[::1]", "", 3, "fe80::1%eth0", "  1.2.3.4  "],
+)
 def test_validate_ports_long_form_host_ip_rejects(value: object) -> None:
+    # fe80::1%eth0 is an RFC 4007 zone-id literal: stdlib `ipaddress` parses it
+    # (Python 3.9+ scope_id support), but Docker's Go `net.ParseIP` has no
+    # zone-id support and refuses it ("invalid ip address") -- measured against
+    # `docker compose config` v5.1.2. "  1.2.3.4  " (leading/trailing
+    # whitespace) is refused by both oracles already.
     with pytest.raises(UnsupportedComposeError, match="host_ip"):
         validate_ports("app", "ports", _port(host_ip=value))
 

@@ -285,9 +285,12 @@ def _validate_port_target_field(name: str, key: str, value: Any) -> None:  # noq
     Measured: a native int or a whole-valued float (`80.0`) is accepted, a
     fractional float (`80.5`) is refused, and so is a negative value on
     either side -- Docker casts a string form through Go's uint32 decoder (an
-    interpolation-time `Atoi` + range check that runs even without a `${VAR}`
-    reference: 'target: "abc"' fails the same cast a genuine variable miss
-    would). Unlike the short-form container port (bound to 1-65535 by
+    interpolation-time `strconv.Atoi` + range check that runs even without a
+    `${VAR}` reference: 'target: "abc"' fails the same cast a genuine
+    variable miss would). `strconv.Atoi` is strict like `ParseInt` -- no
+    digit-grouping underscore, no surrounding whitespace -- so `"1_000"` and
+    `"  80  "` are refused even though Python's own lenient `int()` would
+    accept both. Unlike the short-form container port (bound to 1-65535 by
     `_ranges_compatible`), there is no *upper* bound here -- 'target: 99999'
     is accepted, a different Docker code path with a looser bound.
     """
@@ -297,14 +300,8 @@ def _validate_port_target_field(name: str, key: str, value: Any) -> None:  # noq
         return
     if isinstance(value, float) and math.isfinite(value) and value.is_integer() and value >= 0:
         return
-    if isinstance(value, str):
-        try:
-            parsed = int(value)
-        except ValueError:
-            pass
-        else:
-            if parsed >= 0:
-                return
+    if isinstance(value, str) and _STRICT_INT_STRING.match(value) and int(value) >= 0:
+        return
     msg = f"service {name!r}: {key!r} entry 'target' must be a non-negative integer"
     raise UnsupportedComposeError(msg)
 
@@ -331,15 +328,22 @@ def _validate_port_host_ip_field(name: str, key: str, value: Any) -> None:  # no
     """Check the long-form 'host_ip' field: a bare IP address string (v4 or v6, unbracketed).
 
     Measured: Docker parses the value and refuses anything that isn't a real
-    IP address -- a hostname ('localhost'), a malformed address ('1.2.3'), or
-    a bracketed IPv6 literal ('[::1]', valid inside a URL but not on its own)
-    are all refused ("invalid ip address"), even though the type itself is a
-    plain string. `ipaddress.ip_address` (stdlib) accepts exactly the same
-    unbracketed v4/v6 forms Docker does and rejects the same malformed ones.
+    IP address -- a hostname ('localhost'), a malformed address ('1.2.3'), a
+    bracketed IPv6 literal ('[::1]', valid inside a URL but not on its own),
+    or a whitespace-padded one ('  1.2.3.4  ') are all refused ("invalid ip
+    address"), even though the type itself is a plain string. `ipaddress.
+    ip_address` (stdlib) accepts exactly the same unbracketed v4/v6 forms
+    Docker does and rejects the same malformed ones -- with one gap: stdlib
+    `ipaddress` also accepts an RFC 4007 zone-id suffix ('fe80::1%eth0',
+    Python 3.9+ scope_id support), but Docker's Go `net.ParseIP` has no
+    zone-id support at all and refuses it. An IPv4-mapped IPv6 literal
+    ('::ffff:1.2.3.4') is accepted by both. The zone-id gap is closed by
+    refusing any value containing '%' before it ever reaches `ipaddress` --
+    '%' cannot appear in a v4/v6 literal Docker itself would accept.
     """
     if has_variable(value):
         return
-    if isinstance(value, str):
+    if isinstance(value, str) and "%" not in value:
         try:
             ipaddress.ip_address(value)
         except ValueError:

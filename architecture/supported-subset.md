@@ -195,13 +195,17 @@ empty label.
   measured against `docker compose config` v5.1.2) — and, since Task 10, every
   other known field's *value* is checked too, even though compose2pod never
   reads `ports` at all: `target` a non-negative integer (native, a
-  whole-valued float, or a numeric string — no upper bound, unlike the
-  short-form container port's 1-65535); `published` an integer or a string
-  with content entirely unchecked (Docker's own field is a bare string, so
-  `published: abc` and a range string both pass; only `true`/a float fail the
-  type union); `host_ip` a bare IP address (v4 or v6, unbracketed — checked
-  with stdlib `ipaddress.ip_address`, matching Docker's own "invalid ip
-  address" refusal of a hostname or a bracketed literal);
+  whole-valued float, or a strict integer string — no digit-grouping
+  underscore, no surrounding whitespace, matching Go's `strconv.Atoi` exactly
+  rather than Python's lenient `int()`; no upper bound, unlike the short-form
+  container port's 1-65535); `published` an integer or a string with content
+  entirely unchecked (Docker's own field is a bare string, so `published:
+  abc` and a range string both pass; only `true`/a float fail the type
+  union); `host_ip` a bare IP address (v4 or v6, unbracketed — checked with
+  stdlib `ipaddress.ip_address`, matching Docker's own "invalid ip address"
+  refusal of a hostname or a bracketed literal, plus an explicit `%` guard
+  rejecting an RFC 4007 zone-id suffix like `fe80::1%eth0` that stdlib
+  `ipaddress` parses but Docker's Go `net.ParseIP` refuses);
   `protocol`/`mode`/`name`/`app_protocol` each a plain string, content
   unchecked (`mode: bogus` passes). An unrecognized long-form key raises —
   Docker's schema is strict here — but `app_protocol` is a real field, not a
