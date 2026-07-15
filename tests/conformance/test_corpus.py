@@ -37,3 +37,18 @@ def test_networks_default_implicit_is_no_longer_an_over_rejection(
     """
     path = Path(__file__).parent / "corpus" / "networks_default_implicit.yaml"
     assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
+
+
+def test_volume_tilde_bind_is_no_longer_an_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """Task 14's `_validate_volume_references` over-classified `~`-prefixed sources as named volumes.
+
+    Same reasoning as `test_networks_default_implicit_is_no_longer_an_over_rejection`
+    above: the generic corpus run alone would stay green even pre-fix, filing this
+    under the allowed 'over-reject' verdict instead of catching the regression. The
+    stronger claim -- both oracles ACCEPT `volumes: [~/data:/var]` with no top-level
+    declaration -- needs this dedicated assertion on the verdict itself.
+    """
+    path = Path(__file__).parent / "corpus" / "volume_tilde_bind_no_declaration.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"

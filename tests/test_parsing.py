@@ -1484,6 +1484,25 @@ def test_bind_mount_and_anonymous_volumes_need_no_declaration() -> None:
     validate(_doc(volumes=["/container_only"]))
 
 
+def test_tilde_bind_mount_needs_no_declaration() -> None:
+    # Measured against `docker compose config` v5.1.2: `volumes: [~/data:/var]`
+    # with no top-level 'volumes:' block ACCEPTS -- Docker classifies a
+    # `~`-prefixed source as a bind mount (expanded against the invoking
+    # user's home directory), not a named-volume reference. The old "does not
+    # start with '.' or '/'" test wrongly classified this as a named volume
+    # and rejected it as undeclared -- the over-rejection this test guards.
+    validate(_doc(volumes=["~/data:/var"]))
+
+
+def test_hyphenated_and_underscored_named_volume_must_be_declared() -> None:
+    # A bare identifier still needs a top-level declaration regardless of
+    # which NAME_PATTERN characters it uses -- this is not weakened by the
+    # tilde/Windows-path fix above.
+    with pytest.raises(UnsupportedComposeError, match="undefined volume 'my-vol_1'"):
+        validate(_doc(volumes=["my-vol_1:/var"]))
+    validate({"services": {"app": {"image": "nginx", "volumes": ["my-vol_1:/var"]}}, "volumes": {"my-vol_1": None}})
+
+
 def test_named_volume_declared_external_still_counts_as_declared() -> None:
     # `external: true` is still a declaration as far as the reference check is
     # concerned -- Docker treats it as "must already exist", but the

@@ -54,6 +54,20 @@ never written. Every one was measured against `docker compose config` v5.1.2.
   `required` (skip the flag instead of refusing, when the file is missing)
   and `format` (`raw` vs the default interpolated parsing) are the only real
   work.
+- **Windows drive-letter volume source.** `volumes: ["C:\data:/var"]` with no
+  top-level declaration: Docker ACCEPTS (measured, `docker compose config`
+  v5.1.2 -- it special-cases a leading `<letter>:\` so the drive letter stays
+  part of the source, resolving to `{source: C:\data, target: /var}`).
+  compose2pod REJECTS ("refers to undefined volume 'C'"). The colon-based
+  source extraction shared by `parsing._classify_volume` and `emit.py`'s
+  `_volume_flags` (`source, _, _ = volume.partition(":")`) splits on the
+  *first* colon regardless, so for this entry `source` is just the single
+  letter `"C"` -- itself a syntactically valid volume-name grammar match, not
+  the unparseable string a naive read of "doesn't match the name pattern"
+  would suggest. Fixing it needs genuine Windows-drive detection ahead of the
+  split, in both call sites, not a grammar-check swap. Pre-existing since the
+  named-volume reference check was introduced; not touched by the 2026-07-15
+  tilde-bind-mount fix that discovered it.
 
 **Revisit trigger:** a user reports a compose file that `docker compose` runs and
 compose2pod refuses — most likely the quoted-boolean case, since anything that

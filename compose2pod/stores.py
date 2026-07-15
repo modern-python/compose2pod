@@ -19,7 +19,13 @@ from compose2pod.shell import to_shell, variable_names
 
 
 _LONG_FORM_KEYS = {"source", "target", "uid", "gid", "mode"}
-_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
+# Docker's shared identifier grammar for a secret/config *name* -- and, per
+# `parsing._named_volume_source`, for telling a named-volume reference apart
+# from a bind-mount source (a relative or absolute path, or a `~`-prefixed
+# home-relative path all fail this pattern, since none of `.`, `/`, `~` is a
+# pattern character). Public (no leading underscore) because parsing.py, in a
+# different module, reuses it rather than duplicating it.
+NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 _ENV_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
@@ -61,7 +67,7 @@ _STORE_KINDS = (SECRET, CONFIG)
 
 
 def _validate_def(name: str, definition: Any, kind: StoreKind) -> None:  # noqa: ANN401 - Compose values are untyped
-    if not _NAME.fullmatch(name):
+    if not NAME_PATTERN.fullmatch(name):
         msg = f"{kind.label} name {name!r} must match [a-zA-Z0-9][a-zA-Z0-9_.-]*"
         raise UnsupportedComposeError(msg)
     if not isinstance(definition, dict):

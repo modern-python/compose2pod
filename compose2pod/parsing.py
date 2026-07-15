@@ -115,6 +115,51 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
             _HEALTHCHECK_SCALAR_VALIDATORS[key](name, key, healthcheck[key])
 
 
+def _classify_volume(volume: str) -> tuple[str, str | None]:
+    r"""Classify one short-syntax volume entry: its kind, and its source when the kind is 'named'.
+
+    Returns `("anonymous", None)` for a colon-less entry (a bare container
+    path), `("named", source)` for a colon-form entry whose source matches
+    Docker's own volume-name grammar (`stores.NAME_PATTERN`, the identical
+    pattern a secret/config name is checked against:
+    `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`), or `("bind", None)` for every other
+    colon-form entry -- a relative (`./rel`) or absolute (`/abs`) host path, a
+    `~`-prefixed home-relative path (`~/data`, measured ACCEPT against
+    `docker compose config` v5.1.2 with no top-level declaration -- Docker
+    expands it against the invoking user's home directory), or a `${VAR}`
+    reference (`$`, `{`, `}` are none of them pattern characters either).
+
+    Shared by `_validate_service_volumes` (only cares whether an entry is
+    anonymous, to check its own shape) and `_named_volume_source` (only cares
+    whether an entry is named, to extract its source for the cross-document
+    declaration check) -- one function defines the colon-form split exactly
+    once, rather than each re-deriving it. An earlier version of this
+    file split named-vs-bind by "does not start with '.' or '/'" instead of
+    the name grammar, which wrongly swept up every other bind-mount spelling
+    (tilde in particular) into "named" -- an over-rejection once paired with
+    the reference check below, since neither needs a top-level declaration.
+
+    A genuine Windows drive-letter source (`C:\\data:/var`) is NOT fixed by
+    this pattern swap: `source, _, _ = volume.partition(":")` splits on the
+    FIRST colon regardless, so for that entry `source` is just `"C"` -- a
+    single letter, which is itself a syntactically valid NAME_PATTERN match --
+    not the full `"C:\\data"` a naive reading of "doesn't match the pattern"
+    might suggest. Docker's own parser special-cases a leading `<letter>:\\`
+    to keep the drive letter attached to the source before ever comparing it
+    to a name grammar; this module (and `emit.py`'s `_volume_flags`, which
+    shares the same first-colon split for the same reason) does not. Measured,
+    still REJECTs post-fix -- a pre-existing, uncatalogued residual from when
+    this check was introduced (`_named_volume_source`'s Task 14 predecessor),
+    not something this change introduces or was scoped to close.
+    """
+    if ":" not in volume:
+        return "anonymous", None
+    source, _, _ = volume.partition(":")
+    if stores.NAME_PATTERN.fullmatch(source):
+        return "named", source
+    return "bind", None
+
+
 def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
     """Check volumes is a list of short bind-mount entries."""
     volumes = svc.get("volumes")
@@ -128,35 +173,20 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         if not isinstance(volume, str):
             msg = f"service {name!r}: only short volume syntax is supported"
             raise UnsupportedComposeError(msg)
-        if ":" not in volume:
-            # Anonymous volume: must be an absolute container path.
-            if not volume.startswith("/"):
-                msg = f"service {name!r}: anonymous volume '{volume}' must be an absolute path"
-                raise UnsupportedComposeError(msg)
-            continue
-        # Colon-containing volume: bind mount (host path source) or named volume
-        # (bare identifier source) — both are accepted; podman creates a named
-        # volume implicitly on first reference.
+        kind, _ = _classify_volume(volume)
+        if kind == "anonymous" and not volume.startswith("/"):
+            msg = f"service {name!r}: anonymous volume '{volume}' must be an absolute path"
+            raise UnsupportedComposeError(msg)
+        # A named or bind entry needs no further shape check here -- both are
+        # accepted; podman creates a named volume implicitly on first
+        # reference, and _validate_volume_references (below) is the one place
+        # that cross-checks a named entry's source against a declaration.
 
 
 def _named_volume_source(volume: str) -> str | None:
-    """Return a colon-form volume entry's bare-identifier source, or None if it needs no declaration.
-
-    Mirrors the same bind-vs-named split `emit.py`'s `_volume_flags` already
-    makes when translating a relative bind mount: a colon-form entry's source is
-    a bind mount when it starts with `.` or `/` (a host path, relative or
-    absolute) -- Docker requires no top-level declaration for either. No colon at
-    all means an anonymous volume (a bare container path), also declaration-free.
-    Anything else is a bare identifier: the *name* of a volume Docker requires to
-    be declared in the top-level `volumes:` block, even though podman itself
-    would create it implicitly on first reference regardless.
-    """
-    if ":" not in volume:
-        return None
-    source, _, _ = volume.partition(":")
-    if source.startswith((".", "/")):
-        return None
-    return source
+    """Return a colon-form volume entry's bare-identifier source, or None if it needs no declaration."""
+    kind, source = _classify_volume(volume)
+    return source if kind == "named" else None
 
 
 def _validate_image(name: str, svc: dict[str, Any]) -> None:
@@ -796,14 +826,17 @@ def _validate_volume_references(compose: dict[str, Any], services: dict[str, Any
     is a list of strings, and that a colon-less entry is an absolute path), so
     `svc.get("volumes") or []` here is safe to iterate.
 
-    A `${VAR}`-carrying source is exempted, matching every other host-state-
-    dependent grammar in this file (`values.has_variable`): measured, Docker
-    resolves the variable first and classifies the *result* -- the same
-    `${NAME}:/var` document ACCEPTS with no declaration when the shell resolves
-    `NAME` to a bind-mount path (`/abs` or `./rel`) and REJECTS undeclared when
-    it resolves to a bare identifier. Which rule applies is a fact about the
-    shell that will later run the generated script, not about this document, so
-    it does not bind here either way.
+    A `${VAR}`-carrying source needs no separate carve-out the way other
+    host-state-dependent grammars in this file need `values.has_variable`:
+    measured, Docker resolves the variable first and classifies the *result*
+    -- the same `${NAME}:/var` document ACCEPTS with no declaration when the
+    shell resolves `NAME` to a bind-mount path (`/abs` or `./rel`) and REJECTS
+    undeclared when it resolves to a bare identifier, a fact about the shell
+    that will later run the generated script, not about this document, so it
+    does not bind here either way. `_named_volume_source` already returns None
+    for any `${...}`-carrying source unconditionally -- `$`, `{`, and `}` are
+    none of them `stores.NAME_PATTERN` characters -- so this function never
+    needs to ask `values.has_variable` itself.
     """
     top_volumes = compose.get("volumes")
     if top_volumes is not None and not isinstance(top_volumes, dict):
@@ -813,7 +846,7 @@ def _validate_volume_references(compose: dict[str, Any], services: dict[str, Any
     for name, svc in services.items():
         for volume in svc.get("volumes") or []:
             source = _named_volume_source(volume)
-            if source is None or values.has_variable(source):
+            if source is None:
                 continue
             if source not in declared:
                 msg = f"service {name!r}: refers to undefined volume {source!r}"

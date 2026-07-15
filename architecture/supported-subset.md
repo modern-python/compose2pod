@@ -724,12 +724,25 @@ boolean-typed exception in this group, validated as an actual bool like
 
 Short syntax only; the long mapping form raises. The `volumes` key itself
 must be a list — a bare string raises, rather than being destructured one
-character at a time. A `source:target` entry is one of two kinds, told
-apart by whether `source` starts with `.` or `/`:
+character at a time. A `source:target` entry is one of two kinds, told apart
+by whether `source` matches Docker's own volume-name grammar
+(`stores.NAME_PATTERN`, `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$` — the identical
+pattern a secret/config name is checked against):
 
-- **Bind mount** (`source` starts with `.` or `/`): the host path, resolved
-  against `--project-dir` when relative.
-- **Named volume** (`source` is a bare identifier, e.g.
+- **Bind mount** (`source` does not match the name grammar — `./rel`,
+  `/abs`, a `~`-prefixed home-relative path, or a `${VAR}` reference): the
+  host path, resolved against `--project-dir` when relative and passed
+  through verbatim otherwise (a `~`-prefixed source is not expanded by
+  compose2pod itself — it reaches the emitted script as written, the same as
+  every other unresolved token). **Known residual:** a Windows drive-letter
+  source (`C:\data`) is still misclassified as a named volume and rejected —
+  the shared colon-split (`source, _, _ = volume.partition(":")`) takes the
+  drive letter alone as `source`, which is itself a valid name-grammar match;
+  Docker's own parser special-cases the leading `<letter>:\` before ever
+  comparing it to a name grammar. Catalogued in `planning/deferred.md`, not
+  fixed (needs a bigger change to the shared split, in both `parsing.py` and
+  `emit.py`, not a grammar swap).
+- **Named volume** (`source` matches the name grammar, e.g.
   `pgdata:/var/lib/...`): passed through verbatim as `-v <name>:<target>` —
   no format validation, no path translation. Podman creates it implicitly
   with default options on first reference (same as plain `podman run -v`,
@@ -746,14 +759,10 @@ apart by whether `source` starts with `.` or `/`:
   (`_validate_volume_references`, `parsing.py`, Task 14, mirroring
   `_validate_network_references`). A declaration with `external: true` still
   counts. A bind mount or an anonymous volume needs no declaration at all —
-  neither names a volume. A `${VAR}`-carrying source is exempted from the
-  check entirely: measured against `docker compose config` v5.1.2, Docker
-  resolves the variable first and then classifies the *result* (a bind-mount
-  value needs no declaration, a bare-identifier value does) — which rule
-  applies is a fact about the shell that will later run the generated script,
-  not about this document, so it does not bind here either way (same
-  `values.has_variable` carve-out every other host-state-dependent grammar in
-  `parsing.py` already applies).
+  neither names a volume, so neither needs the `${VAR}`-carrying-source
+  carve-out other host-state-dependent grammars in `parsing.py` need either:
+  `$`, `{`, and `}` are none of them name-grammar characters, so a
+  `${VAR}`-carrying source is already excluded by the grammar match itself.
 
 A single absolute container path with no `source:target` (e.g.
 `- /var/cache/models`) is accepted as an **anonymous volume** and emitted
