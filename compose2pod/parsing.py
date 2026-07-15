@@ -303,11 +303,10 @@ def _validate_build_secrets(name: str, key: str, value: Any) -> None:  # noqa: A
 
     Docker also cross-checks each `source` against the top-level `secrets:`
     store, refusing an undeclared name ("refers to undefined build secret") --
-    measured, but not reproduced here: compose2pod never reads `build`'s
-    contents at emit time, and closing that gap would need `_validate_build`
-    to see the whole document rather than one service, which is out of scope
-    for a value-*type* check (see planning/changes -- flagged as a known,
-    narrow residual gap, not invented-and-skipped).
+    this value-*type* check cannot reproduce that here, since it never sees
+    the whole document, only one key's value. See
+    `_validate_build_secret_references`, run separately from `validate()`
+    once every service's build has been shape-checked.
     """
     if not isinstance(value, list):
         msg = f"service {name!r}: build {key!r} must be a list"
@@ -743,6 +742,115 @@ def _validate_network_references(compose: dict[str, Any], services: dict[str, An
                 raise UnsupportedComposeError(msg)
 
 
+def _validate_network_driver_opts(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    """Check a mapping value against Docker's own `driver_opts` schema: string -> (number or string).
+
+    Measured against `docker compose config` v5.1.2: a bool/null/list entry
+    value is refused ('must be a number or string') even though the key
+    itself may be any string. compose2pod never reads a network entry's
+    `driver_opts` contents (see architecture/supported-subset.md), but a
+    malformed value here is still a document Docker refuses.
+    """
+    if not isinstance(value, dict):
+        msg = f"service {name!r}: networks {key!r} must be a mapping"
+        raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: networks {key!r}", value)
+    for val in value.values():
+        if isinstance(val, bool) or not isinstance(val, int | float | str):
+            msg = f"service {name!r}: networks {key!r} values must be a number or string"
+            raise UnsupportedComposeError(msg)
+
+
+# Docker's own schema for a service's long-form (mapping) `networks` entry --
+# STRICT, unlike short-form (list) `networks` or the top-level `networks:`
+# block (whose contents compose2pod never reads). Measured against `docker
+# compose config` v5.1.2, cross-checked against the upstream compose-spec
+# JSON schema (`$defs/service.networks.oneOf[1].patternProperties`): exactly
+# these 9 keys, `additionalProperties: false`, plus a `^x-` extension pattern.
+# `aliases` is also independently checked by `graph._host_names` (which reads
+# it for `--add-host`) -- this is the same grammar enforced twice, defense in
+# depth, the same pattern Task 10 established for `extra_hosts`.
+_DOCKER_NETWORK_ENTRY_KEYS: dict[str, Callable[[str, str, Any], None]] = {
+    "aliases": _validate_string_list,
+    "driver_opts": _validate_network_driver_opts,
+    "gw_priority": values.validate_native_number,
+    "interface_name": values.validate_string,
+    "ipv4_address": values.validate_string,
+    "ipv6_address": values.validate_string,
+    "link_local_ips": _validate_string_list,
+    "mac_address": values.validate_string,
+    "priority": values.validate_native_number,
+}
+
+
+def _validate_network_entry_value(name: str, network: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    """Check one service's long-form network entry against Docker's strict sub-schema.
+
+    `value is None` is accepted (measured: means "use default settings", same
+    as an explicit `{}`). No `${VAR}` carve-out is applied at this level,
+    unlike a scalar grammar: Compose interpolation only ever turns a scalar
+    into another scalar string, never a mapping, so a variable reference here
+    can never satisfy "must be a mapping" regardless of its runtime value --
+    the rejection is a fact about the document, not the host.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        msg = f"service {name!r}: networks {network!r} must be a mapping"
+        raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: networks {network!r}", value)
+    unknown = {key for key in value if key not in _DOCKER_NETWORK_ENTRY_KEYS and not key.startswith("x-")}
+    if unknown:
+        msg = f"service {name!r}: networks {network!r}: unsupported keys {sorted(unknown)}"
+        raise UnsupportedComposeError(msg)
+    for key, validator in _DOCKER_NETWORK_ENTRY_KEYS.items():
+        if key in value:
+            validator(name, key, value[key])
+
+
+def _validate_network_entries(services: dict[str, Any]) -> None:
+    """Every service's long-form (mapping) `networks` entry, checked document-wide.
+
+    Runs after `hostnames()` (already confirmed `networks` is a list, mapping,
+    or absent for every service) -- mirrors `_validate_network_references`:
+    shape validation is document-wide, over every service, not scoped to the
+    startup-order closure `emit.py` later computes for a single target.
+    """
+    for name, svc in services.items():
+        networks = svc.get("networks")
+        if isinstance(networks, dict):
+            for network, value in networks.items():
+                _validate_network_entry_value(name, network, value)
+
+
+def _validate_build_secret_references(compose: dict[str, Any], services: dict[str, Any]) -> None:
+    """Every service's `build.secrets` entry must reference a declared top-level secret.
+
+    compose2pod never reads `build`'s contents at emit time (see
+    `_validate_build_secrets`'s own docstring), but Docker cross-checks each
+    entry's source -- the bare string itself in short form, or the mapping's
+    `source` field in long form -- against the top-level `secrets:` block,
+    refusing an undeclared name ('refers to undefined build secret'). Measured
+    against `docker compose config` v5.1.2 for both forms.
+
+    Runs after `_validate_service` (each entry's own shape -- a string, or a
+    {source, target} mapping with a string `source` -- is already confirmed by
+    `_validate_build_secret_entry`) and after `stores.validate` (the top-level
+    `secrets:` block, if present, is already confirmed to be a mapping), so
+    both `entry["source"]` and `compose.get("secrets") or {}` are safe here.
+    """
+    declared = set(compose.get("secrets") or {})
+    for name, svc in services.items():
+        build = svc.get("build")
+        if not isinstance(build, dict):
+            continue
+        for entry in build.get("secrets") or []:
+            source = entry if isinstance(entry, str) else entry["source"]
+            if source not in declared:
+                msg = f"service {name!r}: build secrets refers to undefined secret {source!r}"
+                raise UnsupportedComposeError(msg)
+
+
 def _reject_null_top_level_blocks(compose: dict[str, Any]) -> None:
     """Refuse a bare top-level block -- `docker compose config` refuses each.
 
@@ -790,8 +898,10 @@ def validate(compose: dict[str, Any]) -> list[str]:
         warnings.extend(_validate_service(name, svc))
     hostnames(services)  # validate hostname/container_name/networks shapes at the gate
     _validate_network_references(compose, services)
+    _validate_network_entries(services)
     _validate_depends_on(services)
     stores.validate(compose)
+    _validate_build_secret_references(compose, services)
     if uses_pod_options(services):
         warnings.append(
             "dns/sysctls/extra_hosts apply pod-wide -- all containers in the pod share one "

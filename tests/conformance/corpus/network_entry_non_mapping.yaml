@@ -1,0 +1,7 @@
+services:
+  app:
+    image: nginx
+    networks:
+      n: somevalue
+networks:
+  n: {}

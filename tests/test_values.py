@@ -6,6 +6,7 @@ from compose2pod.values import (
     validate_count,
     validate_duration,
     validate_integer,
+    validate_native_number,
     validate_number,
     validate_ports,
     validate_size,
@@ -149,6 +150,37 @@ def test_validate_number_rejects_non_finite(value: object) -> None:
 # I4: Go's float parser permits digit-grouping underscores between digits.
 def test_validate_number_accepts_digit_grouping() -> None:
     validate_number("app", "cpus", "1_000")
+
+
+# validate_native_number: networks entry priority/gw_priority. Measured against
+# `docker compose config` v5.1.2 -- unlike validate_number, there is no
+# number-or-string union: a numeric string is refused just like any other one.
+@pytest.mark.parametrize("value", [0, 5, -1, 1.5, 400.0])
+def test_validate_native_number_accepts(value: object) -> None:
+    validate_native_number("app", "priority", value)
+
+
+@pytest.mark.parametrize("value", ["5", "1.5", "", "abc", [], {}, True])
+def test_validate_native_number_rejects(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="priority"):
+        validate_native_number("app", "priority", value)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_validate_native_number_rejects_non_finite(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="priority"):
+        validate_native_number("app", "priority", value)
+
+
+def test_validate_native_number_does_not_carve_out_variable_reference() -> None:
+    # Deliberately unlike every other grammar in this module: `${VAR}` always
+    # interpolates to a string, and this grammar has no string branch, so no
+    # possible variable value could make Docker accept the document -- the
+    # verdict is a fact about the document, not the host, and must not be
+    # carved out. Measured: `priority: "${MYPRI}"` is refused even with
+    # MYPRI set to a valid number ("5") in the reading shell.
+    with pytest.raises(UnsupportedComposeError, match="priority"):
+        validate_native_number("app", "priority", "${MYPRI}")
 
 
 # validate_count: cpu_shares/cpu_quota/cpu_period/pids_limit. Measured against

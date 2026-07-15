@@ -1,0 +1,9 @@
+services:
+  app:
+    image: nginx
+    networks:
+      n:
+        driver_opts:
+          foo: true
+networks:
+  n: {}

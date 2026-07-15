@@ -1402,3 +1402,138 @@ def test_top_level_networks_list_form_rejected() -> None:
     compose = {"services": {"app": {"image": "nginx"}}, "networks": [{"a": 1}]}
     with pytest.raises(UnsupportedComposeError, match="top-level 'networks' must be a mapping"):
         validate(compose)
+
+
+def _net_doc(entry: object) -> dict:
+    """One service naming network 'n' (declared top-level), with 'entry' as its long-form value."""
+    return {"services": {"app": {"image": "nginx", "networks": {"n": entry}}}, "networks": {"n": None}}
+
+
+# Per-service `networks` long-form entry is a STRICT typed sub-schema -- unlike
+# the top-level `networks:` block (whose contents compose2pod never reads),
+# Docker validates every sub-key's shape here, measured against `docker
+# compose config` v5.1.2. The full valid key set (9 keys, confirmed against
+# both live docker and the upstream compose-spec JSON schema, one more than
+# initially assumed -- `interface_name` also exists): aliases, driver_opts,
+# gw_priority, interface_name, ipv4_address, ipv6_address, link_local_ips,
+# mac_address, priority.
+class TestNetworkEntrySchema:
+    def test_non_mapping_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'n' must be a mapping"):
+            validate(_net_doc("somevalue"))
+
+    def test_unknown_sub_key_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_doc({"badkey": 1}))
+
+    def test_null_value_accepted(self) -> None:
+        # Measured: null means "use default settings", same as an explicit {}.
+        assert validate(_net_doc(None)) is not None
+
+    def test_empty_mapping_accepted(self) -> None:
+        assert validate(_net_doc({})) is not None
+
+    def test_extension_key_accepted(self) -> None:
+        # compose-spec's own schema allows `^x-` patternProperties here too.
+        assert validate(_net_doc({"x-foo": 1})) is not None
+
+    def test_aliases_still_a_list_of_strings(self) -> None:
+        # graph._host_names' own alias extraction keeps working through the
+        # new gate -- this is not a duplicate concern, it's the same grammar
+        # enforced twice (defense in depth), same pattern as extra_hosts.
+        assert validate(_net_doc({"aliases": ["a", "b"]})) is not None
+        with pytest.raises(UnsupportedComposeError, match="aliases"):
+            validate(_net_doc({"aliases": "notalist"}))
+        with pytest.raises(UnsupportedComposeError, match="aliases"):
+            validate(_net_doc({"aliases": [3]}))
+
+    @pytest.mark.parametrize("key", ["ipv4_address", "ipv6_address", "mac_address", "interface_name"])
+    def test_string_fields_accept_any_string_reject_non_string(self, key: str) -> None:
+        assert validate(_net_doc({key: "whatever-unchecked-content"})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_doc({key: 3}))
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_doc({key: True}))
+
+    @pytest.mark.parametrize("key", ["priority", "gw_priority"])
+    def test_priority_fields_are_native_numbers_only(self, key: str) -> None:
+        assert validate(_net_doc({key: 1})) is not None
+        assert validate(_net_doc({key: 1.5})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_doc({key: "notanum"}))
+        with pytest.raises(UnsupportedComposeError, match=key):
+            # Measured: even a numeric *string* is refused -- no number-or-string union.
+            validate(_net_doc({key: "5"}))
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_doc({key: True}))
+
+    def test_link_local_ips_is_a_list_of_strings(self) -> None:
+        assert validate(_net_doc({"link_local_ips": ["169.254.1.1"]})) is not None
+        with pytest.raises(UnsupportedComposeError, match="link_local_ips"):
+            validate(_net_doc({"link_local_ips": "notalist"}))
+        with pytest.raises(UnsupportedComposeError, match="link_local_ips"):
+            validate(_net_doc({"link_local_ips": [3]}))
+
+    def test_driver_opts_is_a_mapping_of_number_or_string(self) -> None:
+        assert validate(_net_doc({"driver_opts": {"foo": "bar"}})) is not None
+        assert validate(_net_doc({"driver_opts": {"foo": 3}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_doc({"driver_opts": "notamap"}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_doc({"driver_opts": {"foo": True}}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_doc({"driver_opts": {"foo": None}}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_doc({"driver_opts": {"foo": [1, 2]}}))
+
+    def test_variable_reference_whole_value_still_rejected(self) -> None:
+        # Compose interpolation only ever turns a scalar into another scalar
+        # string -- it can never produce a mapping. So unlike a scalar
+        # grammar's usual `${VAR}` carve-out, this position's "must be a
+        # mapping" verdict holds for every possible value of the variable;
+        # measured against `docker compose config` v5.1.2 with the variable
+        # both unset and set to a value ("").
+        with pytest.raises(UnsupportedComposeError, match="must be a mapping"):
+            validate(_net_doc("${MYVAR}"))
+
+    def test_non_mapping_non_string_entry_does_not_crash(self) -> None:
+        # Crash-class guard: a list value (the same list/map YAML slip as
+        # depends_on/environment/command) must fail clean, not TypeError from
+        # an unguarded set()/hash of an untrusted value.
+        with pytest.raises(UnsupportedComposeError, match="'n' must be a mapping"):
+            validate(_net_doc([{"a": 1}]))
+
+    def test_short_form_networks_still_unrestricted(self) -> None:
+        # List-form (short-form) networks carries no sub-schema at all --
+        # unaffected by this change.
+        compose = {"services": {"app": {"image": "nginx", "networks": ["n"]}}, "networks": {"n": None}}
+        assert validate(compose) is not None
+
+
+_BUILD_SECRETS_UNDECLARED_STORE = {"declared": {"environment": "MYVAR"}}
+
+
+def test_build_secrets_short_form_undeclared_source_rejected() -> None:
+    doc = _build("secrets", ["nope"])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)
+
+
+def test_build_secrets_long_form_undeclared_source_rejected() -> None:
+    doc = _build("secrets", [{"source": "nope", "target": "/run/secrets/x"}])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)
+
+
+def test_build_secrets_declared_source_accepted_both_forms() -> None:
+    doc = _build("secrets", ["declared", {"source": "declared"}])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    assert validate(doc) == []
+
+
+def test_build_secrets_no_top_level_secrets_block_rejects_any_reference() -> None:
+    doc = _build("secrets", ["declared"])
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)

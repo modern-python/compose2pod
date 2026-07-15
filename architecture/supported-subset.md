@@ -319,9 +319,13 @@ slot (`architecture/glossary.md`).
   string or list of strings); and **nested**
   structures (`ulimits` — identical grammar to the top-level `ulimits` service
   key, via the same `keys.validate_ulimits`; `secrets` — a list of a bare
-  secret-name string or a `{source, target}` mapping, though Docker's further
-  cross-check that `source` names a declared top-level secret is not
-  reproduced here, a narrow known gap). Every mapping-shaped value's own keys
+  secret-name string or a `{source, target}` mapping, each `source`
+  cross-checked document-wide against the top-level `secrets:` block
+  (`_validate_build_secret_references`, `compose2pod/parsing.py`) — an
+  undeclared name raises ("refers to undefined secret"), the same cross-check
+  the service-level `secrets`/`configs` registry already runs via
+  `stores.py`, though build's own reference has no `uid`/`gid`/`mode` fields
+  to also check). Every mapping-shaped value's own keys
   are checked too: `build`'s contents are the one region `require_string_keys`
   does not cover through the general per-service sweep (see Top-level keys,
   below), so each of these validators checks its own keys directly — matching
@@ -376,19 +380,41 @@ slot (`architecture/glossary.md`).
   would be an over-rejection).
 - **Per-service `networks`:** long (mapping) form contributes each entry's
   `aliases` to the same resolvable-name set as `hostname`/`container_name`;
-  short (list) form carries none. Must be a list or mapping. A long-form
-  *value* that isn't itself a mapping (e.g. `networks: {default: true}`) is
-  lenient, not rejected — it just contributes no aliases. When present,
-  `aliases` must be a list of strings. Every network a service names must be
-  declared in the top-level `networks` block, or `validate()` raises
-  ("refers to undefined network") — the top-level block's *contents* are
-  still ignored (see Top-level keys, above), only the reference is checked,
-  because a document naming an undeclared network is one `docker compose
-  config` refuses. A short (list) form's entry must itself be a string
-  before that membership check runs — a still-unvalidated entry (e.g. a
-  dict, the same list/map YAML slip `depends_on`/`command`/`environment` all
-  suffer) used to hash straight into a `set` and crash raw (`TypeError:
-  unhashable type`) instead of failing clean.
+  short (list) form carries none. Must be a list or mapping. Every network a
+  service names must be declared in the top-level `networks` block, or
+  `validate()` raises ("refers to undefined network") — the top-level
+  block's *contents* are still ignored (see Top-level keys, above), only the
+  reference is checked, because a document naming an undeclared network is
+  one `docker compose config` refuses. A short (list) form's entry must
+  itself be a string before that membership check runs — a still-unvalidated
+  entry (e.g. a dict, the same list/map YAML slip `depends_on`/`command`/
+  `environment` all suffer) used to hash straight into a `set` and crash raw
+  (`TypeError: unhashable type`) instead of failing clean.
+
+  A long-form entry's *value* is a STRICT typed sub-schema, unlike the
+  ignored top-level `networks:` block — Docker refuses both a non-mapping
+  value (`networks: {n: somevalue}`) and an unknown sub-key (`additional
+  properties 'x' not allowed`), checked document-wide over every service
+  (`_validate_network_entries`, `compose2pod/parsing.py`), mirroring
+  `_validate_network_references`'s own document-wide scope rather than the
+  startup-order closure `emit.py` computes at emit time. `null` is accepted
+  (means "use default settings", same as an explicit `{}`). The full valid
+  key set — measured against `docker compose config` v5.1.2, cross-checked
+  against the upstream compose-spec JSON schema — is exactly nine, plus any
+  `x-`-prefixed extension key: `aliases` (list of strings — the same grammar
+  `graph._host_names` already enforces for its own alias extraction, checked
+  twice by design, defense in depth, same pattern as `extra_hosts`);
+  `ipv4_address`, `ipv6_address`, `mac_address`, `interface_name` (a plain
+  string, content unchecked); `priority`, `gw_priority` (a *native* number
+  only — unlike most numeric grammars in `values.py`, a numeric string is
+  refused, and unlike them, a `${VAR}` reference is never carved out:
+  interpolation only ever produces a string, which this grammar never
+  accepts, so the rejection holds for every possible value of the variable,
+  not just the reading host's — a fact about the document, not the host);
+  `link_local_ips` (list of strings); `driver_opts` (a mapping, each value a
+  number or string — keys otherwise unchecked, matching Docker; compose2pod
+  never reads a network entry's contents at emit time regardless of the
+  checked shape).
 
 ## Extends
 

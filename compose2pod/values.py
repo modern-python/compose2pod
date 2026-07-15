@@ -138,6 +138,28 @@ def validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - 
     raise UnsupportedComposeError(msg)
 
 
+def validate_native_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Check `value` is a native int or float -- unlike `validate_number`, no string form is accepted.
+
+    Measured against `docker compose config` v5.1.2 for a service's long-form
+    network entry `priority`/`gw_priority`: the field has no number-or-string
+    union the way `cpus`/`mem_limit` do -- `priority: "5"` is refused ('must
+    be a number') even though the identical native `5` is accepted.
+
+    `has_variable` is deliberately NOT checked here, unlike every other
+    grammar in this module. Compose interpolation only ever turns a `${VAR}`
+    reference into another string, and this grammar never accepts a string --
+    so no possible value of the variable can make Docker accept the document.
+    The "must be a number" verdict is already a fact about the document alone,
+    not the reading host's environment, and carving it out here would be a
+    false green, not a legitimate deferral.
+    """
+    if _is_int(value) or (isinstance(value, float) and math.isfinite(value)):
+        return
+    msg = f"service {name!r}: {key!r} must be a number"
+    raise UnsupportedComposeError(msg)
+
+
 def validate_count(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     """Check `value` is an int64 count field: cpu_shares, cpu_quota, cpu_period, pids_limit.
 
