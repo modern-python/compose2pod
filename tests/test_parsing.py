@@ -861,17 +861,28 @@ class TestSweepServiceNamedExtensionPrefix:
 
 
 class TestSweepSkipsUnreadRegions:
-    """`build`'s contents and the ignored top-level `networks`/`volumes` blocks are never read.
+    """`build`'s own `x-` extensions and the ignored top-level `networks`/`volumes` blocks are never read.
 
     compose2pod accepts these regions but never inspects their contents (see
     architecture/supported-subset.md), so a non-string key inside them can
-    never reach the generated script and must not be rejected -- Docker
-    itself accepts them. The `environment`/other emitted-map divergence
-    (`{3306: db}` rejected) is unaffected: those keys do reach the script.
+    never reach the generated script and must not be rejected. The
+    `environment`/other emitted-map divergence (`{3306: db}` rejected) is
+    unaffected: those keys do reach the script.
+
+    `build`'s own *known* keys are the one exception, and a narrower one than
+    this class used to claim: their values are now type-checked against
+    Docker's own grammar for each (Task 9), which includes checking that a
+    mapping-shaped value's own keys are strings -- Docker itself refuses a
+    non-string key in `build.args`/`labels`/`ssh`/etc. (`non-string key in
+    services.app.build.args: true`, measured against `docker compose config`
+    v5.1.2), even though compose2pod still never emits any of it. See
+    `test_build_args_non_string_key_rejected`, below `_validate_build`'s other
+    tests. Only a build key `docker compose config` does not itself define --
+    an `x-` extension -- stays genuinely unread.
     """
 
-    def test_build_contents_non_string_key_accepted(self) -> None:
-        compose = {"services": {"app": {"build": {"context": ".", "args": {True: 1}}}}}
+    def test_build_x_prefixed_extension_contents_accepted(self) -> None:
+        compose = {"services": {"app": {"build": {"context": ".", "x-custom": {True: 1}}}}}
         assert validate(compose) == []
 
     def test_top_level_volumes_contents_non_string_key_accepted(self) -> None:
@@ -1152,6 +1163,173 @@ def test_build_mapping_accepts_full_known_key_set_and_x_prefix() -> None:
     }
     validate({"services": {"app": {"build": known}}})
     validate({"services": {"app": {"build": {"dockerfile": "Dockerfile"}}}})
+
+
+# --- build value grammars (Task 9): Task 4 only checked build's key NAMES; these
+# check each known key's VALUE against Docker's own grammar for it. compose2pod
+# still never emits any of it (image_for always substitutes --image), but a
+# malformed value is still a document `docker compose config` refuses. Every
+# grammar below was measured against `docker compose config` v5.1.2 with the
+# same YAML text fed to both oracles (`compose2pod.cli._read_compose` +
+# `compose2pod.parsing.validate` vs `docker compose config`).
+
+
+def _build(key: str, value: object) -> dict:
+    return {"services": {"app": {"build": {"context": ".", key: value}}}}
+
+
+@pytest.mark.parametrize("key", ["context", "dockerfile", "dockerfile_inline", "target", "network", "isolation"])
+def test_build_string_keys_accept_string(key: str) -> None:
+    assert validate(_build(key, "value")) == []
+
+
+@pytest.mark.parametrize("key", ["context", "dockerfile", "dockerfile_inline", "target", "network", "isolation"])
+@pytest.mark.parametrize("bad", [3, ["a"], {"a": "b"}])
+def test_build_string_keys_reject_non_string(key: str, bad: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match=key):
+        validate(_build(key, bad))
+
+
+def test_build_shm_size_accepts_int_and_size_string_and_whole_float() -> None:
+    assert validate(_build("shm_size", 100)) == []
+    assert validate(_build("shm_size", "100mb")) == []
+    assert validate(_build("shm_size", 100.0)) == []
+
+
+@pytest.mark.parametrize("bad", ["abc", "", ["a"], {"a": "b"}, 0.5])
+def test_build_shm_size_rejects_bad_values(bad: object) -> None:
+    # 0.5: build.shm_size refuses ANY fractional float, whole or not -- measured
+    # against `docker compose config` v5.1.2. Unlike the top-level `shm_size`
+    # service key (`values.validate_size`'s default `allow_fractional=True`),
+    # build's own `shm_size` only accepts a *whole* native float, matching
+    # `allow_fractional=False` (the same flag `mem_reservation` uses).
+    with pytest.raises(UnsupportedComposeError, match="shm_size"):
+        validate(_build("shm_size", bad))
+
+
+@pytest.mark.parametrize("key", ["no_cache", "pull", "privileged"])
+def test_build_bool_keys_are_strict(key: str) -> None:
+    assert validate(_build(key, True)) == []
+    assert validate(_build(key, False)) == []
+    with pytest.raises(UnsupportedComposeError, match=key):
+        validate(_build(key, 1))
+    with pytest.raises(UnsupportedComposeError, match=key):
+        # Deferred over-rejection, matching the top-level boolean keys'
+        # documented limitation (planning/deferred.md): Docker itself casts
+        # this quoted string, compose2pod does not yet.
+        validate(_build(key, "true"))
+
+
+@pytest.mark.parametrize("key", ["no_cache", "pull", "privileged"])
+def test_build_bool_keys_accept_a_variable_reference(key: str) -> None:
+    # `${VAR}` on a build boolean key is host-state-dependent -- measured:
+    # `MYVAR=true` is accepted, unset (blank) or `MYVAR=banana` is refused.
+    # compose2pod defers to script-run time, the same carve-out every other
+    # value grammar in `values.py` applies via `has_variable`.
+    assert validate(_build(key, "${MYVAR}")) == []
+
+
+@pytest.mark.parametrize("key", ["cache_from", "cache_to", "tags", "platforms", "entitlements"])
+def test_build_string_list_keys(key: str) -> None:
+    assert validate(_build(key, ["a", "b"])) == []
+    assert validate(_build(key, [])) == []
+    for bad in ("a", 3, ["a", 3], {"a": "b"}):
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_build(key, bad))
+
+
+@pytest.mark.parametrize("key", ["args", "labels", "ssh"])
+def test_build_list_or_map_keys(key: str) -> None:
+    # Measured: `ssh` shares `args`/`labels`' exact grammar (a list of
+    # 'KEY[=value]' strings -- a bare 'KEY' with no '=' is fine -- or a
+    # mapping with scalar-or-null values), NOT the plain list-of-strings
+    # shape `build.ssh: [default=/path]`'s docs might suggest at a glance;
+    # `docker compose config` also accepts `build.ssh: {default: /path}`.
+    assert validate(_build(key, ["KEY=val"])) == []
+    assert validate(_build(key, ["KEY"])) == []
+    assert validate(_build(key, {"KEY": "val"})) == []
+    assert validate(_build(key, {"KEY": 3})) == []
+    assert validate(_build(key, {"KEY": None})) == []
+    for bad in ("bare", 3, [3], {"KEY": ["a"]}):
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_build(key, bad))
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate(_build(key, {True: "val"}))
+
+
+def test_build_args_non_string_key_rejected() -> None:
+    # See TestSweepSkipsUnreadRegions's docstring: build bypasses the general
+    # string-key sweep (`_sweep_service` skips build's contents), so each
+    # mapping-shaped build validator checks its own keys. Measured: Docker
+    # refuses this ('non-string key in services.app.build.args: true').
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate(_build("args", {True: "x"}))
+
+
+def test_build_additional_contexts() -> None:
+    assert validate(_build("additional_contexts", ["KEY=val"])) == []
+    assert validate(_build("additional_contexts", {"KEY": "val"})) == []
+    # Unlike args/labels/ssh, a bare 'KEY' (no '=') is refused, and a
+    # non-string map value is refused too -- both measured. The map-value
+    # case is not a mere schema nicety: docker compose config's own resolver
+    # panics on a native number there (compose-go v2.10.2, a real bug in the
+    # dependency, but its exit code is still nonzero -- 'docker rejects' by
+    # the harness's own definition), so accepting it here would be a document
+    # already broken upstream.
+    for bad in (["KEY"], {"KEY": 3}, {"KEY": True}, {"KEY": None}, "bare", 3):
+        with pytest.raises(UnsupportedComposeError, match="additional_contexts"):
+            validate(_build("additional_contexts", bad))
+
+
+def test_build_extra_hosts() -> None:
+    assert validate(_build("extra_hosts", ["myhost=1.2.3.4"])) == []
+    assert validate(_build("extra_hosts", ["myhost:1.2.3.4"])) == []
+    assert validate(_build("extra_hosts", {"myhost": "1.2.3.4"})) == []
+    # A map value may be a list of addresses (multiple IPs for one host) --
+    # measured; unlike args/labels/ssh/additional_contexts, a plain number,
+    # bool, or null map value is refused: build.extra_hosts values must be a
+    # string or list of strings, nothing else.
+    assert validate(_build("extra_hosts", {"myhost": ["1.2.3.4", "5.6.7.8"]})) == []
+    # An empty address list is accepted too -- measured (not obviously so:
+    # zero addresses for a host reads like it should be refused, but Docker
+    # takes it, so over-rejecting it would be exactly the taste-not-podman
+    # mistake the parity rule forbids).
+    assert validate(_build("extra_hosts", {"myhost": []})) == []
+    for bad in (["myhost"], {"myhost": 3}, {"myhost": ["1.2.3.4", 3]}, "bare", 3):
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts"):
+            validate(_build("extra_hosts", bad))
+
+
+_BUILD_SECRETS_STORE = {"mysec": {"environment": "MYVAR"}}
+
+
+def _build_secrets(value: object) -> dict:
+    doc = _build("secrets", value)
+    doc["secrets"] = _BUILD_SECRETS_STORE
+    return doc
+
+
+def test_build_secrets() -> None:
+    assert validate(_build_secrets(["mysec"])) == []
+    assert validate(_build_secrets([{"source": "mysec"}])) == []
+    assert validate(_build_secrets([{"source": "mysec", "target": "/run/secrets/x"}])) == []
+    for bad in ("mysec", 3, [3], [{"bogus": "mysec"}], [{"source": 3}], [{"target": 3}]):
+        with pytest.raises(UnsupportedComposeError, match="secrets"):
+            validate(_build_secrets(bad))
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate(_build_secrets([{True: "mysec"}]))
+
+
+def test_build_ulimits() -> None:
+    # Same grammar as the top-level `ulimits` service key (`keys.validate_ulimits`,
+    # reused directly) -- measured identical against `docker compose config`.
+    assert validate(_build("ulimits", {"nofile": 100})) == []
+    assert validate(_build("ulimits", {"nofile": {"soft": 100, "hard": 200}})) == []
+    for bad in (["a"], "a", 3, {"nofile": 1.5}, {"nofile": {"soft": 100}}):
+        with pytest.raises(UnsupportedComposeError, match="ulimit"):
+            validate(_build("ulimits", bad))
+    with pytest.raises(UnsupportedComposeError, match="ulimit"):
+        validate(_build("ulimits", {True: 100}))
 
 
 def test_image_rejects_empty_string() -> None:

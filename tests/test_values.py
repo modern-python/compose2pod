@@ -197,7 +197,7 @@ def test_validate_integer_rejects_digit_grouping(value: str) -> None:
 # Measured against `docker compose config` v5.1.2: ulimits' int64 field rejects
 # any float outright ("invalid type float64 for external"), whole or fractional
 # -- unlike oom_score_adj/mem_swappiness/mem_reservation. Strict is the default
-# so a bare `validate_integer` call (as `_validate_ulimits` makes) stays exact.
+# so a bare `validate_integer` call (as `validate_ulimits` makes) stays exact.
 def test_validate_integer_default_rejects_whole_float() -> None:
     with pytest.raises(UnsupportedComposeError, match="nofile"):
         validate_integer("app", "nofile", 60.0)

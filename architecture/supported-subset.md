@@ -88,8 +88,10 @@ its *value* is swept with the ordinary `x-`-skipping walk.
 **Skipped**, because compose2pod never emits from these regions, so a
 non-string key inside one can never reach the generated script: `x-` blocks
 (top-level and per-service — user payload by design, though the `x-` key
-itself is still checked); `build`'s own contents (never read — see `build`,
-below); and the ignored top-level `volumes` block. The top-level `networks`
+itself is still checked); `build`'s own contents (never emitted — see
+`build`, below, for the narrower value-*type* check that covers a
+mapping-shaped build key's own keys through a different path than this
+sweep); and the ignored top-level `volumes` block. The top-level `networks`
 block is narrower: its contents stay unread, but its own *keys* are read —
 see Per-service `networks`, below — to check that a service's `networks`
 reference names something declared; that check only ever hashes a key into
@@ -175,9 +177,10 @@ empty label.
   `env_file`, `volumes`, `healthcheck`, `depends_on`, `networks`, `hostname`,
   `container_name`, `tmpfs`, `secrets`, `configs`, plus the declarative
   registry and resource-limit keys below. compose2pod never builds: a
-  `build` section is accepted but its contents (context, dockerfile, args)
-  are never read — `image_for` (`compose2pod/emit.py`) runs the CI image
-  supplied via `--image` for any service that has one.
+  `build` section is accepted, and each known key's shape and value is
+  checked against Docker's own grammar for it (see `build`, below), but none
+  of it is ever *used* — `image_for` (`compose2pod/emit.py`) runs the CI
+  image supplied via `--image` for any service that has one.
 - **Ignored (warns):** `ports`, `restart`, `stdin_open`, `tty`,
   `stop_signal`, `stop_grace_period`, `profiles` — meaningless or irrelevant
   inside a single shared-namespace pod. Ignoring one at *emit* does not mean
@@ -263,10 +266,13 @@ slot (`architecture/glossary.md`).
   string, or a non-string `image` with no `build`, raises. A non-string
   `image` alongside `build` is accepted — the CI image always wins, so
   `image_for` never reads it.
-- **`build`:** a string or mapping — its contents are never read (see
-  `image`, above), only the shape, since a document `docker compose config`
-  refuses (e.g. `build: 3`) must still be refused here. A mapping's own
-  top-level *key names* are checked against Docker's schema for it too
+- **`build`:** a string or mapping — its contents are never *used*: `image_for`
+  always substitutes the CI image, so nothing under `build:` ever reaches the
+  generated script, whatever it validates as. A document `docker compose
+  config` refuses (e.g. `build: 3`) must still be refused here, so the shape,
+  each known key's *name*, and — since `2026-07-15.08` — each known key's
+  *value* are all checked, even though none of it is emitted. A mapping's own
+  top-level key names are checked against Docker's schema for it
   (`_DOCKER_BUILD_KEYS`, `compose2pod/parsing.py` — 22 keys plus any
   `x-`-prefixed extension key, measured against `docker compose config`
   v5.1.2 by probing each key individually): `additional_contexts`, `args`,
@@ -274,10 +280,34 @@ slot (`architecture/glossary.md`).
   `entitlements`, `extra_hosts`, `isolation`, `labels`, `network`,
   `no_cache`, `platforms`, `privileged`, `pull`, `secrets`, `shm_size`,
   `ssh`, `tags`, `target`, `ulimits`. `context` is not required —
-  `build: {dockerfile: Dockerfile}` alone is accepted. Only the key names
-  are checked; a key's *value* is never read or validated, since checking it
-  would risk over-rejecting a file Docker runs for no benefit — compose2pod
-  never uses it.
+  `build: {dockerfile: Dockerfile}` alone is accepted.
+
+  Each key's value is checked against Docker's own grammar for it, grouped
+  into six measured clusters: a **string** (`context`, `dockerfile`,
+  `dockerfile_inline`, `target`, `network`, `isolation`); a **size**
+  (`shm_size` — a number or size string, but unlike the top-level `shm_size`
+  service key, a *fractional* native float is refused, whole or not); a
+  strict **bool** (`no_cache`, `pull`, `privileged` — a quoted `"true"` is a
+  deferred over-rejection, same limitation as the top-level six boolean keys,
+  `planning/deferred.md`; a `${VAR}` reference passes through, since Docker's
+  own cast of it is host-state-dependent); a **list of strings** (`cache_from`,
+  `cache_to`, `tags`, `platforms`, `entitlements`); a **list-or-map**, itself
+  three different grammars (`args`/`labels`/`ssh` share one — a list of
+  `'KEY[=value]'` strings or a mapping with scalar-or-null values, `ssh`
+  included despite reading like a plain list at a glance;
+  `additional_contexts` requires `'='` in every list entry and a plain-string
+  map value; `extra_hosts` accepts either host/IP separator in a list entry
+  and a map value that is a string or list of strings); and **nested**
+  structures (`ulimits` — identical grammar to the top-level `ulimits` service
+  key, via the same `keys.validate_ulimits`; `secrets` — a list of a bare
+  secret-name string or a `{source, target}` mapping, though Docker's further
+  cross-check that `source` names a declared top-level secret is not
+  reproduced here, a narrow known gap). Every mapping-shaped value's own keys
+  are checked too: `build`'s contents are the one region `require_string_keys`
+  does not cover through the general per-service sweep (see Top-level keys,
+  below), so each of these validators checks its own keys directly — matching
+  Docker, which refuses a non-string key inside `build.args`/`labels`/etc. the
+  same as everywhere else.
 - **`command`:** string or list, each list element a string. String form
   runs via `/bin/sh -c`; list form is argv tokens. Any other shape (e.g. a
   mapping, or a list containing one — the classic YAML list/map slip)

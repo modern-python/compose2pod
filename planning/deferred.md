@@ -21,6 +21,12 @@ never written. Every one was measured against `docker compose config` v5.1.2.
   means coercing it *before* emit. `keys._bool` emits `[flag] if value else []`,
   and the non-empty string `"false"` is truthy in Python, so a naive fix would
   emit `--read-only` for a value the user wrote as false. Coerce first, then test.
+  `2026-07-15.08` deliberately kept `build`'s own three boolean keys (`no_cache`,
+  `pull`, `privileged` — under `build:`, not the top-level `privileged` service
+  key) consistent with this same limitation rather than accepting a quoted
+  string there and not here: `build.no_cache: "true"` is refused for the same
+  reason, and a `${VAR}` reference on any of the three is a separate, already-
+  accepted case (host-state-dependent, `values.has_variable`), not this one.
 - **Compound and hour healthcheck durations.** `interval: 1h30m` and `1h` raise;
   Docker accepts both. `1h30m` is 5400 seconds and the value only paces the
   script's polling loop, so podman can honor it. `architecture/supported-subset.md`

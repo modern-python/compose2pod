@@ -7,7 +7,7 @@ from compose2pod import stores, values
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, health_cmd, interval_seconds
-from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS, require_string_keys, validate_map
+from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS, require_string_keys, validate_map, validate_ulimits
 from compose2pod.pod import uses_pod_options, validate_pod_options
 from compose2pod.resources import validate_deploy
 
@@ -145,44 +145,202 @@ def _validate_image(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
+def _validate_build_shm_size(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    # allow_fractional=False: measured against `docker compose config` v5.1.2 --
+    # build.shm_size refuses ANY fractional float (whole or not), unlike the
+    # top-level `shm_size` service key (which keeps validate_size's default,
+    # allow_fractional=True). The same divergence mem_reservation already has
+    # from mem_limit.
+    values.validate_size(name, key, value, allow_fractional=False)
+
+
+def _validate_build_bool(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    """Strict bool for build's own no_cache/pull/privileged -- `${VAR}` passes through.
+
+    A quoted `"true"` is refused, unlike the top-level six boolean keys' deferred
+    limitation note in `planning/deferred.md` (this is the same limitation, just
+    on a different set of keys, kept consistent on purpose). `${VAR}` is
+    different: measured against `docker compose config` v5.1.2, `no_cache:
+    ${MYVAR}` is accepted when `MYVAR=true` and refused when unset or non-boolean
+    -- genuinely host-state-dependent, so it is not this refusal's business
+    (`values.has_variable`, the same carve-out every other grammar in `values.py`
+    applies).
+    """
+    if values.has_variable(value):
+        return
+    if not isinstance(value, bool):
+        msg = f"service {name!r}: build {key!r} must be a boolean"
+        raise UnsupportedComposeError(msg)
+
+
+def _validate_build_map(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    """List-or-map value shared by args/labels/ssh -- reuses `keys.validate_map`'s shape rules.
+
+    Measured against `docker compose config` v5.1.2: `ssh` is not the plain
+    list-of-strings shape a first pass might assume (Docker's own docs show
+    `default | key=/path`) -- `build.ssh: {default: /path}` is accepted too,
+    identically to `args`/`labels`. All three share one grammar: a list of
+    'KEY[=value]' strings (a bare 'KEY' is fine, meaning a null value), or a
+    mapping with scalar-or-null values.
+
+    `require_string_keys` is checked here, not left to `validate_map` alone:
+    `parsing._sweep_service` skips build's contents (see
+    `TestSweepSkipsUnreadRegions` in `tests/test_parsing.py`), so nothing
+    upstream has guaranteed this mapping's keys are strings the way it has for
+    the top-level `labels`/`environment`. Measured: Docker refuses a
+    non-string key here too ('non-string key in services.app.build.args').
+    """
+    if isinstance(value, dict):
+        require_string_keys(f"service {name!r}: build {key!r}", value)
+    validate_map(name, key, value)
+
+
+def _validate_build_additional_contexts(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    """List-or-map value, but stricter than args/labels/ssh in two measured ways.
+
+    A list entry must contain '=' (a bare 'KEY' is refused: "invalid value
+    KEY, expected key=value") -- additional_contexts has no null-value
+    concept the way a build arg can inherit one. A map value must be a plain
+    string -- a number/bool/null passes Docker's own JSON schema (the same
+    scalar-or-null union args/labels/ssh accept) but then crashes Docker's
+    own context-path resolver downstream (`compose-go` v2.10.2: "interface
+    conversion: interface {} is int, not string", exit code 2 -- a real bug
+    in the dependency, but still 'docker rejects' by the harness's own
+    returncode check, so accepting it here would be a document already
+    broken upstream).
+    """
+    if isinstance(value, list):
+        for item in value:
+            if not isinstance(item, str) or "=" not in item:
+                msg = f"service {name!r}: build {key!r} entries must be 'KEY=value' strings"
+                raise UnsupportedComposeError(msg)
+        return
+    if isinstance(value, dict):
+        require_string_keys(f"service {name!r}: build {key!r}", value)
+        for val in value.values():
+            if not isinstance(val, str):
+                msg = f"service {name!r}: build {key!r} values must be strings"
+                raise UnsupportedComposeError(msg)
+        return
+    msg = f"service {name!r}: build {key!r} must be a list or mapping"
+    raise UnsupportedComposeError(msg)
+
+
+def _validate_build_extra_hosts_value(name: str, key: str, val: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    if isinstance(val, str):
+        return
+    if isinstance(val, list) and all(isinstance(item, str) for item in val):
+        return
+    msg = f"service {name!r}: build {key!r} values must be a string or list of strings"
+    raise UnsupportedComposeError(msg)
+
+
+def _validate_build_extra_hosts(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    """List-or-map value: a list entry needs a 'host=ip' or 'host:ip' separator (both accepted, measured).
+
+    A map value may be a single address string, or a list of address strings
+    (one host, multiple IPs) -- but not a number/bool/null, unlike
+    args/labels/ssh's scalar-or-null union. All three shapes measured against
+    `docker compose config` v5.1.2.
+    """
+    if isinstance(value, list):
+        for item in value:
+            if not isinstance(item, str) or ("=" not in item and ":" not in item):
+                msg = f"service {name!r}: build {key!r} entries must be 'host=ip' or 'host:ip' strings"
+                raise UnsupportedComposeError(msg)
+        return
+    if isinstance(value, dict):
+        require_string_keys(f"service {name!r}: build {key!r}", value)
+        for val in value.values():
+            _validate_build_extra_hosts_value(name, key, val)
+        return
+    msg = f"service {name!r}: build {key!r} must be a list or mapping"
+    raise UnsupportedComposeError(msg)
+
+
+_BUILD_SECRET_REF_KEYS = {"source", "target"}
+
+
+def _validate_build_secret_entry(name: str, entry: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    if isinstance(entry, str):
+        return
+    if not isinstance(entry, dict):
+        msg = f"service {name!r}: build 'secrets' entries must be a string or mapping"
+        raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: build 'secrets' entry", entry)
+    unknown = set(entry) - _BUILD_SECRET_REF_KEYS
+    if unknown:
+        msg = f"service {name!r}: build 'secrets' entry: unsupported keys {sorted(unknown)}"
+        raise UnsupportedComposeError(msg)
+    for field in _BUILD_SECRET_REF_KEYS:
+        if field in entry and not isinstance(entry[field], str):
+            msg = f"service {name!r}: build 'secrets' entry {field!r} must be a string"
+            raise UnsupportedComposeError(msg)
+
+
+def _validate_build_secrets(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    """List of secret references: a bare name string, or a {source, target} mapping.
+
+    Docker also cross-checks each `source` against the top-level `secrets:`
+    store, refusing an undeclared name ("refers to undefined build secret") --
+    measured, but not reproduced here: compose2pod never reads `build`'s
+    contents at emit time, and closing that gap would need `_validate_build`
+    to see the whole document rather than one service, which is out of scope
+    for a value-*type* check (see planning/changes -- flagged as a known,
+    narrow residual gap, not invented-and-skipped).
+    """
+    if not isinstance(value, list):
+        msg = f"service {name!r}: build {key!r} must be a list"
+        raise UnsupportedComposeError(msg)
+    for entry in value:
+        _validate_build_secret_entry(name, entry)
+
+
 # Docker's own schema for the long-form `build` mapping -- not compose2pod's:
-# compose2pod never reads any of build's contents (`image_for` always uses the
-# CI image), so nothing here is enumerated because compose2pod cares about it.
-# It exists solely so a bogus key -- a document `docker compose config`
-# refuses ("additional properties '<key>' not allowed") -- is still refused
-# here. Measured against `docker compose config` v5.1.2, each key probed
-# individually. `context` is deliberately not required: `build: {dockerfile:
-# Dockerfile}` alone is accepted. Only the key *names* are checked; the values
-# are never read or validated -- doing so would risk over-rejecting a file
-# Docker runs, for no benefit to compose2pod.
-_DOCKER_BUILD_KEYS = {
-    "additional_contexts",
-    "args",
-    "cache_from",
-    "cache_to",
-    "context",
-    "dockerfile",
-    "dockerfile_inline",
-    "entitlements",
-    "extra_hosts",
-    "isolation",
-    "labels",
-    "network",
-    "no_cache",
-    "platforms",
-    "privileged",
-    "pull",
-    "secrets",
-    "shm_size",
-    "ssh",
-    "tags",
-    "target",
-    "ulimits",
+# compose2pod never uses any of build's contents to construct a command
+# (`image_for` always substitutes the CI image), so nothing here is
+# enumerated because compose2pod itself needs it. It exists so a document
+# `docker compose config` refuses is refused here too -- both a bogus key
+# ("additional properties '<key>' not allowed") and, per key, a bogus value
+# (Task 9 -- Task 4 only closed the key-*name* gap). Measured against `docker
+# compose config` v5.1.2, each key and its value grammar probed individually.
+# `context` is deliberately not required: `build: {dockerfile: Dockerfile}`
+# alone is accepted. A validated value is never read again after this: it
+# still never reaches emit.py, only the gate.
+_DOCKER_BUILD_KEYS: dict[str, Callable[[str, str, Any], None]] = {
+    "additional_contexts": _validate_build_additional_contexts,
+    "args": _validate_build_map,
+    "cache_from": _validate_string_list,
+    "cache_to": _validate_string_list,
+    "context": values.validate_string,
+    "dockerfile": values.validate_string,
+    "dockerfile_inline": values.validate_string,
+    "entitlements": _validate_string_list,
+    "extra_hosts": _validate_build_extra_hosts,
+    "isolation": values.validate_string,
+    "labels": _validate_build_map,
+    "network": values.validate_string,
+    "no_cache": _validate_build_bool,
+    "platforms": _validate_string_list,
+    "privileged": _validate_build_bool,
+    "pull": _validate_build_bool,
+    "secrets": _validate_build_secrets,
+    "shm_size": _validate_build_shm_size,
+    "ssh": _validate_build_map,
+    "tags": _validate_string_list,
+    "target": values.validate_string,
+    "ulimits": validate_ulimits,
 }
 
 
 def _validate_build(name: str, svc: dict[str, Any]) -> None:
-    """Check build is a string or mapping; its contents are never read -- only its shape and key names are checked."""
+    """Check build is a string or mapping; each known key's value is checked against Docker's own grammar for it.
+
+    None of it is ever read again after this -- `image_for` always substitutes
+    the CI image, so a validated value still never reaches the generated
+    script -- but a malformed one is still a document `docker compose config`
+    refuses, so it must be refused here too.
+    """
     if "build" not in svc:
         return
     build = svc["build"]
@@ -195,6 +353,9 @@ def _validate_build(name: str, svc: dict[str, Any]) -> None:
         if unknown:
             msg = f"service {name!r}: build: unsupported keys {sorted(unknown)}"
             raise UnsupportedComposeError(msg)
+        for key, validator in _DOCKER_BUILD_KEYS.items():
+            if key in build:
+                validator(name, key, build[key])
 
 
 def _validate_argv_list(name: str, key: str, value: list[Any]) -> None:

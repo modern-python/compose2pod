@@ -7,11 +7,11 @@ from compose2pod.keys import (
     Expand,
     _merge_map,
     _validate_list,
-    _validate_ulimits,
     concat_list,
     pairs_to_mapping,
     require_string_keys,
     validate_map,
+    validate_ulimits,
 )
 from compose2pod.parsing import SUPPORTED_SERVICE_KEYS
 
@@ -112,7 +112,7 @@ def test_merge_present_iff_list_or_map_shaped(key: str) -> None:
     end up with no merge callable.
     """
     spec = SERVICE_KEYS[key]
-    is_list_or_map_shaped = spec.validate in (_validate_list, validate_map, _validate_ulimits)
+    is_list_or_map_shaped = spec.validate in (_validate_list, validate_map, validate_ulimits)
     assert (spec.merge is not None) == is_list_or_map_shaped
 
 

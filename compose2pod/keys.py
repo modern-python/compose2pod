@@ -271,7 +271,7 @@ def extra_host_entries(value: list[Any] | dict[str, Any]) -> list[tuple[str, str
 
 
 def _validate_pull_policy(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
-    # No `value is None` escape, matching `_validate_ulimits`: the gate refuses a
+    # No `value is None` escape, matching `validate_ulimits`: the gate refuses a
     # null `pull_policy:` outright (`parsing._reject_null_values`), as Docker
     # does, so a null reaching a *shape* validator is a wrong shape like any
     # other. Null policy lives in one place -- the gate -- not in each validator.
@@ -288,15 +288,29 @@ def _emit_pull_policy(value: Any) -> list[Token]:  # noqa: ANN401 - Compose valu
     return ["--pull", PULL_POLICY_MAP[value]] if value is not None else []
 
 
-def _validate_ulimits(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    # No `value is None` escape: the gate refuses a null `ulimits:` outright
-    # (`parsing._reject_null_values`), as Docker does, so a null reaching here
-    # is a wrong shape like any other.
+def validate_ulimits(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Check `value` is a ulimits mapping: name -> int, or name -> {soft, hard} (both int).
+
+    Public (not `_`-prefixed): reused directly by `parsing._validate_build` for
+    `build.ulimits`, which is measured to share this exact grammar with the
+    top-level `ulimits` service key. The `require_string_keys` calls are
+    defense-in-depth for the top-level key -- `parsing._sweep_service` already
+    guarantees string keys there before this ever runs -- but load-bearing for
+    `build.ulimits`: `_sweep_service` skips build's contents, so this is the
+    one place its keys get checked at all (measured: Docker refuses a
+    non-string key here too).
+
+    No `value is None` escape: the gate refuses a null `ulimits:` outright
+    (`parsing._reject_null_values`), as Docker does, so a null reaching here
+    is a wrong shape like any other.
+    """
     if not isinstance(value, dict):
         msg = f"service {name!r}: '{key}' must be a mapping"
         raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: {key!r}", value)
     for limit, spec in value.items():
         if isinstance(spec, dict):
+            require_string_keys(f"service {name!r}: {key!r} ulimit {limit!r}", spec)
             if set(spec) != {"soft", "hard"}:
                 msg = f"service {name!r}: ulimit {limit!r} mapping must have exactly 'soft' and 'hard'"
                 raise UnsupportedComposeError(msg)
@@ -338,7 +352,7 @@ SERVICE_KEYS: dict[str, KeySpec] = {
     "labels": _map("--label"),
     "annotations": _map("--annotation"),
     "pull_policy": KeySpec(validate=_validate_pull_policy, emit=_emit_pull_policy),
-    "ulimits": KeySpec(validate=_validate_ulimits, emit=_emit_ulimits, merge=_merge_map),
+    "ulimits": KeySpec(validate=validate_ulimits, emit=_emit_ulimits, merge=_merge_map),
     "mem_limit": _size("--memory"),
     "memswap_limit": _size("--memory-swap"),
     # allow_fractional=False: measured against `docker compose config` v5.1.2 --
