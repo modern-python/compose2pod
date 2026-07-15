@@ -607,7 +607,7 @@ def _require_string_keys_deep(where: str, node: Any) -> None:  # noqa: ANN401 - 
     that would otherwise disagree: PyYAML's default YAML 1.1 resolver turns
     it into a bool, which Docker's YAML 1.2 parser reads as an ordinary
     string -- refusing that bool here would reject a file Docker runs. The
-    CLI's YAML loader (`_build_yaml_loader`, `compose2pod/cli.py`) closes
+    CLI's YAML loader (`_build_yaml_loader`, `compose2pod/read.py`) closes
     that gap ahead of this function, not inside it: it resolves only
     `true`/`false` as booleans, matching YAML 1.2, so a bare `on`/`off` never
     arrives here as a non-string key at all.

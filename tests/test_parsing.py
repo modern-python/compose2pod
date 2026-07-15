@@ -1213,7 +1213,7 @@ def test_build_mapping_accepts_full_known_key_set_and_x_prefix() -> None:
 # still never emits any of it (image_for always substitutes --image), but a
 # malformed value is still a document `docker compose config` refuses. Every
 # grammar below was measured against `docker compose config` v5.1.2 with the
-# same YAML text fed to both oracles (`compose2pod.cli._read_compose` +
+# same YAML text fed to both oracles (`compose2pod.read.read` +
 # `compose2pod.parsing.validate` vs `docker compose config`).
 
 

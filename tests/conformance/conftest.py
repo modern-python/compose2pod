@@ -17,11 +17,11 @@ from typing import Any
 import pytest
 import yaml
 
-from compose2pod.cli import _read_compose
 from compose2pod.emit import EmitOptions, emit_script
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.extends import resolve_extends
 from compose2pod.parsing import validate
+from compose2pod.read import read
 
 
 _DOCKER = shutil.which("docker")
@@ -100,7 +100,7 @@ def _compose2pod_accepts(text: str, workdir: Path) -> bool:
     would understate compose2pod's strictness and report false violations.
     """
     try:
-        compose = resolve_extends(_read_compose(text, "yaml"))
+        compose = resolve_extends(read(text, "yaml"))
         validate(compose)
         emit_script(
             compose=compose,

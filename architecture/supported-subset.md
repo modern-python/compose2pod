@@ -33,7 +33,7 @@ script runs somewhere else, later, where that precondition may hold.
 
 `tests/conformance/` enforces the hard direction mechanically rather than by
 a hand-maintained table: it runs both `docker compose config` and the real
-`_read_compose → resolve_extends → validate → emit_script` pipeline over a
+`read → resolve_extends → validate → emit_script` pipeline over a
 matrix generated from every key in `SERVICE_KEYS | STRUCTURAL_KEYS |
 IGNORED_SERVICE_KEYS` crossed with a set of hostile shapes, plus a
 hand-authored corpus (`tests/conformance/corpus/`) for what a single-key
@@ -119,8 +119,8 @@ Rejecting a non-string key **matches Docker**, which refuses one too
 What Docker does *not* see is a bare `on:` / `off:` / `yes:` / `no:` as a
 non-string key, because it parses **YAML 1.2**, where each of those is an
 ordinary string. PyYAML implements YAML **1.1**, where each is a *boolean* —
-so the CLI loads YAML with a 1.2-style boolean resolver (`_build_yaml_loader`,
-`compose2pod/cli.py`), and only `true`/`false` resolve as booleans. Without it,
+so `read()` loads YAML with a 1.2-style boolean resolver (`_build_yaml_loader`,
+`compose2pod/read.py`), and only `true`/`false` resolve as booleans. Without it,
 `environment: {on: 1}` would arrive as the key `True` and be refused — a file
 Docker runs — and the *value* `SSL: on` would reach the container as `SSL=true`
 rather than `SSL=on`. The spelling cannot be recovered downstream: once the
