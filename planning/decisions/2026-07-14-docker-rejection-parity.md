@@ -1,6 +1,6 @@
 ---
 status: accepted
-summary: A document `docker compose config` rejects must be rejected here too; one it accepts is accepted whenever podman can express it, and where it cannot yet, that is a tracked limitation rather than a defect. Binds only on the document's own content; enforced by a differential conformance harness.
+summary: A document `docker compose config` rejects must be rejected here too (closed across every value/reference position the harness and deep sweeps reach; the one known residual, the non-target dependency graph, is closure-scoped by design and tracked); one it accepts is accepted whenever podman can express it, else a tracked limitation. Binds only on the document's own content; enforced by a differential conformance harness.
 supersedes: null
 superseded_by: null
 ---
@@ -41,14 +41,40 @@ is what a missing invariant looks like from the outside. A measured sweep (see
 
 ## Decision & rationale
 
-**The hard rule (soundness).** `accepted(compose2pod) ⊆ accepted(docker)`. No
-exceptions. compose2pod is a drop-in replacement for `docker compose` on
-rootless runners: the file it converts is the file the developer runs locally.
-Accepting a document Docker refuses emits a script for a file that is already
-broken upstream, turning a hard error into a green CI run. That false green is
-the single failure the gate exists to prevent, so the rule carries no residue —
-`2026-07-14.10` writes the four value grammars (size, number, duration, port)
-needed to make it literally true rather than approximately true.
+**The hard rule (soundness).** `accepted(compose2pod) ⊆ accepted(docker)`.
+compose2pod is a drop-in replacement for `docker compose` on rootless runners:
+the file it converts is the file the developer runs locally. Accepting a document
+Docker refuses emits a script for a file that is already broken upstream, turning
+a hard error into a green CI run. That false green is the single failure the gate
+exists to prevent. This is the direction that must never regress, and the
+conformance harness (`tests/conformance/`) exists to keep it from doing so.
+
+**What the rule covers, and its one known residual.** The audit
+(`audits/2026-07-14-docker-rejection-parity.md`) was explicit that its 113
+measured divergences were "a floor, not a total" — a single-key matrix cannot
+reach every nested or cross-document position. The closure work took that floor
+down to zero across every position the harness and a series of deep controller
+sweeps could reach: the value grammars (`2026-07-14.10`, `.11`), the ignored and
+structural keys, `deploy.resources`, healthcheck scalars, `build` values, the
+`ports`/`networks`/`extra_hosts`/secret long-form and nested schemas, the
+top-level `networks`/`volumes` definitions, `depends_on` long-form, top-level
+scalar-key types, and named-volume references. The value-grammar surface is
+soundness-complete — an adversarial review of ~60 hostile grammar probes found
+nothing.
+
+**One residual is left open by design, not oversight:** the **non-target
+dependency graph**. `docker compose config` validates `depends_on` existence and
+cycles across the *whole document*; compose2pod validates only the **target's
+dependency closure** (`startup_order`), because a service outside the closure
+never joins the pod and never runs — the same closure-scoping that governs
+add-host, stores, and pod options (`architecture/supported-subset.md`). So a
+`depends_on` naming a missing service, or a dependency cycle, *among services the
+target never reaches* is accepted here and rejected by Docker. This is the honest
+boundary between "reject every broken document" and "don't validate what never
+runs." It is catalogued in `planning/deferred.md` with a revisit trigger (a
+document-wide pre-validation pass, independent of the closure, would close it),
+and it is the single known place the hard rule does not hold — named here rather
+than papered over.
 
 **The second rule: podman decides, not documentation.** An earlier draft of this
 decision said an over-rejection was fine "as long as it is declared". That test
@@ -111,3 +137,8 @@ plain CI job.
 - **A refusal is justified by "we don't parse that yet" rather than by podman.**
   That is the failure mode the second rule exists to catch: the refusal is a
   limitation to be tracked and worked off, not a design position to be defended.
+- **A user hits the non-target dependency-graph residual** — a real document
+  whose `depends_on` names a missing service, or forms a cycle, outside the
+  target's closure, and who is surprised compose2pod ran it green. That is the
+  signal to add the document-wide `depends_on` existence + cycle pass and retire
+  the residual (see `planning/deferred.md`).
