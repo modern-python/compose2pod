@@ -224,7 +224,10 @@ class TestResolveExtends:
                 "web": {"extends": {"service": "base"}, "environment": "NOT_A_MAP"},
             }
         }
-        with pytest.raises(UnsupportedComposeError, match="cannot merge 'environment' across incompatible forms"):
+        # environment is now a registry key: the merge validates each side first
+        # (like labels/annotations), so a non-mapping local is refused by
+        # validate_map before the structural "cannot merge" path is reached.
+        with pytest.raises(UnsupportedComposeError, match="'environment' must be a list or mapping"):
             resolve_extends(doc)
 
     def test_diamond_inheritance_resolves_base_once(self) -> None:

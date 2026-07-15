@@ -10,7 +10,7 @@ from compose2pod import stores
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
-from compose2pod.keys import SERVICE_KEYS, Expand, Token, key_value_pairs
+from compose2pod.keys import SERVICE_KEYS, Expand, Token
 from compose2pod.parsing import validate
 from compose2pod.pod import pod_create_flags
 from compose2pod.resources import deploy_resource_flags
@@ -69,12 +69,9 @@ def _health_flags(healthcheck: dict[str, Any]) -> list[Token]:
     return flags
 
 
-def _env_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
-    """-e and --env-file flag tokens."""
+def _env_file_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
+    """--env-file flag tokens. `environment` is a SERVICE_KEYS registry key (_map("-e"))."""
     flags: list[Token] = []
-    # A null environment value means "pass KEY through from the host" (bare `-e KEY`).
-    for pair in key_value_pairs(svc.get("environment") or {}):
-        flags += ["-e", Expand(value=str(pair))]
     env_files = svc.get("env_file") or []
     if isinstance(env_files, str):
         env_files = [env_files]
@@ -109,7 +106,7 @@ def _volume_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
 def run_flags(name: str, svc: dict[str, Any], pod: str, project_dir: str) -> list[Token]:
     """Flag tokens (unquoted) for `podman run` of one service."""
     flags: list[Token] = ["--pod", pod, "--name", f"{pod}-{name}"]
-    flags += _env_flags(svc, project_dir)
+    flags += _env_file_flags(svc, project_dir)
     flags += _volume_flags(svc, project_dir)
     flags += _health_flags(svc.get("healthcheck") or {})
     for key, spec in SERVICE_KEYS.items():

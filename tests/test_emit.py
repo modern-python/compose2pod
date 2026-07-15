@@ -28,10 +28,11 @@ class TestRunFlags:
     def test_db_flags(self, chats_compose: dict) -> None:
         flags = run_flags("db", chats_compose["services"]["db"], "test-pod", "/builds/chats")
         assert flags[:4] == ["--pod", "test-pod", "--name", "test-pod-db"]
-        assert flags[4:6] == ["-e", Expand(value="POSTGRES_PASSWORD=password")]
-        assert flags[6:8] == ["--health-cmd", Expand(value="pg_isready -U database -d database")]
-        assert flags[8:10] == ["--health-timeout", "5s"]
-        assert flags[10:12] == ["--health-retries", "15"]  # fix #2
+        # environment is a registry key now, emitted after the healthcheck flags.
+        assert flags[4:6] == ["--health-cmd", Expand(value="pg_isready -U database -d database")]
+        assert flags[6:8] == ["--health-timeout", "5s"]
+        assert flags[8:10] == ["--health-retries", "15"]  # fix #2
+        assert flags[10:12] == ["-e", Expand(value="POSTGRES_PASSWORD=password")]
 
     def test_start_period_is_passed_through(self) -> None:
         svc = {"image": "x", "healthcheck": {"test": "true", "start_period": "30s"}}

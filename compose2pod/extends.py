@@ -3,7 +3,7 @@
 from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import SERVICE_KEYS, as_list, pairs_to_mapping, split_extra_host
+from compose2pod.keys import SERVICE_KEYS, as_list, split_extra_host
 
 
 # Merge policy for keys with a SERVICE_KEYS KeySpec comes from spec.merge (see
@@ -11,7 +11,7 @@ from compose2pod.keys import SERVICE_KEYS, as_list, pairs_to_mapping, split_extr
 # have no KeySpec. Both categories obey one rule: a merge may normalize a value
 # only through a form that key actually has, so it can never accept a shape the
 # gate would reject standalone.
-_STRUCTURAL_MERGE_KEYS = {"environment", "extra_hosts", "healthcheck", "depends_on"}
+_STRUCTURAL_MERGE_KEYS = {"extra_hosts", "healthcheck", "depends_on"}
 _STRUCTURAL_CONCAT_KEYS = {"secrets", "configs", "volumes", "tmpfs", "env_file"}
 
 # The only concat keys Compose gives a bare-string form. The gate accepts a
@@ -90,16 +90,17 @@ def _as_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa: ANN
     """Normalize a structural mapping-merge key's value to a mapping.
 
     List form is accepted for exactly the keys Compose defines one for --
-    `environment`, `extra_hosts`, `depends_on` -- each through the normalizer
-    that key's own list form actually needs. `healthcheck` has no list form, so
-    a list is refused rather than coerced: a merge must not accept a shape the
-    gate would reject standalone (see `_merge`).
+    `extra_hosts`, `depends_on` -- each through the normalizer that key's own
+    list form actually needs. `environment` used to be handled here too, but
+    it is now a `SERVICE_KEYS` registry key (`_map("-e")`) whose own
+    `merge=_merge_map` branch in `_merge` wins first, so this function never
+    sees it. `healthcheck` has no list form, so a list is refused rather than
+    coerced: a merge must not accept a shape the gate would reject standalone
+    (see `_merge`).
     """
     if isinstance(value, dict):
         return value
     if isinstance(value, list):
-        if key == "environment":
-            return pairs_to_mapping(name, key, value)
         if key == "extra_hosts":
             return _extra_hosts_to_mapping(name, value)
         if key == "depends_on":
