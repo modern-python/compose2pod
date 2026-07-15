@@ -71,8 +71,14 @@ class TestValidate:
             validate(compose)
 
     def test_named_volume_is_accepted(self) -> None:
-        compose = {"services": {"db": {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}}}
-        assert validate(compose) == []
+        # A named volume must be declared top-level (see
+        # test_service_named_volume_must_be_declared_top_level), which itself
+        # carries the usual "ignoring top-level 'volumes'" warning.
+        compose = {
+            "services": {"db": {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}},
+            "volumes": {"pgdata": None},
+        }
+        assert any("volumes" in w for w in validate(compose))
 
     def test_long_volume_syntax_raises(self) -> None:
         compose = {"services": {"app": {"image": "x", "volumes": [{"type": "bind", "source": ".", "target": "/s"}]}}}
@@ -111,6 +117,24 @@ class TestValidate:
     def test_unknown_top_level_key_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="foo"):
             validate({"services": {"app": {"image": "x"}}, "foo": {}})
+
+    def test_top_level_name_non_string_raises(self) -> None:
+        # Measured: `docker compose config` refuses `name: 123` ("name must
+        # be a string") -- a bare `name:` (null) refuses the same way, one
+        # isinstance check reproduces both.
+        with pytest.raises(UnsupportedComposeError, match="'name' must be a string"):
+            validate({"services": {"app": {"image": "x"}}, "name": 123})
+        with pytest.raises(UnsupportedComposeError, match="'name' must be a string"):
+            validate({"services": {"app": {"image": "x"}}, "name": None})
+
+    def test_top_level_version_non_string_raises(self) -> None:
+        # Measured: `docker compose config` refuses `version: 123` the same
+        # way ("version must be a string").
+        with pytest.raises(UnsupportedComposeError, match="'version' must be a string"):
+            validate({"services": {"app": {"image": "x"}}, "version": 123})
+
+    def test_top_level_name_and_version_strings_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x"}}, "name": "valid-name", "version": "3.8"}) == []
 
     def test_non_string_top_level_key_raises_instead_of_crashing_raw(self) -> None:
         # PyYAML routinely produces non-string keys (int, or a YAML-1.1 bool
@@ -1400,6 +1424,26 @@ def test_service_network_must_be_declared_top_level() -> None:
     validate({"services": {"app": {"image": "nginx", "networks": ["backend"]}}, "networks": {"backend": None}})
 
 
+def test_service_network_default_is_implicitly_declared() -> None:
+    # `default` is Docker's implicit network -- always available, never needs
+    # a top-level `networks:` block. Measured against `docker compose config`
+    # v5.1.2: `networks: [default]` with NO top-level 'networks:' block
+    # ACCEPTS (previously refused here as "undefined network default" -- the
+    # one real over-rejection this task fixes). Every other undeclared name,
+    # including the other two Docker-reserved ones, still REJECTS.
+    validate(_doc(networks=["default"]))
+    for reserved in ("host", "none"):
+        with pytest.raises(UnsupportedComposeError, match="undefined network"):
+            validate(_doc(networks=[reserved]))
+
+
+def test_service_network_default_explicit_declaration_still_works() -> None:
+    # Declaring 'default' explicitly at the top level is legal too, and a
+    # no-op alongside the implicit declaration.
+    compose = {"services": {"app": {"image": "nginx", "networks": ["default"]}}, "networks": {"default": None}}
+    assert any("networks" in w for w in validate(compose))
+
+
 def test_service_network_list_entry_must_be_a_string() -> None:
     # Same list/map YAML slip as `depends_on`/`command`/`environment`. Used to
     # crash raw (TypeError: unhashable type: 'dict') from inside validate()
@@ -1420,6 +1464,53 @@ def test_top_level_networks_list_form_rejected() -> None:
     # unhashable list entry before this guard existed.
     compose = {"services": {"app": {"image": "nginx"}}, "networks": [{"a": 1}]}
     with pytest.raises(UnsupportedComposeError, match="top-level 'networks' must be a mapping"):
+        validate(compose)
+
+
+def test_service_named_volume_must_be_declared_top_level() -> None:
+    # Mirrors test_service_network_must_be_declared_top_level -- measured
+    # against `docker compose config` v5.1.2: `volumes: [data:/var]` with no
+    # top-level `volumes:` block REJECTS ("refers to undefined volume data").
+    with pytest.raises(UnsupportedComposeError, match="undefined volume 'data'"):
+        validate(_doc(volumes=["data:/var"]))
+    validate({"services": {"app": {"image": "nginx", "volumes": ["data:/var"]}}, "volumes": {"data": None}})
+
+
+def test_bind_mount_and_anonymous_volumes_need_no_declaration() -> None:
+    # Neither form names a volume at all -- no top-level 'volumes:' block
+    # exists in any of these documents, and none is required.
+    validate(_doc(volumes=["./host:/var"]))
+    validate(_doc(volumes=["/abs:/var"]))
+    validate(_doc(volumes=["/container_only"]))
+
+
+def test_named_volume_declared_external_still_counts_as_declared() -> None:
+    # `external: true` is still a declaration as far as the reference check is
+    # concerned -- Docker treats it as "must already exist", but the
+    # *reference* only cares that the name is known top-level.
+    compose = {
+        "services": {"app": {"image": "nginx", "volumes": ["data:/var"]}},
+        "volumes": {"data": {"external": True}},
+    }
+    validate(compose)
+
+
+def test_named_volume_variable_source_needs_no_declaration() -> None:
+    # A `${VAR}`-carrying source is a fact about the reading shell, not the
+    # document (see _validate_volume_references's docstring) -- the same
+    # `${VAR}` carve-out every other host-state-dependent grammar in this
+    # module already applies.
+    validate(_doc(volumes=["${VOLNAME}:/var"]))
+
+
+def test_top_level_volumes_list_form_rejected_by_reference_check() -> None:
+    # Same hashing hazard `_validate_network_references` already guards
+    # against, one level down: `declared = set(compose.get("volumes") or {})`
+    # would crash raw on an unhashable list entry before this guard existed.
+    # This is also now the ONLY place the top-level 'volumes' mapping shape is
+    # checked -- see _validate_volume_definitions's updated docstring.
+    compose = {"services": {"app": {"image": "nginx"}}, "volumes": [{"a": 1}]}
+    with pytest.raises(UnsupportedComposeError, match="top-level 'volumes' must be a mapping"):
         validate(compose)
 
 

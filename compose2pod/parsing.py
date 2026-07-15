@@ -139,6 +139,26 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         # volume implicitly on first reference.
 
 
+def _named_volume_source(volume: str) -> str | None:
+    """Return a colon-form volume entry's bare-identifier source, or None if it needs no declaration.
+
+    Mirrors the same bind-vs-named split `emit.py`'s `_volume_flags` already
+    makes when translating a relative bind mount: a colon-form entry's source is
+    a bind mount when it starts with `.` or `/` (a host path, relative or
+    absolute) -- Docker requires no top-level declaration for either. No colon at
+    all means an anonymous volume (a bare container path), also declaration-free.
+    Anything else is a bare identifier: the *name* of a volume Docker requires to
+    be declared in the top-level `volumes:` block, even though podman itself
+    would create it implicitly on first reference regardless.
+    """
+    if ":" not in volume:
+        return None
+    source, _, _ = volume.partition(":")
+    if source.startswith((".", "/")):
+        return None
+    return source
+
+
 def _validate_image(name: str, svc: dict[str, Any]) -> None:
     """Check the service has a usable image (image_for reads svc['image'] verbatim when there's no 'build')."""
     if "build" in svc:
@@ -714,6 +734,15 @@ def _validate_network_references(compose: dict[str, Any], services: dict[str, An
     shares the pod namespace), but a service naming a network nothing declares is a
     document `docker compose config` refuses -- so the reference is still checked.
 
+    `default` is the one exception: it is Docker's implicit network, always
+    available whether or not a top-level `networks:` block exists at all --
+    measured against `docker compose config` v5.1.2, `networks: [default]` with
+    no top-level `networks:` block ACCEPTS, while every other undeclared name
+    (`host`, `none`, or any custom name) still REJECTS. So `declared` always
+    carries `default`, whether or not the document declares it explicitly (an
+    explicit `networks: {default: {...}}` is legal too, and a no-op here since
+    `default` is already in the set).
+
     Runs after `hostnames()` deliberately: that call already confirmed each
     service's `networks` is a list or mapping (or absent), so `svc.get("networks")
     or {}` here is safe to iterate -- a still-unvalidated string would be walked
@@ -733,7 +762,7 @@ def _validate_network_references(compose: dict[str, Any], services: dict[str, An
     if top_networks is not None and not isinstance(top_networks, dict):
         msg = "top-level 'networks' must be a mapping"
         raise UnsupportedComposeError(msg)
-    declared = set(top_networks or {})
+    declared = set(top_networks or {}) | {"default"}
     for name, svc in services.items():
         for network in svc.get("networks") or {}:
             if not isinstance(network, str):
@@ -741,6 +770,53 @@ def _validate_network_references(compose: dict[str, Any], services: dict[str, An
                 raise UnsupportedComposeError(msg)
             if network not in declared:
                 msg = f"service {name!r}: refers to undefined network {network!r}"
+                raise UnsupportedComposeError(msg)
+
+
+def _validate_volume_references(compose: dict[str, Any], services: dict[str, Any]) -> None:
+    """Every per-service NAMED volume must be declared top-level, as Docker requires.
+
+    Mirrors `_validate_network_references` above, one level down: compose2pod
+    ignores the top-level `volumes:` block's *contents* (podman creates a named
+    volume implicitly on first reference, regardless of what the block says), but
+    a service naming an undeclared NAMED volume is a document `docker compose
+    config` refuses -- so the reference is still checked. Unlike networks, not
+    every reference needs a declaration: a bind mount or an anonymous volume
+    names no volume at all, so only a bare-identifier source is checked
+    (`_named_volume_source` returns None for the other two forms). Measured
+    against `docker compose config` v5.1.2: `volumes: [data:/var]` with no
+    top-level `volumes:` REJECTS ("refers to undefined volume data"); the same
+    entry with `volumes: {data:}` declared, or a bind/anonymous entry with no
+    top-level block at all, ACCEPTS either way; `external: true` on the
+    declaration still counts as declared (Docker treats it as "must already
+    exist", but the *reference* check only cares that the name is known).
+
+    Runs after the per-service loop in `validate()` (`_validate_service` ->
+    `_validate_service_volumes` has already confirmed every service's `volumes`
+    is a list of strings, and that a colon-less entry is an absolute path), so
+    `svc.get("volumes") or []` here is safe to iterate.
+
+    A `${VAR}`-carrying source is exempted, matching every other host-state-
+    dependent grammar in this file (`values.has_variable`): measured, Docker
+    resolves the variable first and classifies the *result* -- the same
+    `${NAME}:/var` document ACCEPTS with no declaration when the shell resolves
+    `NAME` to a bind-mount path (`/abs` or `./rel`) and REJECTS undeclared when
+    it resolves to a bare identifier. Which rule applies is a fact about the
+    shell that will later run the generated script, not about this document, so
+    it does not bind here either way.
+    """
+    top_volumes = compose.get("volumes")
+    if top_volumes is not None and not isinstance(top_volumes, dict):
+        msg = "top-level 'volumes' must be a mapping"
+        raise UnsupportedComposeError(msg)
+    declared = set(top_volumes or {})
+    for name, svc in services.items():
+        for volume in svc.get("volumes") or []:
+            source = _named_volume_source(volume)
+            if source is None or values.has_variable(source):
+                continue
+            if source not in declared:
+                msg = f"service {name!r}: refers to undefined volume {source!r}"
                 raise UnsupportedComposeError(msg)
 
 
@@ -1095,19 +1171,18 @@ def _validate_network_definitions(compose: dict[str, Any]) -> None:
 
 
 def _validate_volume_definitions(compose: dict[str, Any]) -> None:
-    """Every top-level `volumes:` definition's own shape -- previously entirely unchecked.
+    """Every top-level `volumes:` definition's own shape -- not a service's reference to one.
 
-    Unlike `networks`, nothing else in `validate()` ever confirmed the
-    top-level `volumes:` block itself was even a mapping -- the "ignoring
-    top-level 'volumes'" warning ran unconditionally on key presence, never
-    inspecting the value.
+    Unlike before Task 14, this no longer re-checks the top-level mapping shape
+    itself: `_validate_volume_references` already does (and runs first, from
+    `validate()`), raising "top-level 'volumes' must be a mapping" before this
+    function is ever reached -- duplicating that check here would be dead code
+    no test could cover honestly (the same reasoning `_validate_network_definitions`
+    already documents for its own, symmetric reliance on `_validate_network_references`).
     """
     defs = compose.get("volumes")
-    if defs is None:
-        return
     if not isinstance(defs, dict):
-        msg = "top-level 'volumes' must be a mapping"
-        raise UnsupportedComposeError(msg)
+        return
     for ident, definition in defs.items():
         _validate_top_level_definition("volume", ident, definition, _VOLUME_DEFINITION_KEYS)
 
@@ -1151,11 +1226,30 @@ def _reject_null_top_level_blocks(compose: dict[str, Any]) -> None:
     """Refuse a bare top-level block -- `docker compose config` refuses each.
 
     `services` has its own message ("no services defined"); `version`/`name` are
-    scalars, not blocks.
+    scalars, not blocks -- see `_validate_top_level_scalar_strings`.
     """
     for key in ("networks", "volumes", "secrets", "configs"):
         if key in compose and compose[key] is None:
             msg = f"top-level {key!r} must not be null"
+            raise UnsupportedComposeError(msg)
+
+
+def _validate_top_level_scalar_strings(compose: dict[str, Any]) -> None:
+    """Refuse a non-string top-level `name` or `version` -- both must be plain strings.
+
+    Measured against `docker compose config` v5.1.2: `name: 123` and
+    `version: 123` both raise ("name must be a string" / "version must be a
+    string"), and so does a bare `name:`/`version:` (null is not a string
+    either) -- one `isinstance` check reproduces all three verdicts with no
+    separate null case needed, unlike `_reject_null_top_level_blocks`'s blocks
+    (where null is a distinct, block-shaped refusal). A `${VAR}` reference is
+    still a plain YAML string scalar regardless of what the variable resolves
+    to later, so it always passes this check -- there is no host-state-
+    dependent case here the way there is for a boolean or numeric grammar.
+    """
+    for key in ("name", "version"):
+        if key in compose and not isinstance(compose[key], str):
+            msg = f"top-level {key!r} must be a string"
             raise UnsupportedComposeError(msg)
 
 
@@ -1179,6 +1273,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
         msg = f"unsupported top-level keys: {sorted(unknown_top)}"
         raise UnsupportedComposeError(msg)
     _reject_null_top_level_blocks(compose)
+    _validate_top_level_scalar_strings(compose)
     if "networks" in compose:
         warnings.append("ignoring top-level 'networks' (all services share the pod namespace)")
     if "volumes" in compose:
@@ -1196,6 +1291,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
     _validate_network_references(compose, services)
     _validate_network_entries(services)
     _validate_network_definitions(compose)
+    _validate_volume_references(compose, services)
     _validate_volume_definitions(compose)
     _validate_depends_on(services)
     stores.validate(compose)

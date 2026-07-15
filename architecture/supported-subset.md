@@ -45,7 +45,10 @@ consecutive hand-found divergences once did.
 ## Top-level keys
 
 - **Supported:** `services` (required — a non-mapping value raises, an empty
-  mapping raises "no services defined"), `version`, `name`, `networks`,
+  mapping raises "no services defined"), `version`, `name` (both must be
+  strings when present — a number, a bool, or a bare `name:`/`version:`
+  (null) all raise "must be a string", matching Docker's own verdict exactly;
+  `_validate_top_level_scalar_strings`, `parsing.py`, Task 14), `networks`,
   `volumes`, `secrets`, `configs` (see Stores, below).
 - **Ignored (warns):** `networks` — every service shares the pod's single
   network namespace, so top-level network definitions have no *effect*.
@@ -396,10 +399,19 @@ slot (`architecture/glossary.md`).
   `validate()` raises ("refers to undefined network") — the top-level
   block's *contents* are still ignored (see Top-level keys, above), only the
   reference is checked, because a document naming an undeclared network is
-  one `docker compose config` refuses. A short (list) form's entry must
-  itself be a string before that membership check runs — a still-unvalidated
-  entry (e.g. a dict, the same list/map YAML slip `depends_on`/`command`/
-  `environment` all suffer) used to hash straight into a `set` and crash raw
+  one `docker compose config` refuses. **`default` is the one exception:**
+  it is Docker's implicit network, always available whether or not a
+  top-level `networks:` block exists at all — `networks: [default]` with no
+  top-level declaration is accepted (measured against `docker compose
+  config` v5.1.2; `_validate_network_references` seeds `declared` with
+  `{"default"}` unconditionally, Task 14). Every other undeclared name
+  still raises, including Docker's other two reserved names (`host`,
+  `none` — neither is implicitly available). Declaring `default` explicitly
+  (`networks: {default: {...}}`) is legal too, and a no-op alongside the
+  implicit declaration. A short (list) form's entry must itself be a string
+  before the membership check runs — a still-unvalidated entry (e.g. a
+  dict, the same list/map YAML slip `depends_on`/`command`/`environment`
+  all suffer) used to hash straight into a `set` and crash raw
   (`TypeError: unhashable type`) instead of failing clean.
 
   A long-form entry's *value* is a STRICT typed sub-schema, unlike the
@@ -724,9 +736,24 @@ apart by whether `source` starts with `.` or `/`:
   no explicit `podman volume create` step needed), and it persists on the
   host after the pod is removed, identical to `docker compose down` without
   `-v`. The top-level `volumes:` block (declaring drivers/options) is
-  accepted but ignored — a non-default `driver`/`driver_opts` or `external:
-  true` (which Compose treats as "must already exist") has no effect, since
-  podman's implicit creation is the only path taken either way.
+  accepted but ignored *for effect* — a non-default `driver`/`driver_opts` or
+  `external: true` (which Compose treats as "must already exist") has no
+  effect, since podman's implicit creation is the only path taken either way.
+  **The name itself must still be declared, though:** a NAMED volume's source
+  must appear as a key in the top-level `volumes:` block, or `validate()`
+  raises ("refers to undefined volume") — the same "ignored for effect, still
+  validated for existence" stance the top-level `networks:` block already has
+  (`_validate_volume_references`, `parsing.py`, Task 14, mirroring
+  `_validate_network_references`). A declaration with `external: true` still
+  counts. A bind mount or an anonymous volume needs no declaration at all —
+  neither names a volume. A `${VAR}`-carrying source is exempted from the
+  check entirely: measured against `docker compose config` v5.1.2, Docker
+  resolves the variable first and then classifies the *result* (a bind-mount
+  value needs no declaration, a bare-identifier value does) — which rule
+  applies is a fact about the shell that will later run the generated script,
+  not about this document, so it does not bind here either way (same
+  `values.has_variable` carve-out every other host-state-dependent grammar in
+  `parsing.py` already applies).
 
 A single absolute container path with no `source:target` (e.g.
 `- /var/cache/models`) is accepted as an **anonymous volume** and emitted

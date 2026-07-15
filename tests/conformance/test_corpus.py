@@ -19,3 +19,21 @@ _CORPUS = sorted((Path(__file__).parent / "corpus").glob("*.yaml"))
 @pytest.mark.parametrize("path", _CORPUS, ids=lambda p: p.stem)
 def test_corpus_document_obeys_the_rule(path: Path, assert_rule: Callable[[dict[str, Any]], str]) -> None:
     assert_rule(yaml.safe_load(path.read_text()))
+
+
+def test_networks_default_implicit_is_no_longer_an_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """Fix 1 lifts an over-rejection, not just a forbidden combination.
+
+    `assert_rule` alone only enforces the one-way rule (Docker rejects implies
+    we reject) -- it never fails on the opposite direction (Docker accepts, we
+    refuse), which is the allowed 'over-reject' verdict. That means the generic
+    `test_corpus_document_obeys_the_rule` run above would stay green for this
+    file even before Fix 1: it would just quietly file `networks_default_implicit`
+    under 'over-reject' instead. The stronger claim this task makes -- that both
+    oracles ACCEPT `networks: [default]` with no top-level declaration -- needs
+    this dedicated assertion on the verdict itself.
+    """
+    path = Path(__file__).parent / "corpus" / "networks_default_implicit.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"

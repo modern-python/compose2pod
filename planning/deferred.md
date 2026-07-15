@@ -61,6 +61,50 @@ templates or round-trips YAML (`yq`, Helm-style generators, quote-everything
 house styles) produces it. The conformance harness reports these as
 `over-reject`, so they stay visible rather than forgotten.
 
+## Non-target `depends_on` graph is not validated outside the target's closure
+
+`planning/decisions/2026-07-14-docker-rejection-parity.md`'s hard rule is
+`accepted(compose2pod) ⊆ accepted(docker)`, no exceptions — but this one item
+is a deliberate, maintainer-ruled exception to it, not an oversight, because
+closing it fights compose2pod's own validation design rather than completing
+an unfinished parser (contrast the section above, where every item is a
+genuine gap). Two false greens survive against the hard rule, both measured
+against `docker compose config` v5.1.2, same YAML both oracles:
+
+- **`depends_on: [ghost]` on a service OUTSIDE the target's dependency
+  closure**, naming a service nothing in the document defines — Docker
+  REJECTS the whole document ("undefined service"); compose2pod ACCEPTS it
+  (and runs successfully), because the target never reaches `ghost`'s
+  declaring service in its own closure walk.
+- **A dependency cycle among services OUTSIDE the target's closure** —
+  Docker REJECTS the whole document; compose2pod ACCEPTS it, same reason.
+
+**Why this is deferred, not fixed:** `validate()` (`compose2pod/parsing.py`)
+checks every `depends_on` entry's *condition* document-wide
+(`_validate_depends_on`), but never cross-checks a dependency *name* against
+the full service set — that check happens only inside `startup_order`
+(`compose2pod/graph.py`), which walks exclusively the `--target` service's
+own `depends_on` closure (see `architecture/supported-subset.md`'s `##
+depends_on` section: "`startup_order` ... walks the target's `depends_on`
+closure and raises if a dependency names a service absent from the
+document"). A service outside that closure never runs, by design — `profiles`
+inertness and the "closure authoritative" stance both already lean on the
+same fact (`architecture/supported-subset.md`'s Service keys section) — so
+its own `depends_on` graph, however broken, can never desync a running
+script from the document. Validating it anyway would mean a document-wide
+pre-pass wholly independent of `--target`, cutting against the one design
+choice (closure-scoped validation, not whole-document validation) that makes
+compose2pod's gate cheap to reason about and keeps an unrelated service's
+typo from blocking every other target in a shared compose file. The
+maintainer ruled: catalogue, don't fix, pending a concrete need.
+
+**Revisit trigger:** a document-wide pre-validation pass over `depends_on`
+existence and cycles, run independently of the target closure (so it costs
+nothing extra for a document where every service is well-formed, and only
+ever narrows acceptance for one that is not), would close both. Worth
+building if a user hits either case in practice — most likely the cycle,
+since an unrelated-service typo is comparatively easy to notice by eye.
+
 ## Unify the store render/vars seam
 
 `stores.create_lines` (rendered lines) and `stores.referenced_variables` (the
