@@ -52,6 +52,30 @@ class TestValidatePodOptions:
         with pytest.raises(UnsupportedComposeError, match="'extra_hosts' values must be"):
             validate_pod_options("app", {"image": "x", "extra_hosts": {"db": ["10.0.0.5"]}})
 
+    # Task 10, Class 2: a non-string map value passed `validate_map`'s shared
+    # scalar-or-null shape check (correct for labels/annotations) but Docker
+    # itself refuses it for extra_hosts -- measured against `docker compose
+    # config` v5.1.2: 'extra_hosts: {h: 3}' and 'extra_hosts: {h: true}' both
+    # raise 'must be a string'.
+
+    def test_extra_hosts_map_int_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts 'db' must be a string"):
+            validate_pod_options("app", {"image": "x", "extra_hosts": {"db": 3}})
+
+    def test_extra_hosts_map_bool_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts 'db' must be a string"):
+            validate_pod_options("app", {"image": "x", "extra_hosts": {"db": True}})
+
+    def test_extra_hosts_map_null_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts 'db' must be a string"):
+            validate_pod_options("app", {"image": "x", "extra_hosts": {"db": None}})
+
+    def test_extra_hosts_map_string_value_accepted(self) -> None:
+        validate_pod_options("app", {"image": "x", "extra_hosts": {"db": "1.2.3.4"}})
+
+    def test_extra_hosts_map_variable_reference_accepted(self) -> None:
+        validate_pod_options("app", {"image": "x", "extra_hosts": {"db": "${VAR}"}})
+
 
 class TestUsesPodOptions:
     def test_true_when_declared(self) -> None:
@@ -125,9 +149,13 @@ class TestAddHostFlags:
         services = {"a": {"extra_hosts": {"db": "10.0.0.5"}}}
         assert pod_create_flags(services, ["a"], []) == ["--add-host", Expand(value="db:10.0.0.5")]
 
-    def test_extra_hosts_boolean_value_normalizes_like_docker(self) -> None:
-        # Same boolean-map-value normalization as environment/labels/annotations,
-        # applied uniformly since extra_hosts is also a validate_map-shaped key.
+    def test_extra_hosts_boolean_value_renders_defensively_when_gate_is_bypassed(self) -> None:
+        # A boolean extra_hosts value is refused at the gate as of Task 10
+        # (`TestValidatePodOptions.test_extra_hosts_map_bool_value_rejected`,
+        # measured: Docker itself rejects it, unlike environment/labels/
+        # annotations) -- a real document carrying one never reaches this
+        # function. `_render_scalar` still normalizes it when called directly,
+        # bypassing the gate, as defense-in-depth (`keys.extra_host_entries`).
         services = {"a": {"extra_hosts": {"db": True}}}
         assert pod_create_flags(services, ["a"], []) == ["--add-host", Expand(value="db:true")]
 

@@ -14,6 +14,7 @@ same file is accepted. compose2pod defers interpolation to script-run time by
 design and cannot know that value, so it must not judge it.
 """
 
+import ipaddress
 import math
 import re
 from typing import Any
@@ -165,6 +166,7 @@ def validate_integer(
     value: Any,  # noqa: ANN401 - Compose values are untyped YAML/JSON
     *,
     allow_whole_float: bool = False,
+    strict_string: bool = False,
 ) -> None:
     """Check `value` is an integer, or a string that parses as one (a fractional value is refused).
 
@@ -174,6 +176,13 @@ def validate_integer(
     config` v5.1.2. `oom_score_adj` opts in with `allow_whole_float=True`: its
     Go field casts a whole-valued JSON number leniently (`1000.0` is
     accepted), and refuses only a fractional one (`0.5`).
+
+    `strict_string=True` (stores.py's secret/config reference `mode`) matches
+    Go's `strconv.ParseInt` exactly, rather than Python's lenient `int()`
+    cast: an optional leading sign then digits only, with no surrounding
+    whitespace -- measured, a whitespace-padded `mode` string is refused
+    (Go's ParseInt: invalid syntax) even though Python's own `int()` would
+    happily strip the whitespace and accept it.
     """
     if has_variable(value):
         return
@@ -181,15 +190,19 @@ def validate_integer(
         return
     if isinstance(value, float) and math.isfinite(value) and allow_whole_float and value.is_integer():
         return
-    # Go's ParseInt (used for oom_score_adj etc.) does not permit the digit-grouping
-    # underscores its float parser allows; unlike Python's int(), it is "invalid syntax".
-    if isinstance(value, str) and "_" not in value:
-        try:
-            int(value)
-        except ValueError:
-            pass
-        else:
-            return
+    if isinstance(value, str):
+        if strict_string:
+            if _STRICT_INT_STRING.match(value):
+                return
+        # Go's ParseInt (used for oom_score_adj etc.) does not permit the digit-grouping
+        # underscores its float parser allows; unlike Python's int(), it is "invalid syntax".
+        elif "_" not in value:
+            try:
+                int(value)
+            except ValueError:
+                pass
+            else:
+                return
     msg = f"service {name!r}: {key!r} must be an integer"
     raise UnsupportedComposeError(msg)
 
@@ -254,18 +267,128 @@ def _ranges_compatible(host: str | None, container: str) -> bool:
     return c_len == 1 or h_end - h_start + 1 == c_len
 
 
+# Docker's own long-form `ports` field set (Task 10, each field's grammar measured
+# individually against `docker compose config` v5.1.2). Unlike short-form `ports`
+# (never validated as a schema, just as a mapping shape), the long form IS a strict
+# schema: an unrecognized key ("app_protocol" is real; a typo of it is not) raises
+# "additional properties '<key>' not allowed".
+_PORT_LONG_FORM_KEYS = {"target", "published", "protocol", "host_ip", "mode", "name", "app_protocol"}
+# protocol/mode/name/app_protocol are each typed as a plain string with no further
+# content check at config-validate time -- measured, 'protocol: bogus' and 'mode:
+# bogus' both pass `docker compose config`; only the *type* is Docker's business here.
+_PORT_STRING_FIELDS = ("protocol", "mode", "name", "app_protocol")
+
+
+def _validate_port_target_field(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    """Check the long-form 'target' field: a non-negative integer (native or string).
+
+    Measured: a native int or a whole-valued float (`80.0`) is accepted, a
+    fractional float (`80.5`) is refused, and so is a negative value on
+    either side -- Docker casts a string form through Go's uint32 decoder (an
+    interpolation-time `Atoi` + range check that runs even without a `${VAR}`
+    reference: 'target: "abc"' fails the same cast a genuine variable miss
+    would). Unlike the short-form container port (bound to 1-65535 by
+    `_ranges_compatible`), there is no *upper* bound here -- 'target: 99999'
+    is accepted, a different Docker code path with a looser bound.
+    """
+    if has_variable(value):
+        return
+    if _is_int(value) and value >= 0:
+        return
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer() and value >= 0:
+        return
+    if isinstance(value, str):
+        try:
+            parsed = int(value)
+        except ValueError:
+            pass
+        else:
+            if parsed >= 0:
+                return
+    msg = f"service {name!r}: {key!r} entry 'target' must be a non-negative integer"
+    raise UnsupportedComposeError(msg)
+
+
+def _validate_port_published_field(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped
+    """Check the long-form 'published' field: an integer or a string, content unchecked.
+
+    Measured: Docker's own `Published` field is a plain string with no
+    further validation at config time -- 'published: abc', 'published: -1',
+    and 'published: "8080-8090"' (a range, exactly like the short form) all
+    pass; only the *type* union (int-or-string -- no bool, no float) is
+    enforced ('published: true'/'published: 80.5' both fail "must be a
+    integer or string").
+    """
+    if has_variable(value):
+        return
+    if _is_int(value) or isinstance(value, str):
+        return
+    msg = f"service {name!r}: {key!r} entry 'published' must be an integer or string"
+    raise UnsupportedComposeError(msg)
+
+
+def _validate_port_host_ip_field(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped
+    """Check the long-form 'host_ip' field: a bare IP address string (v4 or v6, unbracketed).
+
+    Measured: Docker parses the value and refuses anything that isn't a real
+    IP address -- a hostname ('localhost'), a malformed address ('1.2.3'), or
+    a bracketed IPv6 literal ('[::1]', valid inside a URL but not on its own)
+    are all refused ("invalid ip address"), even though the type itself is a
+    plain string. `ipaddress.ip_address` (stdlib) accepts exactly the same
+    unbracketed v4/v6 forms Docker does and rejects the same malformed ones.
+    """
+    if has_variable(value):
+        return
+    if isinstance(value, str):
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            pass
+        else:
+            return
+    msg = f"service {name!r}: {key!r} entry 'host_ip' must be an IP address"
+    raise UnsupportedComposeError(msg)
+
+
+def _validate_port_string_field(name: str, key: str, field: str, value: Any) -> None:  # noqa: ANN401 - untyped
+    if has_variable(value):
+        return
+    if not isinstance(value, str):
+        msg = f"service {name!r}: {key!r} entry {field!r} must be a string"
+        raise UnsupportedComposeError(msg)
+
+
+def _validate_port_long_form(name: str, key: str, entry: dict[str, Any]) -> None:
+    """Long form ({target, published, ...}).
+
+    The dict's own keys are already guaranteed strings by validate()'s sweep
+    (`_require_string_keys_deep`, which runs ahead of every other check), so a
+    plain `in`/set check here is safe. 'target' is the one key Docker refuses
+    to omit ("is missing a target port", measured against `docker compose
+    config` v5.1.2); every other known field's *value* is checked against
+    Docker's own grammar for it (Task 10), and an unrecognized field raises,
+    matching Docker's own strict schema for this shape.
+    """
+    if "target" not in entry:
+        msg = f"service {name!r}: {key!r} entry {entry!r} is missing a target port"
+        raise UnsupportedComposeError(msg)
+    unknown = set(entry) - _PORT_LONG_FORM_KEYS
+    if unknown:
+        msg = f"service {name!r}: {key!r} entry {entry!r}: unsupported keys {sorted(unknown)}"
+        raise UnsupportedComposeError(msg)
+    _validate_port_target_field(name, key, entry["target"])
+    if "published" in entry:
+        _validate_port_published_field(name, key, entry["published"])
+    if "host_ip" in entry:
+        _validate_port_host_ip_field(name, key, entry["host_ip"])
+    for field in _PORT_STRING_FIELDS:
+        if field in entry:
+            _validate_port_string_field(name, key, field, entry[field])
+
+
 def _validate_port_entry(name: str, key: str, entry: Any) -> None:  # noqa: ANN401 - Compose values are untyped
     if isinstance(entry, dict):
-        # Long form ({target, published, ...}); compose2pod ignores `ports`
-        # entirely, so every other inner key is Docker's business, not ours --
-        # except 'target', which Docker refuses to omit ("is missing a target
-        # port", measured against `docker compose config` v5.1.2). The dict's
-        # own keys are already guaranteed strings by validate()'s sweep
-        # (`_require_string_keys_deep`, which runs ahead of every other check),
-        # so a plain `in` check here is safe.
-        if "target" not in entry:
-            msg = f"service {name!r}: {key!r} entry {entry!r} is missing a target port"
-            raise UnsupportedComposeError(msg)
+        _validate_port_long_form(name, key, entry)
         return
     if has_variable(entry):
         return

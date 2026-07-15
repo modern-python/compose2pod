@@ -263,9 +263,13 @@ def extra_host_entries(value: list[Any] | dict[str, Any]) -> list[tuple[str, str
     re-divide at the wrong character.
     """
     if isinstance(value, dict):
-        # `_render_scalar` so a boolean address normalizes like `docker compose
-        # config` ('true', not Python's 'True') -- the same rule every other map
-        # value follows.
+        # `pod.validate_pod_options` (the gate) already refuses a non-string map
+        # value before this ever runs -- unlike labels/annotations, Docker itself
+        # refuses a boolean/numeric extra_hosts address rather than normalizing
+        # it (measured against `docker compose config` v5.1.2). `_render_scalar`
+        # is defense-in-depth for a caller that reaches this function directly,
+        # bypassing the gate; it is a no-op on the guaranteed-string values a
+        # validated document ever supplies.
         return [(str(host), _render_scalar(address)) for host, address in value.items()]
     return [split_extra_host(str(item)) for item in value]
 

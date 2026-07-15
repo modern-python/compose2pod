@@ -1238,13 +1238,14 @@ def test_build_string_list_keys(key: str) -> None:
             validate(_build(key, bad))
 
 
-@pytest.mark.parametrize("key", ["args", "labels", "ssh"])
+@pytest.mark.parametrize("key", ["args", "labels"])
 def test_build_list_or_map_keys(key: str) -> None:
-    # Measured: `ssh` shares `args`/`labels`' exact grammar (a list of
-    # 'KEY[=value]' strings -- a bare 'KEY' with no '=' is fine -- or a
-    # mapping with scalar-or-null values), NOT the plain list-of-strings
-    # shape `build.ssh: [default=/path]`'s docs might suggest at a glance;
-    # `docker compose config` also accepts `build.ssh: {default: /path}`.
+    # Measured: `args`/`labels` share one grammar -- a list of 'KEY[=value]'
+    # strings (a bare 'KEY' with no '=' is fine) or a mapping with
+    # scalar-or-null values. `ssh` looks identical at a glance (Docker's own
+    # docs show `default | key=/path`) but is NOT -- see
+    # test_build_ssh_list_form_requires_default_or_key_path, below: its list
+    # form has one extra rule a bare 'KEY' entry must satisfy.
     assert validate(_build(key, ["KEY=val"])) == []
     assert validate(_build(key, ["KEY"])) == []
     assert validate(_build(key, {"KEY": "val"})) == []
@@ -1255,6 +1256,32 @@ def test_build_list_or_map_keys(key: str) -> None:
             validate(_build(key, bad))
     with pytest.raises(UnsupportedComposeError, match="build"):
         validate(_build(key, {True: "val"}))
+
+
+def test_build_ssh_map_form_shares_args_labels_grammar() -> None:
+    # The map form is unrestricted, identically to args/labels -- measured
+    # against `docker compose config` v5.1.2.
+    assert validate(_build("ssh", {"mykey": "/path"})) == []
+    assert validate(_build("ssh", {"mykey": 3})) == []
+    assert validate(_build("ssh", {"mykey": None})) == []
+    for bad in ("bare", 3, [3], {"mykey": ["a"]}):
+        with pytest.raises(UnsupportedComposeError, match="ssh"):
+            validate(_build("ssh", bad))
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate(_build("ssh", {True: "val"}))
+
+
+def test_build_ssh_list_form_requires_default_or_key_path() -> None:
+    # A Task 9 regression, closed here: `build.ssh`'s list form is stricter
+    # than args/labels' shared grammar -- a bare entry (no '=') must equal
+    # 'default'; Docker refuses any other bare id ('invalid ssh key "mykey"',
+    # measured against `docker compose config` v5.1.2). An entry with '='
+    # accepts any id, same as args/labels.
+    assert validate(_build("ssh", ["default"])) == []
+    assert validate(_build("ssh", ["default=/path"])) == []
+    assert validate(_build("ssh", ["mykey=/path"])) == []
+    with pytest.raises(UnsupportedComposeError, match="ssh"):
+        validate(_build("ssh", ["mykey"]))
 
 
 def test_build_args_non_string_key_rejected() -> None:

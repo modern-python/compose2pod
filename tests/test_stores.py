@@ -110,10 +110,62 @@ class TestValidateSecretKind:
             stores.validate(_doc("secrets", {"s": {"environment": "VAR\n"}}))
 
     def test_non_scalar_long_form_value_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="must be an int or string"):
+        with pytest.raises(UnsupportedComposeError, match="must be an integer"):
             stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "mode": True}]))
-        with pytest.raises(UnsupportedComposeError, match="must be an int or string"):
+        with pytest.raises(UnsupportedComposeError, match="must be a string"):
             stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "uid": [1]}]))
+
+    # Task 10: uid/gid and mode are NOT the same grammar, despite reading like
+    # siblings -- measured against `docker compose config` v5.1.2.
+
+    def test_uid_gid_must_be_a_string_native_int_rejected(self) -> None:
+        # uid/gid are typed as a plain string field with no further parsing at
+        # config-validate time -- Docker refuses a *native* int outright, even
+        # though the numerically identical string is fine.
+        with pytest.raises(UnsupportedComposeError, match=r"secret uid.*must be a string"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "uid": 1000}]))
+        with pytest.raises(UnsupportedComposeError, match=r"secret gid.*must be a string"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "gid": 1000}]))
+
+    def test_uid_gid_string_content_is_unchecked(self) -> None:
+        # Measured: the string's *content* is never parsed at config-validate
+        # time -- even a non-numeric string passes `docker compose config`.
+        stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "uid": "somevalue"}]))
+        stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "gid": "-1"}]))
+
+    def test_mode_accepts_int_or_integer_string_rejects_non_numeric_string(self) -> None:
+        stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "mode": 0o400}]))
+        stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "mode": "0400"}]))
+        with pytest.raises(UnsupportedComposeError, match="must be an integer"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "mode": "somevalue"}]))
+
+    def test_mode_rejects_any_float_whole_or_fractional(self) -> None:
+        # Unlike uid/gid, mode goes through Go's strconv.ParseInt at decode
+        # time -- a native float is refused outright, whole or fractional.
+        with pytest.raises(UnsupportedComposeError, match="must be an integer"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "mode": 400.0}]))
+        with pytest.raises(UnsupportedComposeError, match="must be an integer"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "mode": 0.5}]))
+
+    def test_mode_string_form_is_a_strict_parseint_not_pythons_lenient_int(self) -> None:
+        # Measured: surrounding whitespace and a digit-grouping underscore are
+        # both refused as strings, even though Python's own int() would accept
+        # either.
+        with pytest.raises(UnsupportedComposeError, match="must be an integer"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "mode": "  400  "}]))
+        with pytest.raises(UnsupportedComposeError, match="must be an integer"):
+            stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "mode": "1_000"}]))
+
+    def test_uid_gid_mode_variable_reference_bypasses_validation(self) -> None:
+        stores.validate(_doc("secrets", {"s": {"file": "./a"}}, [{"source": "s", "uid": "${U}", "mode": "${M}"}]))
+
+    def test_config_uid_gid_mode_share_secrets_grammar(self) -> None:
+        # Task 10: "This applies to BOTH secrets and configs references" -- measured identical.
+        with pytest.raises(UnsupportedComposeError, match=r"config uid.*must be a string"):
+            stores.validate(_doc("configs", {"c": {"file": "./c"}}, [{"source": "c", "uid": 1000}]))
+        stores.validate(_doc("configs", {"c": {"file": "./c"}}, [{"source": "c", "uid": "somevalue"}]))
+        with pytest.raises(UnsupportedComposeError, match="must be an integer"):
+            stores.validate(_doc("configs", {"c": {"file": "./c"}}, [{"source": "c", "mode": "somevalue"}]))
 
     def test_non_string_target_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="secret target"):

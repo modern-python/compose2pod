@@ -357,3 +357,92 @@ def test_validate_ports_accepts_long_form_with_target(value: object) -> None:
 def test_validate_ports_rejects_long_form_missing_target(value: object) -> None:
     with pytest.raises(UnsupportedComposeError, match="missing a target port"):
         validate_ports("app", "ports", value)
+
+
+# --- long-form ports fields (Task 10, Class 4): `_validate_port_entry`'s dict
+# branch used to return right after checking 'target' is present -- every other
+# field's value was Docker's business, not ours. Each grammar below was
+# measured against `docker compose config` v5.1.2 with the same YAML text fed
+# to both oracles.
+
+
+def _port(**fields: object) -> list[dict[str, object]]:
+    return [{"target": 80, **fields}]
+
+
+def test_validate_ports_rejects_long_form_unknown_field() -> None:
+    with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+        validate_ports("app", "ports", _port(bogus_field=1))
+
+
+def test_validate_ports_accepts_every_known_long_form_field_name() -> None:
+    # app_protocol is a real Compose Spec field, not a typo -- measured, it is
+    # accepted, unlike a genuinely unknown key (see the test above).
+    validate_ports(
+        "app",
+        "ports",
+        _port(published="8080", host_ip="1.2.3.4", protocol="tcp", mode="host", name="web", app_protocol="http"),
+    )
+
+
+@pytest.mark.parametrize("value", [80, 80.0, "80", 0])
+def test_validate_ports_long_form_target_accepts(value: object) -> None:
+    validate_ports("app", "ports", [{"target": value}])
+
+
+@pytest.mark.parametrize("value", [80.5, -1, "-5", "abc", True, "80-90"])
+def test_validate_ports_long_form_target_rejects(value: object) -> None:
+    # Docker casts a string target through Go's uint32 decoder: no fractional
+    # float, no negative (native or string), no non-numeric string, no bool,
+    # and no range (unlike the string form's short-form grammar).
+    with pytest.raises(UnsupportedComposeError, match="target"):
+        validate_ports("app", "ports", [{"target": value}])
+
+
+def test_validate_ports_long_form_target_has_no_upper_bound() -> None:
+    # Measured: unlike the short-form container port (bound to 1-65535), the
+    # long-form target field is accepted well past 65535 at config-validate time.
+    validate_ports("app", "ports", [{"target": 99999}])
+
+
+@pytest.mark.parametrize("value", [8080, -1, "8080", "abc", "8080-8090", ""])
+def test_validate_ports_long_form_published_accepts(value: object) -> None:
+    # Docker's own Published field is a plain string with no further
+    # validation at config time -- content is entirely unchecked.
+    validate_ports("app", "ports", _port(published=value))
+
+
+@pytest.mark.parametrize("value", [True, 80.5])
+def test_validate_ports_long_form_published_rejects(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="published"):
+        validate_ports("app", "ports", _port(published=value))
+
+
+@pytest.mark.parametrize("value", ["1.2.3.4", "255.255.255.255", "0.0.0.0", "::1", "2001:db8::1"])  # noqa: S104 - a real Compose value, not a bind address
+def test_validate_ports_long_form_host_ip_accepts(value: object) -> None:
+    validate_ports("app", "ports", _port(host_ip=value))
+
+
+@pytest.mark.parametrize("value", ["localhost", "1.2.3", "1.2.3.4.5", "[::1]", "", 3])
+def test_validate_ports_long_form_host_ip_rejects(value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match="host_ip"):
+        validate_ports("app", "ports", _port(host_ip=value))
+
+
+@pytest.mark.parametrize("field", ["protocol", "mode", "name", "app_protocol"])
+def test_validate_ports_long_form_string_fields_accept_any_string(field: str) -> None:
+    # Measured: content is entirely unchecked -- 'protocol: bogus' and
+    # 'mode: bogus' both pass `docker compose config`; only the type matters.
+    validate_ports("app", "ports", _port(**{field: "bogus"}))
+    validate_ports("app", "ports", _port(**{field: ""}))
+
+
+@pytest.mark.parametrize("field", ["protocol", "mode", "name", "app_protocol"])
+def test_validate_ports_long_form_string_fields_reject_non_string(field: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match=field):
+        validate_ports("app", "ports", _port(**{field: 3}))
+
+
+def test_validate_ports_long_form_fields_accept_variable_reference() -> None:
+    validate_ports("app", "ports", _port(published="${P}", host_ip="${H}", protocol="${PR}"))
+    validate_ports("app", "ports", [{"target": "${T}"}])

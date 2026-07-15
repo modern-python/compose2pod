@@ -1,0 +1,6 @@
+services:
+  app:
+    image: alpine
+    ports:
+      - target: 80
+        protocol: 3

@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from compose2pod import values
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.keys import Token, require_string_keys
 from compose2pod.shell import to_shell, variable_names
@@ -89,10 +90,24 @@ def _validate_def(name: str, definition: Any, kind: StoreKind) -> None:  # noqa:
 
 
 def _check_long_form_scalars(name: str, ref: dict[str, Any], kind: StoreKind) -> None:
-    for key in ("uid", "gid", "mode"):
-        if key in ref and (isinstance(ref[key], bool) or not isinstance(ref[key], int | str)):
-            msg = f"service {name!r}: {kind.label} {key!r} must be an int or string"
-            raise UnsupportedComposeError(msg)
+    """Check uid/gid/mode against Docker's own per-field grammar for a store reference.
+
+    Measured against `docker compose config` v5.1.2: uid/gid and mode are NOT
+    the same grammar, despite reading like siblings. uid/gid are typed as a
+    plain string field with no further parsing at config-validate time -- an
+    int/bool/float/null is refused ('must be a string'), but the string's
+    *content* is entirely unchecked (even 'uid: somevalue' passes; whatever
+    numeric parse exists happens later, outside Compose's own validation).
+    `mode` goes through Go's `strconv.ParseInt` at decode time instead: it
+    accepts a native int (any float is refused, whole or not, unlike uid/gid)
+    or a strict, sign-optional ParseInt-grammar string (no digit-grouping
+    underscore, no surrounding whitespace -- 'mode: "  400  "' is refused).
+    """
+    for key in ("uid", "gid"):
+        if key in ref:
+            values.validate_string(name, f"{kind.label} {key}", ref[key])
+    if "mode" in ref:
+        values.validate_integer(name, f"{kind.label} mode", ref["mode"], strict_string=True)
 
 
 def _check_target(name: str, ref: dict[str, Any], kind: StoreKind) -> None:

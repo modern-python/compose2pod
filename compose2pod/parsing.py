@@ -195,6 +195,26 @@ def _validate_build_map(name: str, key: str, value: Any) -> None:  # noqa: ANN40
     validate_map(name, key, value)
 
 
+def _validate_build_ssh(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    """List-or-map value, but the list form is stricter than args/labels -- a Task 9 regression fix.
+
+    Measured against `docker compose config` v5.1.2: `_validate_build_map`'s
+    shared grammar (a list of 'KEY[=value]' strings, or a mapping with
+    scalar-or-null values) is right for the map form and for a list entry
+    that carries '=' -- but a *bare* list entry (no '='), which args/labels
+    accept as a null-valued key, is refused for `ssh` unless it is literally
+    'default' ('build.ssh: [mykey]' raises 'invalid ssh key "mykey"'); an
+    entry with '=' ('mykey=/path') accepts any id, same as args/labels.
+    """
+    _validate_build_map(name, key, value)
+    if isinstance(value, list):
+        for item in value:
+            item_key, sep, _path = item.partition("=")
+            if not sep and item_key != "default":
+                msg = f"service {name!r}: build {key!r} entry {item!r} must be 'default' or 'id=path'"
+                raise UnsupportedComposeError(msg)
+
+
 def _validate_build_additional_contexts(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
     """List-or-map value, but stricter than args/labels/ssh in two measured ways.
 
@@ -326,7 +346,7 @@ _DOCKER_BUILD_KEYS: dict[str, Callable[[str, str, Any], None]] = {
     "pull": _validate_build_bool,
     "secrets": _validate_build_secrets,
     "shm_size": _validate_build_shm_size,
-    "ssh": _validate_build_map,
+    "ssh": _validate_build_ssh,
     "tags": _validate_string_list,
     "target": values.validate_string,
     "ulimits": validate_ulimits,

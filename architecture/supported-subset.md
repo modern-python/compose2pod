@@ -192,9 +192,21 @@ empty label.
   strings, and `ports` the fuller port-mapping grammar
   (`values.validate_ports`): a long-form (mapping) entry must carry a
   `target` key — Docker refuses to omit one ("is missing a target port",
-  measured against `docker compose config` v5.1.2) — but every other
-  long-form field is left unchecked, since compose2pod never reads `ports`
-  at all. `restart`/`stop_signal` stop at the type check because that's all
+  measured against `docker compose config` v5.1.2) — and, since Task 10, every
+  other known field's *value* is checked too, even though compose2pod never
+  reads `ports` at all: `target` a non-negative integer (native, a
+  whole-valued float, or a numeric string — no upper bound, unlike the
+  short-form container port's 1-65535); `published` an integer or a string
+  with content entirely unchecked (Docker's own field is a bare string, so
+  `published: abc` and a range string both pass; only `true`/a float fail the
+  type union); `host_ip` a bare IP address (v4 or v6, unbracketed — checked
+  with stdlib `ipaddress.ip_address`, matching Docker's own "invalid ip
+  address" refusal of a hostname or a bracketed literal);
+  `protocol`/`mode`/`name`/`app_protocol` each a plain string, content
+  unchecked (`mode: bogus` passes). An unrecognized long-form key raises —
+  Docker's schema is strict here — but `app_protocol` is a real field, not a
+  typo, and is in the known set alongside the other six.
+  `restart`/`stop_signal` stop at the type check because that's all
   Docker itself validates for either — measured, `restart: banana` and any
   `stop_signal` string are both accepted — so enumerating an enum here would
   refuse a file Docker runs. `stop_signal`/`stop_grace_period` are inert
@@ -292,12 +304,15 @@ slot (`architecture/glossary.md`).
   `planning/deferred.md`; a `${VAR}` reference passes through, since Docker's
   own cast of it is host-state-dependent); a **list of strings** (`cache_from`,
   `cache_to`, `tags`, `platforms`, `entitlements`); a **list-or-map**, itself
-  three different grammars (`args`/`labels`/`ssh` share one — a list of
-  `'KEY[=value]'` strings or a mapping with scalar-or-null values, `ssh`
-  included despite reading like a plain list at a glance;
-  `additional_contexts` requires `'='` in every list entry and a plain-string
-  map value; `extra_hosts` accepts either host/IP separator in a list entry
-  and a map value that is a string or list of strings); and **nested**
+  three different grammars (`args`/`labels` share one — a list of
+  `'KEY[=value]'` strings or a mapping with scalar-or-null values; `ssh`
+  reads like a plain list at a glance and shares that grammar for its map
+  form, but its list form is stricter — a bare entry (no `'='`) must equal
+  `'default'`, measured (`'invalid ssh key "mykey"'`); an entry with `'='`
+  accepts any id, same as `args`/`labels`; `additional_contexts` requires
+  `'='` in every list entry and a plain-string map value; `extra_hosts`
+  accepts either host/IP separator in a list entry and a map value that is a
+  string or list of strings); and **nested**
   structures (`ulimits` — identical grammar to the top-level `ulimits` service
   key, via the same `keys.validate_ulimits`; `secrets` — a list of a bare
   secret-name string or a `{source, target}` mapping, though Docker's further
@@ -456,7 +471,11 @@ flags. compose2pod hoists them onto `podman pod create` instead
   `dns_search`; the asymmetry is Docker's, measured, not compose2pod's.
   `sysctls` accepts a mapping (`key: value`) or a list of
   `"key=value"` strings, each value a string or number; `extra_hosts`
-  accepts a list or a mapping (`host: ip`). A list entry divides on `=`
+  accepts a list or a mapping (`host: ip`) — every map value must be a
+  string (measured: Docker refuses `extra_hosts: {h: 3}` and
+  `extra_hosts: {h: true}` alike, "must be a string"; the list form cannot
+  carry this problem, since its elements are already required to be
+  strings). A list entry divides on `=`
   (Compose's documented separator, `- somehost=162.242.195.82`) or on the
   legacy `:` (`- somehost:162.242.195.82`) — `=` wins when both appear,
   because an IPv6 address is itself full of colons and splitting on the first
@@ -705,9 +724,17 @@ The prefix keeps a config from ever colliding with a same-named secret.
   `source` must be a string. `source`
   must name a top-level definition of the same kind; an unknown `source`
   raises. An unrecognized long-form key raises. When present, `target` must
-  be a string; `uid`/`gid`/`mode` must each be an int or string, not a bool
-  (`bool` is technically an `int` in Python, so a naive check would let one
-  through).
+  be a string. `uid`/`gid` and `mode` are NOT the same grammar, despite
+  reading like siblings (measured against `docker compose config` v5.1.2):
+  `uid`/`gid` are a plain string field with no further parsing at
+  config-validate time — a native int/bool/float/null is refused ("must be a
+  string"), but the string's own content is entirely unchecked, even
+  `uid: somevalue`. `mode` goes through Go's `strconv.ParseInt` at decode
+  time instead — a native int is accepted, any float is refused (whole or
+  fractional, unlike uid/gid, which have no numeric type at all), and a
+  string must match ParseInt's strict grammar (an optional sign then digits
+  only — no digit-grouping underscore, no surrounding whitespace;
+  `values.validate_integer`'s `strict_string=True`).
 - **Closure-scoped creation:** only a definition referenced (by `source`)
   from somewhere in the target service's dependency closure is ever
   created — a top-level definition nothing in the closure references never
