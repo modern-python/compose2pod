@@ -107,7 +107,14 @@ def _as_mapping(name: str, key: str, value: Any) -> dict[str, Any]:  # noqa: ANN
                 if not isinstance(dep, str):
                     msg = f"service {name!r}: depends_on entry {dep!r} must be a string"
                     raise UnsupportedComposeError(msg)
-            return {dep: {} for dep in value}
+            # `condition` explicit, not merely omitted: a short-form entry
+            # means service_started (Docker's own default for that form),
+            # but `graph._depends_on_entry_condition` requires an explicit
+            # `condition` on every *long*-form entry it sees -- normalizing
+            # to `{}` here would silently turn a valid short-form dependency
+            # into a mapping-form entry missing that key, rejected by a gate
+            # this same document would pass standalone.
+            return {dep: {"condition": "service_started"} for dep in value}
     msg = f"service {name!r}: cannot merge {key!r} across incompatible forms"
     raise UnsupportedComposeError(msg)
 

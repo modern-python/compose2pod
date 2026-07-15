@@ -889,20 +889,32 @@ All three conditions are honored: `service_started`, `service_healthy`,
 `service_healthy` dependency on a service with no usable healthcheck raises.
 
 `depends_on` (`compose2pod/graph.py`) itself must be either a list of
-service names (short form, each defaulting to `service_started`) or a
-mapping of service name to a per-dependency mapping (long form, read for
-`condition`). Anything else — a bare string (including the empty string;
-`or {}`'s falsy default used to swallow it silently as "no dependencies"),
-a number, a mapping whose value isn't itself a mapping — raises at the gate
-instead of failing later with a raw `AttributeError`/`TypeError`. Only an
-*absent* `depends_on` (not merely a falsy one) yields no dependencies. Each
-short-form list element must
-itself be a string (the same list/map YAML slip that trips up
+service names (short form) or a mapping of service name to a per-dependency
+mapping (long form, read for `condition`). The two forms default
+differently, matching `docker compose config` v5.1.2 exactly: a short-form
+entry defaults to `service_started` — Compose's own default for that form —
+but a long-form entry with no `condition` key at all raises ("missing
+required key 'condition'"); Docker refuses this too ("missing property
+'condition'"), even though it silently defaults the short form. compose2pod
+used to default the long form the same way the short form does
+(`spec.get("condition", "service_started")`), which was a false green
+against `planning/decisions/2026-07-14-docker-rejection-parity.md`'s hard
+rule, closed in Task 13. Anything else — a bare string (including the empty
+string; `or {}`'s falsy default used to swallow it silently as "no
+dependencies"), a number, a mapping whose value isn't itself a mapping —
+raises at the gate instead of failing later with a raw
+`AttributeError`/`TypeError`. Only an *absent* `depends_on` (not merely a
+falsy one) yields no dependencies. Each short-form list element must itself
+be a string (the same list/map YAML slip that trips up
 `environment`/`command`), checked before the list would otherwise crash raw
 (`TypeError: unhashable type`) when passed to `dict.fromkeys`. `extends.py`'s
-own list-to-mapping normalization enforces the identical check ahead of
-`validate()`, since `extends` resolution runs first (see Extends, above)
-and would otherwise crash raw on the same input.
+own list-to-mapping normalization enforces the identical string check ahead
+of `validate()`, since `extends` resolution runs first (see Extends, above),
+and injects the same `service_started` default explicitly (`{dep:
+{"condition": "service_started"}}`, not `{dep: {}}`) so a short-form entry
+that merges through `extends` stays the valid, Docker-default-matching
+document it would be standalone rather than becoming a condition-less
+long-form entry the gate now refuses.
 
 The long form's `condition` value gets the same treatment: it must be a
 string, so a mapping or list condition raises there instead of crashing raw

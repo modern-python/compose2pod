@@ -52,7 +52,17 @@ def _depends_on_entry_condition(dep: str, spec: dict[str, Any]) -> str:
     if unknown:
         msg = f"depends_on entry {dep!r}: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
-    condition = spec.get("condition", "service_started")
+    if "condition" not in spec:
+        # Measured against `docker compose config` v5.1.2: a long-form entry
+        # with no `condition` at all is refused ("missing property
+        # 'condition'"), unlike the short (list) form below, which still
+        # defaults to service_started -- that default is Docker's own and
+        # stays. This one was compose2pod's own invention (`spec.get(...,
+        # "service_started")`) and was a false green against the hard rule
+        # in `planning/decisions/2026-07-14-docker-rejection-parity.md`.
+        msg = f"depends_on entry {dep!r}: missing required key 'condition'"
+        raise UnsupportedComposeError(msg)
+    condition = spec["condition"]
     if not isinstance(condition, str):
         # Callers (parsing._validate_depends_on) test membership in a
         # `set` of known condition strings -- `x in a_set` hashes `x`,
