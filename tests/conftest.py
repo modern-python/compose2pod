@@ -53,4 +53,7 @@ def chats_compose() -> dict:
                 },
             },
         },
+        # A per-service network reference must be declared top-level (Docker
+        # rejects an undeclared one) -- keydb's 'default' network needs this.
+        "networks": {"default": None},
     }

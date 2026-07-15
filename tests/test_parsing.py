@@ -52,11 +52,13 @@ class TestValidate:
         assert validate({"services": {"app": {"image": "x"}}}) == []
 
     def test_mem_limit_bool_value_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match=r"'mem_limit' must be a number or string"):
+        # mem_limit now enforces the size grammar (Task 2), not "any number or
+        # string" -- the message changed, but a bool is still refused either way.
+        with pytest.raises(UnsupportedComposeError, match=r"'mem_limit' must be a size"):
             validate({"services": {"app": {"image": "x", "mem_limit": True}}})
 
     def test_cpus_list_value_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match=r"'cpus' must be a number or string"):
+        with pytest.raises(UnsupportedComposeError, match=r"'cpus' must be a number"):
             validate({"services": {"app": {"image": "x", "cpus": [1]}}})
 
     def test_unsupported_service_key_raises(self) -> None:
@@ -69,8 +71,14 @@ class TestValidate:
             validate(compose)
 
     def test_named_volume_is_accepted(self) -> None:
-        compose = {"services": {"db": {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}}}
-        assert validate(compose) == []
+        # A named volume must be declared top-level (see
+        # test_service_named_volume_must_be_declared_top_level), which itself
+        # carries the usual "ignoring top-level 'volumes'" warning.
+        compose = {
+            "services": {"db": {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}},
+            "volumes": {"pgdata": None},
+        }
+        assert any("volumes" in w for w in validate(compose))
 
     def test_long_volume_syntax_raises(self) -> None:
         compose = {"services": {"app": {"image": "x", "volumes": [{"type": "bind", "source": ".", "target": "/s"}]}}}
@@ -109,6 +117,24 @@ class TestValidate:
     def test_unknown_top_level_key_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="foo"):
             validate({"services": {"app": {"image": "x"}}, "foo": {}})
+
+    def test_top_level_name_non_string_raises(self) -> None:
+        # Measured: `docker compose config` refuses `name: 123` ("name must
+        # be a string") -- a bare `name:` (null) refuses the same way, one
+        # isinstance check reproduces both.
+        with pytest.raises(UnsupportedComposeError, match="'name' must be a string"):
+            validate({"services": {"app": {"image": "x"}}, "name": 123})
+        with pytest.raises(UnsupportedComposeError, match="'name' must be a string"):
+            validate({"services": {"app": {"image": "x"}}, "name": None})
+
+    def test_top_level_version_non_string_raises(self) -> None:
+        # Measured: `docker compose config` refuses `version: 123` the same
+        # way ("version must be a string").
+        with pytest.raises(UnsupportedComposeError, match="'version' must be a string"):
+            validate({"services": {"app": {"image": "x"}}, "version": 123})
+
+    def test_top_level_name_and_version_strings_accepted(self) -> None:
+        assert validate({"services": {"app": {"image": "x"}}, "name": "valid-name", "version": "3.8"}) == []
 
     def test_non_string_top_level_key_raises_instead_of_crashing_raw(self) -> None:
         # PyYAML routinely produces non-string keys (int, or a YAML-1.1 bool
@@ -332,23 +358,23 @@ class TestValidate:
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": 1024}}}}})
 
     def test_ulimits_list_valued_limit_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="must be an int or a soft/hard mapping"):
+        # A scalar ulimit bound now goes through values.validate_integer (Task 2), so the
+        # message is "must be an integer" rather than the old "int or a soft/hard mapping".
+        with pytest.raises(UnsupportedComposeError, match=r"'nofile'.*must be an integer"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": [1, 2]}}}})
 
     def test_ulimits_non_scalar_soft_hard_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
+        with pytest.raises(UnsupportedComposeError, match=r"'soft'.*must be an integer"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": [1, 2], "hard": 3}}}}})
 
     def test_ulimits_boolean_scalar_raises(self) -> None:
-        # bool IS an int in Python, so isinstance(spec, int | str) let it
-        # through and emit rendered the literal --ulimit "nofile=True". A
-        # boolean ulimit is meaningless -- unlike environment's bool (which
-        # Docker normalizes), there is no sensible ulimit normalization.
-        with pytest.raises(UnsupportedComposeError, match="must be an int or a soft/hard mapping"):
+        # bool IS an int in Python; values.validate_integer's _is_int excludes it
+        # the same way the old isinstance(spec, int | str) guard used to.
+        with pytest.raises(UnsupportedComposeError, match=r"'nofile'.*must be an integer"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": True}}}})
 
     def test_ulimits_boolean_soft_hard_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="'soft' and 'hard' must be int or str"):
+        with pytest.raises(UnsupportedComposeError, match=r"'soft'.*must be an integer"):
             validate({"services": {"app": {"image": "x", "ulimits": {"nofile": {"soft": True, "hard": 100}}}}})
 
     def test_non_mapping_healthcheck_raises(self) -> None:
@@ -375,17 +401,57 @@ class TestValidate:
         # Used to be silently accepted and mis-emitted as the literal
         # --health-retries "{'a': 1}".
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "retries": {"a": 1}}}}}
-        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'retries' must be a number or string"):
+        with pytest.raises(UnsupportedComposeError, match=r"'retries' must be an integer"):
             validate(compose)
 
     def test_healthcheck_timeout_list_rejected_at_gate(self) -> None:
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "timeout": [5]}}}}
-        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'timeout' must be a number or string"):
+        with pytest.raises(UnsupportedComposeError, match=r"'timeout' must be a duration with a unit"):
             validate(compose)
 
     def test_healthcheck_start_period_mapping_rejected_at_gate(self) -> None:
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "start_period": {"a": 1}}}}}
-        with pytest.raises(UnsupportedComposeError, match=r"healthcheck 'start_period' must be a number or string"):
+        with pytest.raises(UnsupportedComposeError, match=r"'start_period' must be a duration with a unit"):
+            validate(compose)
+
+    # Measured against `docker compose config` v5.1.2 (planning/changes/2026-07-15.05):
+    # timeout/start_period are a Go duration string -- a native number and a unitless
+    # string are both refused ("missing unit in duration"), except the bare '0' special
+    # case. interval shares the same grammar (through interval_seconds), with the
+    # additional deliberate/deferred rejection of compound and hour durations.
+    @pytest.mark.parametrize("key", ["timeout", "start_period"])
+    @pytest.mark.parametrize("value", ["30s", "1h30m", "1h", "500ms", "0s", "0"])
+    def test_healthcheck_duration_scalars_accept(self, key: str, value: str) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", key: value}}}}
+        assert validate(compose) == []
+
+    @pytest.mark.parametrize("key", ["timeout", "start_period"])
+    @pytest.mark.parametrize("value", [30, "30", 1.5, "1.5", 0, 3, "3", "somevalue"])
+    def test_healthcheck_duration_scalars_reject_false_greens(self, key: str, value: object) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", key: value}}}}
+        with pytest.raises(UnsupportedComposeError, match=rf"{key!r} must be a duration with a unit"):
+            validate(compose)
+
+    @pytest.mark.parametrize("value", ["30s", "500ms", "0"])
+    def test_healthcheck_interval_accepts(self, value: str) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "interval": value}}}}
+        assert validate(compose) == []
+
+    @pytest.mark.parametrize("value", [30, "30", 1.5, 0, 3, "3", 0.5, "somevalue"])
+    def test_healthcheck_interval_rejects_false_greens(self, value: object) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "interval": value}}}}
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+            validate(compose)
+
+    @pytest.mark.parametrize("value", [3, "3", 30, "30", 1.5, 0.5, 0, "0"])
+    def test_healthcheck_retries_accepts(self, value: object) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "retries": value}}}}
+        assert validate(compose) == []
+
+    @pytest.mark.parametrize("value", ["1.5", "30s", "1h30m", "somevalue"])
+    def test_healthcheck_retries_rejects_false_greens(self, value: object) -> None:
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "retries": value}}}}
+        with pytest.raises(UnsupportedComposeError, match=r"'retries' must be an integer"):
             validate(compose)
 
     def test_healthcheck_test_cmd_shell_nested_list_rejected_at_gate(self) -> None:
@@ -446,8 +512,13 @@ class TestValidate:
             validate(compose)
 
     def test_valid_networks_forms_accepted(self) -> None:
-        assert validate({"services": {"app": {"image": "x", "networks": ["n1"]}}}) == []
-        assert validate({"services": {"app": {"image": "x", "networks": {"default": None}}}}) == []
+        # A declared top-level 'networks' block is now required (see
+        # test_service_network_must_be_declared_top_level), which itself
+        # carries the usual "ignoring top-level 'networks'" warning.
+        list_form = {"services": {"app": {"image": "x", "networks": ["n1"]}}, "networks": {"n1": None}}
+        assert any("networks" in w for w in validate(list_form))
+        map_form = {"services": {"app": {"image": "x", "networks": {"default": None}}}, "networks": {"default": None}}
+        assert any("networks" in w for w in validate(map_form))
 
     def test_secrets_top_level_and_service_ref_accepted(self) -> None:
         doc = {"services": {"app": {"image": "x", "secrets": ["db"]}}, "secrets": {"db": {"file": "./db.txt"}}}
@@ -814,32 +885,62 @@ class TestSweepServiceNamedExtensionPrefix:
 
 
 class TestSweepSkipsUnreadRegions:
-    """`build`'s contents and the ignored top-level `networks`/`volumes` blocks are never read.
+    """`build`'s own `x-` extensions are never read; the top-level `networks`/`volumes` blocks now are.
 
-    compose2pod accepts these regions but never inspects their contents (see
-    architecture/supported-subset.md), so a non-string key inside them can
-    never reach the generated script and must not be rejected -- Docker
-    itself accepts them. The `environment`/other emitted-map divergence
-    (`{3306: db}` rejected) is unaffected: those keys do reach the script.
+    `build`'s contents stay genuinely unread (`image_for` never uses them),
+    so a non-string key inside a `build.x-*` extension can never reach the
+    generated script and must not be rejected. The `environment`/other
+    emitted-map divergence (`{3306: db}` rejected) is unaffected: those keys
+    do reach the script.
+
+    `build`'s own *known* keys are the one exception, and a narrower one than
+    this class used to claim: their values are now type-checked against
+    Docker's own grammar for each (Task 9), which includes checking that a
+    mapping-shaped value's own keys are strings -- Docker itself refuses a
+    non-string key in `build.args`/`labels`/`ssh`/etc. (`non-string key in
+    services.app.build.args: true`, measured against `docker compose config`
+    v5.1.2), even though compose2pod still never emits any of it. See
+    `test_build_args_non_string_key_rejected`, below `_validate_build`'s other
+    tests. Only a build key `docker compose config` does not itself define --
+    an `x-` extension -- stays genuinely unread.
+
+    The top-level `networks`/`volumes` blocks used to be this class's other
+    two members: compose2pod never *emits* from either (every service shares
+    the pod namespace; podman creates named volumes on first reference), but
+    Task 12 gave both a definition schema (`_validate_network_definitions`/
+    `_validate_volume_definitions`, `parsing.py`) -- Docker still validates a
+    document's own `networks:`/`volumes:` block contents even though
+    compose2pod ignores their effect, the same "ignored but still validated"
+    stance `build` has always had. Both blocks are swept now, like
+    `secrets`/`configs`, so the two tests below assert rejection, not
+    acceptance -- see git history for the pre-Task-12 accept-with-warning
+    version if the contrast is useful.
     """
 
-    def test_build_contents_non_string_key_accepted(self) -> None:
-        compose = {"services": {"app": {"build": {"context": ".", "args": {True: 1}}}}}
+    def test_build_x_prefixed_extension_contents_accepted(self) -> None:
+        compose = {"services": {"app": {"build": {"context": ".", "x-custom": {True: 1}}}}}
         assert validate(compose) == []
 
-    def test_top_level_volumes_contents_non_string_key_accepted(self) -> None:
+    def test_top_level_volumes_contents_non_string_key_now_rejected(self) -> None:
+        # Was accepted (this class used to be genuinely unread); Task 12 added
+        # a definition schema for the top-level `volumes:` block, so its
+        # contents are swept like `secrets`/`configs` now, not skipped.
         compose = {
             "services": {"app": {"image": "alpine"}},
             "volumes": {"data": {"driver_opts": {True: 1}}},
         }
-        assert any("ignoring top-level 'volumes'" in w for w in validate(compose))
+        with pytest.raises(UnsupportedComposeError, match=r"volumes\.data\.driver_opts: key True must be a string"):
+            validate(compose)
 
-    def test_top_level_networks_contents_non_string_key_accepted(self) -> None:
+    def test_top_level_networks_contents_non_string_key_now_rejected(self) -> None:
+        # Same as volumes, above -- Task 12 added a definition schema for the
+        # top-level `networks:` block.
         compose = {
             "services": {"app": {"image": "alpine"}},
             "networks": {"net1": {"driver_opts": {True: 1}}},
         }
-        assert any("ignoring top-level 'networks'" in w for w in validate(compose))
+        with pytest.raises(UnsupportedComposeError, match=r"networks\.net1\.driver_opts: key True must be a string"):
+            validate(compose)
 
     def test_environment_non_string_key_still_rejected(self) -> None:
         # The `environment: {3306: db}` divergence from Docker stands: that
@@ -995,3 +1096,821 @@ class TestNullContentBlocks:
     def test_absent_blocks_are_not_null_blocks(self) -> None:
         assert validate({"services": {"app": {"image": "x", "deploy": {"resources": {}}}}}) == []
         assert validate({"services": {"app": {"image": "x", "healthcheck": {"test": ["CMD", "true"]}}}}) == []
+
+
+def _doc(**svc: object) -> dict:
+    return {"services": {"app": {"image": "nginx", **svc}}}
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("restart", {"a": {"b": 1}}),
+        ("restart", 3),
+        ("restart", ["a"]),
+        ("tty", "yes-please"),
+        ("tty", 3),
+        ("stdin_open", []),
+        ("stop_signal", 3),
+        ("stop_signal", ["SIGTERM"]),
+        ("profiles", "dev"),
+        ("profiles", 3),
+        ("ports", 3),
+        ("ports", "8080:80"),
+        ("ports", ["abc"]),
+        ("stop_grace_period", 90),
+        ("stop_grace_period", "90"),
+        ("stop_grace_period", "abc"),
+    ],
+)
+def test_ignored_keys_are_still_shape_checked(key: str, value: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match=key):
+        validate(_doc(**{key: value}))
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        # Docker validates none of these contents -- neither do we, or we would
+        # over-reject a file it runs.
+        ("restart", "banana"),
+        ("restart", "unless-stopped"),
+        ("stop_signal", "SIGKILL"),
+        ("tty", True),
+        ("stdin_open", False),
+        ("profiles", ["dev"]),
+        ("ports", ["8080:80/tcp"]),
+        ("ports", [{"target": 80, "published": "8080"}]),
+        ("stop_grace_period", "1m30s"),
+    ],
+)
+def test_ignored_keys_accept_valid_shapes(key: str, value: object) -> None:
+    warnings = validate(_doc(**{key: value}))
+    assert any(key in warning for warning in warnings)
+
+
+def test_build_must_be_string_or_mapping() -> None:
+    for bad in (3, ["a"], True, 1.5):
+        with pytest.raises(UnsupportedComposeError, match="build"):
+            validate({"services": {"app": {"build": bad}}})
+    validate({"services": {"app": {"build": "."}}})
+    validate({"services": {"app": {"build": {"context": "."}}}})
+
+
+def test_build_mapping_rejects_non_string_key() -> None:
+    # require_string_keys guards build's own top-level keys (distinct from its
+    # unread contents, see test_build_contents_non_string_key_accepted): a bare
+    # `True:` key must raise cleanly, not crash downstream on a non-str key.
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate({"services": {"app": {"build": {True: "x", "context": "."}}}})
+
+
+def test_build_mapping_rejects_unknown_keys() -> None:
+    # Measured against `docker compose config` v5.1.2: `build` is a strict
+    # JSON schema -- an unrecognized key is refused ("additional properties
+    # '<key>' not allowed") even though compose2pod itself never reads any of
+    # build's contents.
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate({"services": {"app": {"build": {"a": "b"}}}})
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate({"services": {"app": {"build": {"context": ".", "bogus": 1}}}})
+
+
+def test_build_mapping_accepts_full_known_key_set_and_x_prefix() -> None:
+    # `context` is deliberately not required: `build: {dockerfile: ...}` alone
+    # is accepted (measured).
+    known = {
+        "additional_contexts": {},
+        "args": {},
+        "cache_from": [],
+        "cache_to": [],
+        "context": ".",
+        "dockerfile": "Dockerfile",
+        "dockerfile_inline": "FROM x",
+        "entitlements": [],
+        "extra_hosts": {},
+        "isolation": "default",
+        "labels": {},
+        "network": "host",
+        "no_cache": True,
+        "platforms": [],
+        "privileged": True,
+        "pull": True,
+        "secrets": [],
+        "shm_size": "64m",
+        "ssh": [],
+        "tags": [],
+        "target": "build",
+        "ulimits": {},
+        "x-custom": 1,
+    }
+    validate({"services": {"app": {"build": known}}})
+    validate({"services": {"app": {"build": {"dockerfile": "Dockerfile"}}}})
+
+
+# --- build value grammars (Task 9): Task 4 only checked build's key NAMES; these
+# check each known key's VALUE against Docker's own grammar for it. compose2pod
+# still never emits any of it (image_for always substitutes --image), but a
+# malformed value is still a document `docker compose config` refuses. Every
+# grammar below was measured against `docker compose config` v5.1.2 with the
+# same YAML text fed to both oracles (`compose2pod.cli._read_compose` +
+# `compose2pod.parsing.validate` vs `docker compose config`).
+
+
+def _build(key: str, value: object) -> dict:
+    return {"services": {"app": {"build": {"context": ".", key: value}}}}
+
+
+@pytest.mark.parametrize("key", ["context", "dockerfile", "dockerfile_inline", "target", "network", "isolation"])
+def test_build_string_keys_accept_string(key: str) -> None:
+    assert validate(_build(key, "value")) == []
+
+
+@pytest.mark.parametrize("key", ["context", "dockerfile", "dockerfile_inline", "target", "network", "isolation"])
+@pytest.mark.parametrize("bad", [3, ["a"], {"a": "b"}])
+def test_build_string_keys_reject_non_string(key: str, bad: object) -> None:
+    with pytest.raises(UnsupportedComposeError, match=key):
+        validate(_build(key, bad))
+
+
+def test_build_shm_size_accepts_int_and_size_string_and_whole_float() -> None:
+    assert validate(_build("shm_size", 100)) == []
+    assert validate(_build("shm_size", "100mb")) == []
+    assert validate(_build("shm_size", 100.0)) == []
+
+
+@pytest.mark.parametrize("bad", ["abc", "", ["a"], {"a": "b"}, 0.5])
+def test_build_shm_size_rejects_bad_values(bad: object) -> None:
+    # 0.5: build.shm_size refuses ANY fractional float, whole or not -- measured
+    # against `docker compose config` v5.1.2. Unlike the top-level `shm_size`
+    # service key (`values.validate_size`'s default `allow_fractional=True`),
+    # build's own `shm_size` only accepts a *whole* native float, matching
+    # `allow_fractional=False` (the same flag `mem_reservation` uses).
+    with pytest.raises(UnsupportedComposeError, match="shm_size"):
+        validate(_build("shm_size", bad))
+
+
+@pytest.mark.parametrize("key", ["no_cache", "pull", "privileged"])
+def test_build_bool_keys_are_strict(key: str) -> None:
+    assert validate(_build(key, True)) == []
+    assert validate(_build(key, False)) == []
+    with pytest.raises(UnsupportedComposeError, match=key):
+        validate(_build(key, 1))
+    with pytest.raises(UnsupportedComposeError, match=key):
+        # Deferred over-rejection, matching the top-level boolean keys'
+        # documented limitation (planning/deferred.md): Docker itself casts
+        # this quoted string, compose2pod does not yet.
+        validate(_build(key, "true"))
+
+
+@pytest.mark.parametrize("key", ["no_cache", "pull", "privileged"])
+def test_build_bool_keys_accept_a_variable_reference(key: str) -> None:
+    # `${VAR}` on a build boolean key is host-state-dependent -- measured:
+    # `MYVAR=true` is accepted, unset (blank) or `MYVAR=banana` is refused.
+    # compose2pod defers to script-run time, the same carve-out every other
+    # value grammar in `values.py` applies via `has_variable`.
+    assert validate(_build(key, "${MYVAR}")) == []
+
+
+@pytest.mark.parametrize("key", ["cache_from", "cache_to", "tags", "platforms", "entitlements"])
+def test_build_string_list_keys(key: str) -> None:
+    assert validate(_build(key, ["a", "b"])) == []
+    assert validate(_build(key, [])) == []
+    for bad in ("a", 3, ["a", 3], {"a": "b"}):
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_build(key, bad))
+
+
+@pytest.mark.parametrize("key", ["args", "labels"])
+def test_build_list_or_map_keys(key: str) -> None:
+    # Measured: `args`/`labels` share one grammar -- a list of 'KEY[=value]'
+    # strings (a bare 'KEY' with no '=' is fine) or a mapping with
+    # scalar-or-null values. `ssh` looks identical at a glance (Docker's own
+    # docs show `default | key=/path`) but is NOT -- see
+    # test_build_ssh_list_form_requires_default_or_key_path, below: its list
+    # form has one extra rule a bare 'KEY' entry must satisfy.
+    assert validate(_build(key, ["KEY=val"])) == []
+    assert validate(_build(key, ["KEY"])) == []
+    assert validate(_build(key, {"KEY": "val"})) == []
+    assert validate(_build(key, {"KEY": 3})) == []
+    assert validate(_build(key, {"KEY": None})) == []
+    for bad in ("bare", 3, [3], {"KEY": ["a"]}):
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_build(key, bad))
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate(_build(key, {True: "val"}))
+
+
+def test_build_ssh_map_form_shares_args_labels_grammar() -> None:
+    # The map form is unrestricted, identically to args/labels -- measured
+    # against `docker compose config` v5.1.2.
+    assert validate(_build("ssh", {"mykey": "/path"})) == []
+    assert validate(_build("ssh", {"mykey": 3})) == []
+    assert validate(_build("ssh", {"mykey": None})) == []
+    for bad in ("bare", 3, [3], {"mykey": ["a"]}):
+        with pytest.raises(UnsupportedComposeError, match="ssh"):
+            validate(_build("ssh", bad))
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate(_build("ssh", {True: "val"}))
+
+
+def test_build_ssh_list_form_requires_default_or_key_path() -> None:
+    # A Task 9 regression, closed here: `build.ssh`'s list form is stricter
+    # than args/labels' shared grammar -- a bare entry (no '=') must equal
+    # 'default'; Docker refuses any other bare id ('invalid ssh key "mykey"',
+    # measured against `docker compose config` v5.1.2). An entry with '='
+    # accepts any id, same as args/labels.
+    assert validate(_build("ssh", ["default"])) == []
+    assert validate(_build("ssh", ["default=/path"])) == []
+    assert validate(_build("ssh", ["mykey=/path"])) == []
+    with pytest.raises(UnsupportedComposeError, match="ssh"):
+        validate(_build("ssh", ["mykey"]))
+
+
+def test_build_args_non_string_key_rejected() -> None:
+    # See TestSweepSkipsUnreadRegions's docstring: build bypasses the general
+    # string-key sweep (`_sweep_service` skips build's contents), so each
+    # mapping-shaped build validator checks its own keys. Measured: Docker
+    # refuses this ('non-string key in services.app.build.args: true').
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate(_build("args", {True: "x"}))
+
+
+def test_build_additional_contexts() -> None:
+    assert validate(_build("additional_contexts", ["KEY=val"])) == []
+    assert validate(_build("additional_contexts", {"KEY": "val"})) == []
+    # Unlike args/labels/ssh, a bare 'KEY' (no '=') is refused, and a
+    # non-string map value is refused too -- both measured. The map-value
+    # case is not a mere schema nicety: docker compose config's own resolver
+    # panics on a native number there (compose-go v2.10.2, a real bug in the
+    # dependency, but its exit code is still nonzero -- 'docker rejects' by
+    # the harness's own definition), so accepting it here would be a document
+    # already broken upstream.
+    for bad in (["KEY"], {"KEY": 3}, {"KEY": True}, {"KEY": None}, "bare", 3):
+        with pytest.raises(UnsupportedComposeError, match="additional_contexts"):
+            validate(_build("additional_contexts", bad))
+
+
+def test_build_extra_hosts() -> None:
+    assert validate(_build("extra_hosts", ["myhost=1.2.3.4"])) == []
+    assert validate(_build("extra_hosts", ["myhost:1.2.3.4"])) == []
+    assert validate(_build("extra_hosts", {"myhost": "1.2.3.4"})) == []
+    # A map value may be a list of addresses (multiple IPs for one host) --
+    # measured; unlike args/labels/ssh/additional_contexts, a plain number,
+    # bool, or null map value is refused: build.extra_hosts values must be a
+    # string or list of strings, nothing else.
+    assert validate(_build("extra_hosts", {"myhost": ["1.2.3.4", "5.6.7.8"]})) == []
+    # An empty address list is accepted too -- measured (not obviously so:
+    # zero addresses for a host reads like it should be refused, but Docker
+    # takes it, so over-rejecting it would be exactly the taste-not-podman
+    # mistake the parity rule forbids).
+    assert validate(_build("extra_hosts", {"myhost": []})) == []
+    for bad in (["myhost"], {"myhost": 3}, {"myhost": ["1.2.3.4", 3]}, "bare", 3):
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts"):
+            validate(_build("extra_hosts", bad))
+
+
+_BUILD_SECRETS_STORE = {"mysec": {"environment": "MYVAR"}}
+
+
+def _build_secrets(value: object) -> dict:
+    doc = _build("secrets", value)
+    doc["secrets"] = _BUILD_SECRETS_STORE
+    return doc
+
+
+def test_build_secrets() -> None:
+    assert validate(_build_secrets(["mysec"])) == []
+    assert validate(_build_secrets([{"source": "mysec"}])) == []
+    assert validate(_build_secrets([{"source": "mysec", "target": "/run/secrets/x"}])) == []
+    for bad in ("mysec", 3, [3], [{"bogus": "mysec"}], [{"source": 3}], [{"target": 3}]):
+        with pytest.raises(UnsupportedComposeError, match="secrets"):
+            validate(_build_secrets(bad))
+    with pytest.raises(UnsupportedComposeError, match="build"):
+        validate(_build_secrets([{True: "mysec"}]))
+
+
+def test_build_ulimits() -> None:
+    # Same grammar as the top-level `ulimits` service key (`keys.validate_ulimits`,
+    # reused directly) -- measured identical against `docker compose config`.
+    assert validate(_build("ulimits", {"nofile": 100})) == []
+    assert validate(_build("ulimits", {"nofile": {"soft": 100, "hard": 200}})) == []
+    for bad in (["a"], "a", 3, {"nofile": 1.5}, {"nofile": {"soft": 100}}):
+        with pytest.raises(UnsupportedComposeError, match="ulimit"):
+            validate(_build("ulimits", bad))
+    with pytest.raises(UnsupportedComposeError, match="ulimit"):
+        validate(_build("ulimits", {True: 100}))
+
+
+def test_image_rejects_empty_string() -> None:
+    with pytest.raises(UnsupportedComposeError, match="image"):
+        validate({"services": {"app": {"image": ""}}})
+
+
+def test_container_name_must_match_dockers_pattern() -> None:
+    with pytest.raises(UnsupportedComposeError, match="container_name"):
+        validate(_doc(container_name=""))
+    validate(_doc(container_name="my-app"))
+
+
+def test_empty_hostname_is_accepted() -> None:
+    # Docker accepts `hostname: ""` -- refusing it would be an over-rejection.
+    validate(_doc(hostname=""))
+
+
+def test_service_network_must_be_declared_top_level() -> None:
+    with pytest.raises(UnsupportedComposeError, match="undefined network"):
+        validate(_doc(networks=["backend"]))
+    validate({"services": {"app": {"image": "nginx", "networks": ["backend"]}}, "networks": {"backend": None}})
+
+
+def test_service_network_default_is_implicitly_declared() -> None:
+    # `default` is Docker's implicit network -- always available, never needs
+    # a top-level `networks:` block. Measured against `docker compose config`
+    # v5.1.2: `networks: [default]` with NO top-level 'networks:' block
+    # ACCEPTS (previously refused here as "undefined network default" -- the
+    # one real over-rejection this task fixes). Every other undeclared name,
+    # including the other two Docker-reserved ones, still REJECTS.
+    validate(_doc(networks=["default"]))
+    for reserved in ("host", "none"):
+        with pytest.raises(UnsupportedComposeError, match="undefined network"):
+            validate(_doc(networks=[reserved]))
+
+
+def test_service_network_default_explicit_declaration_still_works() -> None:
+    # Declaring 'default' explicitly at the top level is legal too, and a
+    # no-op alongside the implicit declaration.
+    compose = {"services": {"app": {"image": "nginx", "networks": ["default"]}}, "networks": {"default": None}}
+    assert any("networks" in w for w in validate(compose))
+
+
+def test_service_network_list_entry_must_be_a_string() -> None:
+    # Same list/map YAML slip as `depends_on`/`command`/`environment`. Used to
+    # crash raw (TypeError: unhashable type: 'dict') from inside validate()
+    # itself, via `network not in declared` hashing a dict.
+    with pytest.raises(UnsupportedComposeError, match="'networks' entries must be strings"):
+        validate(_doc(networks=[{"a": 1}]))
+
+
+def test_service_network_list_entry_non_string_hashable_still_rejected_cleanly() -> None:
+    with pytest.raises(UnsupportedComposeError, match="'networks' entries must be strings"):
+        validate(_doc(networks=[5]))
+
+
+def test_top_level_networks_list_form_rejected() -> None:
+    # `docker compose config` refuses a list here ("networks must be a
+    # mapping"). Also the same hashing hazard as the per-service check above:
+    # `declared = set(compose.get("networks") or {})` would crash raw on an
+    # unhashable list entry before this guard existed.
+    compose = {"services": {"app": {"image": "nginx"}}, "networks": [{"a": 1}]}
+    with pytest.raises(UnsupportedComposeError, match="top-level 'networks' must be a mapping"):
+        validate(compose)
+
+
+def test_service_named_volume_must_be_declared_top_level() -> None:
+    # Mirrors test_service_network_must_be_declared_top_level -- measured
+    # against `docker compose config` v5.1.2: `volumes: [data:/var]` with no
+    # top-level `volumes:` block REJECTS ("refers to undefined volume data").
+    with pytest.raises(UnsupportedComposeError, match="undefined volume 'data'"):
+        validate(_doc(volumes=["data:/var"]))
+    validate({"services": {"app": {"image": "nginx", "volumes": ["data:/var"]}}, "volumes": {"data": None}})
+
+
+def test_bind_mount_and_anonymous_volumes_need_no_declaration() -> None:
+    # Neither form names a volume at all -- no top-level 'volumes:' block
+    # exists in any of these documents, and none is required.
+    validate(_doc(volumes=["./host:/var"]))
+    validate(_doc(volumes=["/abs:/var"]))
+    validate(_doc(volumes=["/container_only"]))
+
+
+def test_tilde_bind_mount_needs_no_declaration() -> None:
+    # Measured against `docker compose config` v5.1.2: `volumes: [~/data:/var]`
+    # with no top-level 'volumes:' block ACCEPTS -- Docker classifies a
+    # `~`-prefixed source as a bind mount (expanded against the invoking
+    # user's home directory), not a named-volume reference. The old "does not
+    # start with '.' or '/'" test wrongly classified this as a named volume
+    # and rejected it as undeclared -- the over-rejection this test guards.
+    validate(_doc(volumes=["~/data:/var"]))
+
+
+def test_hyphenated_and_underscored_named_volume_must_be_declared() -> None:
+    # A bare identifier still needs a top-level declaration regardless of
+    # which NAME_PATTERN characters it uses -- this is not weakened by the
+    # tilde/Windows-path fix above.
+    with pytest.raises(UnsupportedComposeError, match="undefined volume 'my-vol_1'"):
+        validate(_doc(volumes=["my-vol_1:/var"]))
+    validate({"services": {"app": {"image": "nginx", "volumes": ["my-vol_1:/var"]}}, "volumes": {"my-vol_1": None}})
+
+
+def test_named_volume_declared_external_still_counts_as_declared() -> None:
+    # `external: true` is still a declaration as far as the reference check is
+    # concerned -- Docker treats it as "must already exist", but the
+    # *reference* only cares that the name is known top-level.
+    compose = {
+        "services": {"app": {"image": "nginx", "volumes": ["data:/var"]}},
+        "volumes": {"data": {"external": True}},
+    }
+    validate(compose)
+
+
+def test_named_volume_variable_source_needs_no_declaration() -> None:
+    # A `${VAR}`-carrying source is a fact about the reading shell, not the
+    # document (see _validate_volume_references's docstring) -- the same
+    # `${VAR}` carve-out every other host-state-dependent grammar in this
+    # module already applies.
+    validate(_doc(volumes=["${VOLNAME}:/var"]))
+
+
+def test_top_level_volumes_list_form_rejected_by_reference_check() -> None:
+    # Same hashing hazard `_validate_network_references` already guards
+    # against, one level down: `declared = set(compose.get("volumes") or {})`
+    # would crash raw on an unhashable list entry before this guard existed.
+    # This is also now the ONLY place the top-level 'volumes' mapping shape is
+    # checked -- see _validate_volume_definitions's updated docstring.
+    compose = {"services": {"app": {"image": "nginx"}}, "volumes": [{"a": 1}]}
+    with pytest.raises(UnsupportedComposeError, match="top-level 'volumes' must be a mapping"):
+        validate(compose)
+
+
+def _net_doc(entry: object) -> dict:
+    """One service naming network 'n' (declared top-level), with 'entry' as its long-form value."""
+    return {"services": {"app": {"image": "nginx", "networks": {"n": entry}}}, "networks": {"n": None}}
+
+
+# Per-service `networks` long-form entry is a STRICT typed sub-schema -- unlike
+# the top-level `networks:` block (whose contents compose2pod never reads),
+# Docker validates every sub-key's shape here, measured against `docker
+# compose config` v5.1.2. The full valid key set (9 keys, confirmed against
+# both live docker and the upstream compose-spec JSON schema, one more than
+# initially assumed -- `interface_name` also exists): aliases, driver_opts,
+# gw_priority, interface_name, ipv4_address, ipv6_address, link_local_ips,
+# mac_address, priority.
+class TestNetworkEntrySchema:
+    def test_non_mapping_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="'n' must be a mapping"):
+            validate(_net_doc("somevalue"))
+
+    def test_unknown_sub_key_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_doc({"badkey": 1}))
+
+    def test_null_value_accepted(self) -> None:
+        # Measured: null means "use default settings", same as an explicit {}.
+        assert validate(_net_doc(None)) is not None
+
+    def test_empty_mapping_accepted(self) -> None:
+        assert validate(_net_doc({})) is not None
+
+    def test_extension_key_accepted(self) -> None:
+        # compose-spec's own schema allows `^x-` patternProperties here too.
+        assert validate(_net_doc({"x-foo": 1})) is not None
+
+    def test_aliases_still_a_list_of_strings(self) -> None:
+        # graph._host_names' own alias extraction keeps working through the
+        # new gate -- this is not a duplicate concern, it's the same grammar
+        # enforced twice (defense in depth), same pattern as extra_hosts.
+        assert validate(_net_doc({"aliases": ["a", "b"]})) is not None
+        with pytest.raises(UnsupportedComposeError, match="aliases"):
+            validate(_net_doc({"aliases": "notalist"}))
+        with pytest.raises(UnsupportedComposeError, match="aliases"):
+            validate(_net_doc({"aliases": [3]}))
+
+    @pytest.mark.parametrize("key", ["ipv4_address", "ipv6_address", "mac_address", "interface_name"])
+    def test_string_fields_accept_any_string_reject_non_string(self, key: str) -> None:
+        assert validate(_net_doc({key: "whatever-unchecked-content"})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_doc({key: 3}))
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_doc({key: True}))
+
+    @pytest.mark.parametrize("key", ["priority", "gw_priority"])
+    def test_priority_fields_are_native_numbers_only(self, key: str) -> None:
+        assert validate(_net_doc({key: 1})) is not None
+        assert validate(_net_doc({key: 1.5})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_doc({key: "notanum"}))
+        with pytest.raises(UnsupportedComposeError, match=key):
+            # Measured: even a numeric *string* is refused -- no number-or-string union.
+            validate(_net_doc({key: "5"}))
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_doc({key: True}))
+
+    def test_link_local_ips_is_a_list_of_strings(self) -> None:
+        assert validate(_net_doc({"link_local_ips": ["169.254.1.1"]})) is not None
+        with pytest.raises(UnsupportedComposeError, match="link_local_ips"):
+            validate(_net_doc({"link_local_ips": "notalist"}))
+        with pytest.raises(UnsupportedComposeError, match="link_local_ips"):
+            validate(_net_doc({"link_local_ips": [3]}))
+
+    def test_driver_opts_is_a_mapping_of_number_or_string(self) -> None:
+        assert validate(_net_doc({"driver_opts": {"foo": "bar"}})) is not None
+        assert validate(_net_doc({"driver_opts": {"foo": 3}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_doc({"driver_opts": "notamap"}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_doc({"driver_opts": {"foo": True}}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_doc({"driver_opts": {"foo": None}}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_doc({"driver_opts": {"foo": [1, 2]}}))
+
+    def test_variable_reference_whole_value_still_rejected(self) -> None:
+        # Compose interpolation only ever turns a scalar into another scalar
+        # string -- it can never produce a mapping. So unlike a scalar
+        # grammar's usual `${VAR}` carve-out, this position's "must be a
+        # mapping" verdict holds for every possible value of the variable;
+        # measured against `docker compose config` v5.1.2 with the variable
+        # both unset and set to a value ("").
+        with pytest.raises(UnsupportedComposeError, match="must be a mapping"):
+            validate(_net_doc("${MYVAR}"))
+
+    def test_non_mapping_non_string_entry_does_not_crash(self) -> None:
+        # Crash-class guard: a list value (the same list/map YAML slip as
+        # depends_on/environment/command) must fail clean, not TypeError from
+        # an unguarded set()/hash of an untrusted value.
+        with pytest.raises(UnsupportedComposeError, match="'n' must be a mapping"):
+            validate(_net_doc([{"a": 1}]))
+
+    def test_short_form_networks_still_unrestricted(self) -> None:
+        # List-form (short-form) networks carries no sub-schema at all --
+        # unaffected by this change.
+        compose = {"services": {"app": {"image": "nginx", "networks": ["n"]}}, "networks": {"n": None}}
+        assert validate(compose) is not None
+
+
+def _net_def_doc(definition: object) -> dict:
+    """One declared top-level network 'mynet', referenced by a service, with 'definition' as its own body."""
+    return {"services": {"app": {"image": "nginx", "networks": ["mynet"]}}, "networks": {"mynet": definition}}
+
+
+def _vol_def_doc(definition: object) -> dict:
+    """One declared top-level volume 'v', referenced by a service, with 'definition' as its own body."""
+    return {"services": {"app": {"image": "nginx", "volumes": ["v:/data"]}}, "volumes": {"v": definition}}
+
+
+# Task 12: the top-level `networks:`/`volumes:` blocks' own DEFINITION contents
+# ("networks.mynet: {...}", not a service's *reference* to a network) were
+# never validated at all -- compose2pod ignores their effect (every service
+# shares the pod namespace; podman creates named volumes on first reference),
+# but Docker still validates a document's own declarations, the same "ignored
+# but still validated" stance `build` and the per-service `networks` entry
+# schema (`TestNetworkEntrySchema`, above) already have. Full key sets and
+# per-key grammars measured against live `docker compose config` v5.1.2.
+class TestNetworkDefinitionSchema:
+    def test_non_mapping_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must be a mapping or null"):
+            validate(_net_def_doc("somestring"))
+
+    def test_null_value_accepted(self) -> None:
+        # Measured: means "use default settings" -- the same as an omitted
+        # top-level network or an explicit {}.
+        assert validate(_net_def_doc(None)) is not None
+
+    def test_empty_mapping_accepted(self) -> None:
+        assert validate(_net_def_doc({})) is not None
+
+    def test_unknown_key_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_def_doc({"bogus": 1}))
+
+    def test_extension_key_accepted(self) -> None:
+        assert validate(_net_def_doc({"x-foo": 1})) is not None
+
+    def test_non_mapping_non_string_entry_does_not_crash(self) -> None:
+        # Crash-class guard: a list value must fail clean, not TypeError from
+        # an unguarded set()/hash of an untrusted value.
+        with pytest.raises(UnsupportedComposeError, match="must be a mapping or null"):
+            validate(_net_def_doc([{"a": 1}]))
+
+    def test_non_string_key_in_definition_rejected_cleanly(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="key 123 must be a string"):
+            validate(_net_def_doc({123: "x"}))
+
+    @pytest.mark.parametrize("key", ["driver", "name"])
+    def test_string_fields_accept_string_reject_non_string(self, key: str) -> None:
+        assert validate(_net_def_doc({key: "value"})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_def_doc({key: 123}))
+
+    @pytest.mark.parametrize("key", ["internal", "attachable", "enable_ipv6"])
+    def test_bool_fields_accept_bool_reject_non_bool(self, key: str) -> None:
+        assert validate(_net_def_doc({key: True})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_def_doc({key: 1}))
+
+    @pytest.mark.parametrize("key", ["internal", "attachable", "enable_ipv6"])
+    def test_bool_fields_reject_a_quoted_string_but_accept_a_variable_reference(self, key: str) -> None:
+        # Measured: Docker casts a *literal* quoted string through the same
+        # YAML-1.1-style boolean cast every other boolean key in this project
+        # already defers (planning/deferred.md) -- refused here on purpose, a
+        # cataloged over-reject, not a bug. A genuine `${VAR}` reference is
+        # different: Docker resolves and casts it at read time, so its
+        # verdict is a fact about the reading shell, not the document.
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_def_doc({key: "true"}))
+        assert validate(_net_def_doc({key: "${MYVAR}"})) is not None
+
+    def test_driver_opts_is_a_mapping_of_number_or_string(self) -> None:
+        assert validate(_net_def_doc({"driver_opts": {"foo": "bar"}})) is not None
+        assert validate(_net_def_doc({"driver_opts": {"foo": 3}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_def_doc({"driver_opts": "notamap"}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_def_doc({"driver_opts": {"foo": True}}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_def_doc({"driver_opts": {"foo": None}}))
+
+    def test_labels_list_and_map_forms_accepted(self) -> None:
+        assert validate(_net_def_doc({"labels": ["foo=bar"]})) is not None
+        assert validate(_net_def_doc({"labels": {"foo": "bar"}})) is not None
+        assert validate(_net_def_doc({"labels": {"foo": None}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="labels"):
+            validate(_net_def_doc({"labels": 123}))
+        with pytest.raises(UnsupportedComposeError, match="labels"):
+            validate(_net_def_doc({"labels": {"foo": [1, 2]}}))
+        with pytest.raises(UnsupportedComposeError, match="labels"):
+            validate(_net_def_doc({"labels": [123]}))
+
+    def test_external_bool_and_mapping_forms_accepted(self) -> None:
+        assert validate(_net_def_doc({"external": True})) is not None
+        assert validate(_net_def_doc({"external": False})) is not None
+        assert validate(_net_def_doc({"external": {}})) is not None
+        assert validate(_net_def_doc({"external": {"name": "realnet"}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="external"):
+            validate(_net_def_doc({"external": "notabool"}))
+        with pytest.raises(UnsupportedComposeError, match="external"):
+            validate(_net_def_doc({"external": 123}))
+        with pytest.raises(UnsupportedComposeError, match="external"):
+            validate(_net_def_doc({"external": None}))
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_def_doc({"external": {"bogus": 1}}))
+        with pytest.raises(UnsupportedComposeError, match="name"):
+            validate(_net_def_doc({"external": {"name": 123}}))
+
+    def test_external_variable_reference_passes_through(self) -> None:
+        assert validate(_net_def_doc({"external": "${MYVAR}"})) is not None
+
+    def test_ipam_top_level_shape(self) -> None:
+        assert validate(_net_def_doc({"ipam": {}})) is not None
+        assert validate(_net_def_doc({"ipam": {"driver": "default"}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="ipam"):
+            validate(_net_def_doc({"ipam": "notamap"}))
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_def_doc({"ipam": {"bogus": 1}}))
+        with pytest.raises(UnsupportedComposeError, match="driver"):
+            validate(_net_def_doc({"ipam": {"driver": 123}}))
+
+    def test_ipam_config_is_a_list_of_mappings(self) -> None:
+        assert validate(_net_def_doc({"ipam": {"config": [{"subnet": "172.28.0.0/16"}]}})) is not None
+        assert validate(_net_def_doc({"ipam": {"config": [{}]}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="config"):
+            validate(_net_def_doc({"ipam": {"config": "notalist"}}))
+        with pytest.raises(UnsupportedComposeError, match="config"):
+            validate(_net_def_doc({"ipam": {"config": ["notamap"]}}))
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_def_doc({"ipam": {"config": [{"bogus": 1}]}}))
+
+    @pytest.mark.parametrize("key", ["subnet", "ip_range", "gateway"])
+    def test_ipam_config_entry_string_fields(self, key: str) -> None:
+        assert validate(_net_def_doc({"ipam": {"config": [{key: "value"}]}})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_def_doc({"ipam": {"config": [{key: 123}]}}))
+
+    def test_ipam_config_aux_addresses_is_a_mapping_of_strings(self) -> None:
+        assert validate(_net_def_doc({"ipam": {"config": [{"aux_addresses": {"host1": "172.28.1.5"}}]}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="aux_addresses"):
+            validate(_net_def_doc({"ipam": {"config": [{"aux_addresses": "notamap"}]}}))
+        with pytest.raises(UnsupportedComposeError, match="aux_addresses"):
+            validate(_net_def_doc({"ipam": {"config": [{"aux_addresses": {"host1": 123}}]}}))
+
+    def test_ipam_options_is_a_mapping_of_strings(self) -> None:
+        # Measured divergence from driver_opts: ipam.options values must be
+        # strings -- a number is refused, unlike driver_opts' number-or-string.
+        assert validate(_net_def_doc({"ipam": {"options": {"foo": "bar"}}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="options"):
+            validate(_net_def_doc({"ipam": {"options": "notamap"}}))
+        with pytest.raises(UnsupportedComposeError, match="options"):
+            validate(_net_def_doc({"ipam": {"options": {"foo": 123}}}))
+
+
+# Same pattern as networks, above, but a narrower key set -- measured: no
+# `ipam`/`internal`/`attachable`/`enable_ipv6` (all refused as unknown keys
+# on a volume definition).
+class TestVolumeDefinitionSchema:
+    def test_non_mapping_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must be a mapping or null"):
+            validate(_vol_def_doc("somestring"))
+
+    def test_null_value_accepted(self) -> None:
+        assert validate(_vol_def_doc(None)) is not None
+
+    def test_empty_mapping_accepted(self) -> None:
+        assert validate(_vol_def_doc({})) is not None
+
+    def test_unknown_key_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_vol_def_doc({"bogus": 1}))
+
+    @pytest.mark.parametrize("key", ["ipam", "internal", "attachable", "enable_ipv6"])
+    def test_network_only_keys_rejected_as_unknown(self, key: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_vol_def_doc({key: True}))
+
+    def test_extension_key_accepted(self) -> None:
+        assert validate(_vol_def_doc({"x-foo": 1})) is not None
+
+    def test_non_string_key_in_definition_rejected_cleanly(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="key 123 must be a string"):
+            validate(_vol_def_doc({123: "x"}))
+
+    @pytest.mark.parametrize("key", ["driver", "name"])
+    def test_string_fields_accept_string_reject_non_string(self, key: str) -> None:
+        assert validate(_vol_def_doc({key: "value"})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_vol_def_doc({key: 123}))
+
+    def test_driver_opts_is_a_mapping_of_number_or_string(self) -> None:
+        assert validate(_vol_def_doc({"driver_opts": {"type": "nfs"}})) is not None
+        assert validate(_vol_def_doc({"driver_opts": {"type": 3}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_vol_def_doc({"driver_opts": "notamap"}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_vol_def_doc({"driver_opts": {"type": True}}))
+
+    def test_labels_list_and_map_forms_accepted(self) -> None:
+        assert validate(_vol_def_doc({"labels": ["foo=bar"]})) is not None
+        assert validate(_vol_def_doc({"labels": {"foo": "bar"}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="labels"):
+            validate(_vol_def_doc({"labels": 123}))
+
+    def test_external_bool_and_mapping_forms_accepted(self) -> None:
+        assert validate(_vol_def_doc({"external": True})) is not None
+        assert validate(_vol_def_doc({"external": {"name": "realvol"}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="external"):
+            validate(_vol_def_doc({"external": "notabool"}))
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_vol_def_doc({"external": {"bogus": 1}}))
+
+    def test_external_variable_reference_passes_through(self) -> None:
+        assert validate(_vol_def_doc({"external": "${MYVAR}"})) is not None
+
+
+def test_top_level_volumes_non_mapping_rejected() -> None:
+    # Measured: `volumes: somestring` and `volumes: [1, 2]` are both refused
+    # ("volumes must be a mapping") -- previously entirely unchecked, since
+    # only the ignored-with-warning branch ever looked at this key.
+    compose = {"services": {"app": {"image": "nginx"}}, "volumes": "somestring"}
+    with pytest.raises(UnsupportedComposeError, match="top-level 'volumes' must be a mapping"):
+        validate(compose)
+
+
+_BUILD_SECRETS_UNDECLARED_STORE = {"declared": {"environment": "MYVAR"}}
+
+
+def test_build_secrets_short_form_undeclared_source_rejected() -> None:
+    doc = _build("secrets", ["nope"])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)
+
+
+def test_build_secrets_long_form_undeclared_source_rejected() -> None:
+    doc = _build("secrets", [{"source": "nope", "target": "/run/secrets/x"}])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)
+
+
+def test_build_secrets_declared_source_accepted_both_forms() -> None:
+    doc = _build("secrets", ["declared", {"source": "declared"}])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    assert validate(doc) == []
+
+
+def test_build_secrets_no_top_level_secrets_block_rejects_any_reference() -> None:
+    doc = _build("secrets", ["declared"])
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)
+
+
+def test_build_secrets_long_form_source_omitted_rejected_cleanly() -> None:
+    # Crash-class guard: a long-form entry with no 'source' key used to raw-crash
+    # (KeyError: 'source') from `_validate_build_secret_references` indexing
+    # `entry["source"]` unconditionally. Docker itself rejects this (measured,
+    # `docker compose config` v5.1.2: "refers to undefined build secret ''" --
+    # a missing source is treated as an empty, always-undeclared name), so this
+    # must raise UnsupportedComposeError, never KeyError.
+    doc = _build("secrets", [{"target": "/run/secrets/x"}])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)
+
+
+def test_build_secrets_empty_mapping_entry_rejected_cleanly() -> None:
+    # Same crash hazard, empty-mapping shape: measured against `docker compose
+    # config` v5.1.2 -- also REJECT ("refers to undefined build secret '').
+    doc = _build("secrets", [{}])
+    doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
+    with pytest.raises(UnsupportedComposeError, match="undefined secret"):
+        validate(doc)

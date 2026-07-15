@@ -1,0 +1,5 @@
+services:
+  app:
+    image: alpine
+    extra_hosts:
+      myhost: 3

@@ -116,7 +116,32 @@ class TestResolveExtends:
             }
         }
         merged = _services(doc)["web"]["depends_on"]
-        assert merged == {"db": {"condition": "service_started"}, "cache": {}}
+        assert merged == {"db": {"condition": "service_started"}, "cache": {"condition": "service_started"}}
+
+    def test_short_form_depends_on_through_extends_stays_valid(self) -> None:
+        # Regression: the list->mapping normalization above used to produce
+        # a condition-less `{}` entry per dependency, which
+        # graph._depends_on_entry_condition (Task 13) now refuses as a
+        # long-form entry missing 'condition' -- turning a short-form
+        # `depends_on` that is valid standalone into one refused only
+        # because it happened to pass through `extends`. Both `base` and
+        # `web` here contribute short-form entries (the only combination
+        # that reaches the list->mapping normalizer at all), and the
+        # resolved document must still validate clean.
+        doc = {
+            "services": {
+                "base": {"image": "x", "depends_on": ["db"]},
+                "web": {"extends": {"service": "base"}, "depends_on": ["cache"]},
+                "db": {"image": "y"},
+                "cache": {"image": "z"},
+            }
+        }
+        resolved = resolve_extends(doc)
+        assert validate(resolved) == []
+        assert resolved["services"]["web"]["depends_on"] == {
+            "db": {"condition": "service_started"},
+            "cache": {"condition": "service_started"},
+        }
 
     def test_cap_add_sequence_concatenates(self) -> None:
         doc = {
@@ -372,7 +397,7 @@ class TestMergeNeverWidensTheGate:
         "annotations": ({"a": "1"}, 5),
         "environment": ({"A": "1"}, 5),
         "extra_hosts": ({"h": "1.1.1.1"}, 5),
-        "depends_on": ({"db": {}}, 5),
+        "depends_on": ({"db": {"condition": "service_started"}}, 5),
         # Scalar IS a valid form for these two, so a non-scalar non-list is used.
         "tmpfs": (["/scratch/a"], 5),
         "env_file": (["a.env"], 5),

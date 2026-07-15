@@ -1,0 +1,6 @@
+services:
+  app:
+    image: nginx
+    env_file:
+      - path: app.env
+        required: false

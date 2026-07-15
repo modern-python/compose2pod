@@ -1,19 +1,33 @@
 """Extract compose deploy.resources limits/reservations into podman run flags."""
 
+from collections.abc import Callable
 from typing import Any
 
+from compose2pod import values
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.keys import Expand, Token, is_number, require_string_keys
+from compose2pod.keys import Expand, Token, require_string_keys
 
 
-# deploy.resources.limits.<field> -> (podman flag, conflicting legacy key)
-_LIMITS = {"cpus": ("--cpus", "cpus"), "memory": ("--memory", "mem_limit"), "pids": ("--pids-limit", "pids_limit")}
+def _validate_memory_size(name: str, field: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    # limits.memory / reservations.memory are typed as a Go *string* field --
+    # unlike the legacy mem_limit/mem_reservation keys, a native number is
+    # refused, only a size string is accepted. Measured against `docker
+    # compose config` v5.1.2; see values.validate_size's `string_only` doc.
+    values.validate_size(name, field, value, string_only=True)
 
 
-def _check_number(name: str, field: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
-    if not is_number(value):
-        msg = f"service {name!r}: {field} must be a number or string"
-        raise UnsupportedComposeError(msg)
+def _validate_pids_count(name: str, field: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    # Matches oom_score_adj: a whole-valued float (100.0) casts cleanly to
+    # Docker's int64 field; only a fractional one is refused.
+    values.validate_integer(name, field, value, allow_whole_float=True)
+
+
+# deploy.resources.limits.<field> -> (podman flag, conflicting legacy key, value grammar)
+_LIMITS: dict[str, tuple[str, str, Callable[[str, str, Any], None]]] = {
+    "cpus": ("--cpus", "cpus", values.validate_number),
+    "memory": ("--memory", "mem_limit", _validate_memory_size),
+    "pids": ("--pids-limit", "pids_limit", _validate_pids_count),
+}
 
 
 def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # noqa: ANN401 - Compose values are untyped
@@ -27,9 +41,9 @@ def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # no
     if unknown:
         msg = f"service {name!r}: deploy.resources.limits: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
-    for field, (_flag, legacy) in _LIMITS.items():
+    for field, (_flag, legacy, validate) in _LIMITS.items():
         if field in limits:
-            _check_number(name, f"deploy.resources.limits.{field}", limits[field])
+            validate(name, f"deploy.resources.limits.{field}", limits[field])
             if legacy in svc:
                 msg = f"service {name!r}: {legacy!r} conflicts with deploy.resources.limits.{field}"
                 raise UnsupportedComposeError(msg)
@@ -50,7 +64,7 @@ def _validate_reservations(name: str, svc: dict[str, Any], reservations: Any) ->
             msg = f"service {name!r}: deploy.resources.reservations.{field} is not supported (no podman equivalent)"
             raise UnsupportedComposeError(msg)
     if "memory" in reservations:
-        _check_number(name, "deploy.resources.reservations.memory", reservations["memory"])
+        _validate_memory_size(name, "deploy.resources.reservations.memory", reservations["memory"])
         if "mem_reservation" in svc:
             msg = f"service {name!r}: 'mem_reservation' conflicts with deploy.resources.reservations.memory"
             raise UnsupportedComposeError(msg)
@@ -108,7 +122,7 @@ def deploy_resource_flags(svc: dict[str, Any]) -> list[Token]:
     limits = resources.get("limits") or {}
     reservations = resources.get("reservations") or {}
     tokens: list[Token] = []
-    for field, (flag, _legacy) in _LIMITS.items():
+    for field, (flag, _legacy, _validate) in _LIMITS.items():
         if field in limits:
             tokens += [flag, Expand(value=str(limits[field]))]
     if "memory" in reservations:

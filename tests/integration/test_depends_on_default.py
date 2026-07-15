@@ -1,4 +1,4 @@
-"""depends_on with no condition (defaults to service_started): the one condition with no gate.
+"""depends_on's default condition (service_started): the one condition with no gate.
 
 Unlike service_healthy (wait_healthy) and service_completed_successfully (blocking
 --rm), service_started provides zero synchronization -- helper is started detached
@@ -7,6 +7,12 @@ helper's side effect would be a race (podman run -d returns once the container
 LAUNCHES, not once its command finishes), so app polls with a bounded retry loop
 instead -- the correct shape for testing a condition whose entire point is "the
 caller must provide their own synchronization."
+
+Uses the short (list) form, which is where this default actually lives: Docker
+itself defaults a short-form entry to service_started, but (measured against
+`docker compose config` v5.1.2, Task 13) refuses a long-form entry with no
+explicit `condition` -- `depends_on: {db: {}}` no longer means the same thing
+compose2pod's own long-form default used to.
 """
 
 from collections.abc import Callable
@@ -27,7 +33,7 @@ def test_depends_on_default_condition_is_service_started(run_pod: Callable[..., 
             "app": {
                 "image": "busybox:1.36",
                 "volumes": ["./shared:/shared"],
-                "depends_on": {"helper": {}},  # no condition key -> defaults to service_started
+                "depends_on": ["helper"],  # short form -> defaults to service_started
                 "command": [
                     "sh",
                     "-c",

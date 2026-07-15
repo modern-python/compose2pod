@@ -1,5 +1,6 @@
 import io
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -346,3 +347,96 @@ class TestYaml12Booleans:
         compose = "services:\n  app:\n    image: alpine\n    environment:\n      on: 1\n"
         assert run_main(compose, ["--target", "app", "--image", "ci:1", "--format", "yaml"], monkeypatch) == 0
         assert '-e "on=1"' in capsys.readouterr().out
+
+
+class TestYaml12Floats:
+    """A bare `1e3` is a float, as it is for `docker compose`.
+
+    PyYAML implements YAML 1.1, whose float grammar requires a dot -- `1e3`
+    stays the plain string `"1e3"`. Docker parses YAML 1.2, where a bare
+    mantissa plus exponent is a float on its own, no dot required. The gap is
+    not cosmetic: `cpuset: 1e3` is a *string* to compose2pod today, so it
+    slides past the "cpuset must be a string" rule Docker enforces on the
+    float 1000.0 -- a false green, the one thing the rejection-parity gate
+    exists to prevent (`planning/decisions/2026-07-14-docker-rejection-parity.md`).
+    """
+
+    def test_bare_exponent_loads_as_float(self) -> None:
+        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+            "k:\n  a: 1e3\n  b: -1e3\n  c: 1E3\n"
+        )
+        assert loaded["k"] == {"a": 1000.0, "b": -1000.0, "c": 1000.0}
+        assert all(isinstance(v, float) for v in loaded["k"].values())
+
+    def test_dotted_and_special_floats_still_load_as_floats(self) -> None:
+        loaded = cli._load_yaml(  # noqa: SLF001 - the loader is the unit under test
+            "k:\n  a: 1.5\n  b: .5\n  c: .inf\n  d: -.inf\n  e: .nan\n"
+        )
+        nan = loaded["k"].pop("e")
+        assert loaded["k"] == {"a": 1.5, "b": 0.5, "c": float("inf"), "d": float("-inf")}
+        assert math.isnan(nan)
+
+    def test_bare_int_still_loads_as_int(self) -> None:
+        # The float regex must not swallow a plain integer: no dot, no exponent.
+        loaded = cli._load_yaml("k: 123\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 123}
+        assert isinstance(loaded["k"], int)
+
+    def test_digit_grouped_int_is_unaffected(self) -> None:
+        # Out of scope: only the float resolver moves, the int resolver is untouched.
+        loaded = cli._load_yaml("k: 1_000\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 1000}
+        assert isinstance(loaded["k"], int)
+
+    def test_quoted_exponent_stays_a_string(self) -> None:
+        # The whole point: quoting must still block float resolution.
+        loaded = cli._load_yaml('k: "1e3"\n')  # noqa: SLF001 - the loader is the unit under test
+        assert loaded["k"] == "1e3"
+        assert isinstance(loaded["k"], str)
+
+    def test_cpuset_bare_exponent_is_rejected_end_to_end(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Docker rejects this: cpuset wants a string and sees the float 1000.0.
+        compose = "services:\n  app:\n    image: alpine\n    cpuset: 1e3\n"
+        rc = run_main(compose, ["--target", "app", "--image", "ci:1", "--format", "yaml"], monkeypatch)
+        assert rc == EXIT_USAGE_ERROR
+        assert "'cpuset' must be a string" in capsys.readouterr().err
+
+    def test_oom_score_adj_bare_exponent_is_accepted_end_to_end(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Docker accepts this: oom_score_adj casts the whole-valued float 1000.0 leniently.
+        compose = "services:\n  app:\n    image: alpine\n    oom_score_adj: 1e3\n"
+        rc = run_main(compose, ["--target", "app", "--image", "ci:1", "--format", "yaml"], monkeypatch)
+        assert rc == 0
+        assert "--oom-score-adj" in capsys.readouterr().out
+
+
+class TestYaml11IntBoundaryForms:
+    """Int-boundary forms must still resolve as `int`.
+
+    The float-resolver rebuild (2026-07-15.01) touches the same implicit-resolver
+    table PyYAML's int resolver reads from; these forms must not slide into the
+    new float branch or fall through to `str`.
+    """
+
+    def test_leading_zero_octal_still_loads_as_int(self) -> None:
+        loaded = cli._load_yaml("k: 007\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 7}
+        assert isinstance(loaded["k"], int)
+
+    def test_hex_still_loads_as_int(self) -> None:
+        loaded = cli._load_yaml("k: 0x1A\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 26}
+        assert isinstance(loaded["k"], int)
+
+    def test_binary_still_loads_as_int(self) -> None:
+        loaded = cli._load_yaml("k: 0b101\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 5}
+        assert isinstance(loaded["k"], int)
+
+    def test_sexagesimal_still_loads_as_int(self) -> None:
+        loaded = cli._load_yaml("k: 1:20\n")  # noqa: SLF001 - the loader is the unit under test
+        assert loaded == {"k": 80}
+        assert isinstance(loaded["k"], int)

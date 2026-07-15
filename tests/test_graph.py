@@ -2,6 +2,7 @@ import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
+from compose2pod.parsing import validate
 
 
 class TestDependsOn:
@@ -10,6 +11,21 @@ class TestDependsOn:
 
     def test_map_form_keeps_conditions(self) -> None:
         assert depends_on({"depends_on": {"db": {"condition": "service_healthy"}}}) == {"db": "service_healthy"}
+
+    def test_long_form_missing_condition_raises(self) -> None:
+        # Measured against `docker compose config` v5.1.2: a long-form entry
+        # with no `condition` key is refused ("missing property 'condition'"),
+        # even though the short (list) form still defaults silently to
+        # service_started -- Docker's own default, kept as-is. This default
+        # was ours, not Docker's, and is the false green Task 13 closes.
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': missing required key 'condition'"):
+            depends_on({"depends_on": {"db": {}}})
+
+    def test_long_form_with_other_sub_keys_but_no_condition_still_raises(self) -> None:
+        # A populated but condition-less entry is refused the same way --
+        # `restart`/`required` are no substitute for the required key.
+        with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': missing required key 'condition'"):
+            depends_on({"depends_on": {"db": {"restart": True}}})
 
     def test_missing_depends_on_is_empty(self) -> None:
         assert depends_on({"image": "x"}) == {}
@@ -52,6 +68,53 @@ class TestDependsOn:
         # past this check only to fail confusingly deeper in.
         with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
             depends_on({"depends_on": {"db": {"condition": 1}}})
+
+    def test_depends_on_rejects_a_bare_string(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="depends_on"):
+            validate({"services": {"app": {"image": "nginx", "depends_on": ""}}})
+
+    def test_unknown_sub_key_rejected(self) -> None:
+        # Strict schema, measured against `docker compose config` v5.1.2:
+        # "additional properties 'bogus' not allowed".
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            depends_on({"depends_on": {"db": {"condition": "service_started", "bogus": 1}}})
+
+    def test_x_prefixed_extension_key_accepted(self) -> None:
+        assert depends_on({"depends_on": {"db": {"condition": "service_started", "x-custom": 1}}}) == {
+            "db": "service_started"
+        }
+
+    def test_restart_must_be_a_boolean(self) -> None:
+        # Measured: `restart: 5` is refused ("must be a boolean or string" --
+        # the "or string" half is the quoted-boolean cast, a known deferred
+        # limitation, planning/deferred.md). `condition` is present so this
+        # exercises the `restart` check specifically, not the missing-condition one.
+        with pytest.raises(UnsupportedComposeError, match=r"'restart' must be a boolean"):
+            depends_on({"depends_on": {"db": {"condition": "service_started", "restart": 5}}})
+
+    def test_required_must_be_a_boolean(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'required' must be a boolean"):
+            depends_on({"depends_on": {"db": {"condition": "service_started", "required": "notabool"}}})
+
+    def test_restart_and_required_true_and_false_accepted(self) -> None:
+        assert depends_on(
+            {"depends_on": {"db": {"condition": "service_started", "restart": True, "required": False}}}
+        ) == {"db": "service_started"}
+
+    def test_restart_variable_reference_passes_through(self) -> None:
+        # Host-dependent, measured: Docker interpolates the reference *then*
+        # casts the result to a boolean ("error while interpolating ...
+        # failed to cast to expected type"), so its verdict is a fact about
+        # the reading shell's environment, not the document -- the same
+        # carve-out as `_validate_build_bool`.
+        assert depends_on({"depends_on": {"db": {"condition": "service_started", "restart": "${MYVAR}"}}}) == {
+            "db": "service_started"
+        }
+
+    def test_required_variable_reference_passes_through(self) -> None:
+        assert depends_on({"depends_on": {"db": {"condition": "service_started", "required": "${MYVAR}"}}}) == {
+            "db": "service_started"
+        }
 
 
 class TestHostnames:

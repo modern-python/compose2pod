@@ -48,3 +48,18 @@ jobs:
       - run: just install
       - run: podman --version
       - run: just test-integration
+
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: extractions/setup-just@v4
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+      - run: uv python install 3.12
+      - run: uv python pin 3.12
+      - run: just install
+      - run: docker compose version
+      - run: just test-conformance

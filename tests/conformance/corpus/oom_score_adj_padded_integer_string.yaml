@@ -1,0 +1,4 @@
+services:
+  app:
+    image: nginx:alpine
+    oom_score_adj: " 5 "

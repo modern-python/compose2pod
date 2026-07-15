@@ -1,0 +1,8 @@
+services:
+  app:
+    image: nginx
+    networks:
+      n:
+        priority: "5"
+networks:
+  n: {}

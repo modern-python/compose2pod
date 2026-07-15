@@ -7,6 +7,9 @@ from compose2pod.keys import Expand, Token, extra_host_entries, validate_map
 
 
 _DNS_KEYS = {"dns": "--dns", "dns_search": "--dns-search", "dns_opt": "--dns-option"}
+# Docker accepts a bare string for `dns` and `dns_search` but requires a list for
+# `dns_opt`. Measured, not inferred -- the asymmetry is Docker's, not ours.
+_DNS_LIST_ONLY = {"dns_opt"}
 _POD_OPTION_KEYS = (*_DNS_KEYS, "sysctls", "extra_hosts")
 
 
@@ -55,16 +58,41 @@ def _check_extra_host_separators(name: str, value: Any) -> None:  # noqa: ANN401
             raise UnsupportedComposeError(msg)
 
 
+def _check_extra_host_value_types(name: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped
+    """Check each map-form value is a string; Docker refuses a non-string extra_hosts value.
+
+    `validate_map`'s shared shape check accepts a map value that is a string,
+    number, boolean, or null -- correct for `labels`/`annotations`' bare-key-
+    means-null semantics, but too loose for `extra_hosts`: an int/bool/null
+    address would otherwise reach `keys.extra_host_entries` and get coerced
+    into a bogus `--add-host` value. Measured against `docker compose config`
+    v5.1.2: `extra_hosts: {h: 3}` and `extra_hosts: {h: true}` are both
+    refused ("services.<svc>.extra_hosts.h must be a string"). The list form
+    cannot have this problem: `validate_map` already requires every list
+    element to be a string.
+    """
+    if not isinstance(value, dict):
+        return
+    for host, address in value.items():
+        if not isinstance(address, str):
+            msg = f"service {name!r}: extra_hosts {host!r} must be a string"
+            raise UnsupportedComposeError(msg)
+
+
 def validate_pod_options(name: str, svc: dict[str, Any]) -> None:
     """Shape-check a service's pod-level dns/sysctls declarations."""
     for key in _DNS_KEYS:
         if key in svc:
+            if key in _DNS_LIST_ONLY and not isinstance(svc[key], list):
+                msg = f"service {name!r}: {key!r} must be a list of strings"
+                raise UnsupportedComposeError(msg)
             _as_str_list(name, key, svc[key])
     if "sysctls" in svc:
         _sysctl_pairs(name, svc["sysctls"])
     if "extra_hosts" in svc:
         validate_map(name, "extra_hosts", svc["extra_hosts"])
         _check_extra_host_separators(name, svc["extra_hosts"])
+        _check_extra_host_value_types(name, svc["extra_hosts"])
 
 
 def uses_pod_options(services: dict[str, Any]) -> bool:

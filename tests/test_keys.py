@@ -7,11 +7,11 @@ from compose2pod.keys import (
     Expand,
     _merge_map,
     _validate_list,
-    _validate_ulimits,
     concat_list,
     pairs_to_mapping,
     require_string_keys,
     validate_map,
+    validate_ulimits,
 )
 from compose2pod.parsing import SUPPORTED_SERVICE_KEYS
 
@@ -112,7 +112,7 @@ def test_merge_present_iff_list_or_map_shaped(key: str) -> None:
     end up with no merge callable.
     """
     spec = SERVICE_KEYS[key]
-    is_list_or_map_shaped = spec.validate in (_validate_list, validate_map, _validate_ulimits)
+    is_list_or_map_shaped = spec.validate in (_validate_list, validate_map, validate_ulimits)
     assert (spec.merge is not None) == is_list_or_map_shaped
 
 
@@ -201,3 +201,85 @@ class TestMergeCallables:
 
     def test_pairs_to_mapping_accepts_string_list_elements(self) -> None:
         assert pairs_to_mapping("web", "labels", ["team=core", "BARE"]) == {"team": "core", "BARE": None}
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "mem_limit",
+        "memswap_limit",
+        "mem_reservation",
+        "shm_size",
+        "cpus",
+        "cpu_shares",
+        "cpu_quota",
+        "cpu_period",
+        "pids_limit",
+    ],
+)
+@pytest.mark.parametrize("value", ["", "somevalue"])
+def test_resource_keys_reject_non_numeric_strings(key: str, value: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match=key):
+        SERVICE_KEYS[key].validate("app", key, value)
+
+
+@pytest.mark.parametrize("key", ["mem_limit", "shm_size"])
+@pytest.mark.parametrize("value", [512, "512m", "1gb", "${MEM}"])
+def test_size_keys_accept(key: str, value: object) -> None:
+    SERVICE_KEYS[key].validate("app", key, value)
+
+
+def test_cpuset_requires_a_string() -> None:
+    SERVICE_KEYS["cpuset"].validate("app", "cpuset", "0-3")
+    for bad in (0, 2, 1.5):
+        with pytest.raises(UnsupportedComposeError, match="cpuset"):
+            SERVICE_KEYS["cpuset"].validate("app", "cpuset", bad)
+
+
+# Measured against `docker compose config` v5.1.2: mem_reservation is grouped with
+# mem_swappiness/oom_score_adj in the design as "reject a float", but a native float is
+# rejected while a size *string* (even "1.5" or "512m") is still accepted -- the
+# int-only rule binds the native-numeric branch only, which is exactly what
+# validate_size's allow_fractional=False already does (its string branch is ungated).
+@pytest.mark.parametrize("key", ["oom_score_adj", "mem_swappiness", "mem_reservation"])
+def test_int_only_keys_reject_float(key: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match=key):
+        SERVICE_KEYS[key].validate("app", key, 1.5)
+    SERVICE_KEYS[key].validate("app", key, 60)
+
+
+# Measured against `docker compose config` v5.1.2: `oom_score_adj: 1000.0`,
+# `mem_swappiness: 60.0`, and `mem_reservation: 60.0` are all ACCEPTED -- a
+# whole-valued float casts cleanly to the underlying int64 field. Only a
+# fractional float is refused (covered above); the constraint is an integral
+# value, not the absence of a float type.
+@pytest.mark.parametrize("key", ["oom_score_adj", "mem_swappiness", "mem_reservation"])
+def test_int_only_keys_accept_whole_float(key: str) -> None:
+    SERVICE_KEYS[key].validate("app", key, 1000.0)
+
+
+# Measured against `docker compose config` v5.1.2: cpu_shares/cpu_quota/cpu_period/
+# pids_limit accept any native number (float included) but, as a *string*, go
+# through Go's strconv.ParseInt -- strictly digits, no decimal point, no
+# exponent, no digit-grouping underscore. "0.5"/"1e3"/"1_000" are all rejected
+# as strings even though the identical native value is fine.
+@pytest.mark.parametrize("key", ["cpu_shares", "cpu_quota", "cpu_period", "pids_limit"])
+@pytest.mark.parametrize("value", [2, 0.5, "2", "-3"])
+def test_count_keys_accept(key: str, value: object) -> None:
+    SERVICE_KEYS[key].validate("app", key, value)
+
+
+@pytest.mark.parametrize("key", ["cpu_shares", "cpu_quota", "cpu_period", "pids_limit"])
+@pytest.mark.parametrize("value", ["0.5", "1e3", "1_000"])
+def test_count_keys_reject_non_strict_integer_strings(key: str, value: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match=key):
+        SERVICE_KEYS[key].validate("app", key, value)
+
+
+def test_ulimits_scalar_bound_rejects_non_integer() -> None:
+    with pytest.raises(UnsupportedComposeError, match="nofile"):
+        SERVICE_KEYS["ulimits"].validate("app", "ulimits", {"nofile": "abc"})
+    with pytest.raises(UnsupportedComposeError, match="nofile"):
+        SERVICE_KEYS["ulimits"].validate("app", "ulimits", {"nofile": 1.5})
+    SERVICE_KEYS["ulimits"].validate("app", "ulimits", {"nofile": 65535})
+    SERVICE_KEYS["ulimits"].validate("app", "ulimits", {"nofile": "65535"})

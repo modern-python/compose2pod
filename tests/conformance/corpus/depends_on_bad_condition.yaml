@@ -1,0 +1,8 @@
+services:
+  app:
+    image: nginx
+    depends_on:
+      db:
+        condition: service_banana
+  db:
+    image: postgres

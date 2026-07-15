@@ -1,0 +1,7 @@
+services:
+  app:
+    image: nginx
+    deploy:
+      resources:
+        limits:
+          cpus: ""

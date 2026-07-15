@@ -1046,7 +1046,8 @@ class TestAddHostClosureScope:
             "services": {
                 "app": {"image": "x", "depends_on": ["db"]},
                 "db": {"image": "x", "hostname": "db-host", "networks": {"default": {"aliases": ["db-alias"]}}},
-            }
+            },
+            "networks": {"default": None},
         }
         script = emit_script(compose=compose, options=self._options("app"))
         for host in ("app", "db", "db-host", "db-alias"):
