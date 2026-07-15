@@ -7,7 +7,14 @@ from compose2pod import stores, values
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, health_cmd, interval_seconds
-from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS, require_string_keys, validate_map, validate_ulimits
+from compose2pod.keys import (
+    SERVICE_KEYS,
+    STRUCTURAL_KEYS,
+    is_number,
+    require_string_keys,
+    validate_map,
+    validate_ulimits,
+)
 from compose2pod.pod import uses_pod_options, validate_pod_options
 from compose2pod.resources import validate_deploy
 
@@ -655,27 +662,22 @@ def _sweep_document(compose: dict[str, Any]) -> None:
       not repeat (see `_sweep_service`).
     - Each service's body (`_sweep_service`), except `build`'s contents and
       the service's own `x-`-prefixed keys -- neither is ever read.
-    - Each top-level `secrets`/`configs` definition's body: read by
-      `stores.py`. Swept by name (like `services`, not by the generic
-      `x-`-skipping walk), for the same reason -- `stores._validate_def`
-      accepts a store name matching `[a-zA-Z0-9][a-zA-Z0-9_.-]*`, which
-      does not exclude one starting with `x-`, so a store's *name* must not
-      be conflated with a content key either.
+    - Each top-level `secrets`/`configs`/`networks`/`volumes` definition's
+      body: read by `stores.py` and, since Task 12, by
+      `_validate_network_definitions`/`_validate_volume_definitions` below --
+      compose2pod ignores what a network/volume definition *means* (every
+      service shares the pod namespace; podman creates named volumes on
+      first reference), but Docker still validates what it *says*, the same
+      "ignored but still validated" stance `build` has always had, so its
+      contents are read now, not skipped. All four are swept by name (like
+      `services`, not by the generic `x-`-skipping walk): a store name
+      matches `[a-zA-Z0-9][a-zA-Z0-9_.-]*` and a network/volume name is
+      unconstrained, neither excludes one starting with `x-`, so none of
+      the four kinds' *names* may be conflated with a content key.
 
     Skipped, because compose2pod never emits from them, so a non-string key
     there can never reach the generated script: `x-` blocks (top-level and
-    per-service), `build`'s contents, and the ignored top-level `volumes`
-    block (accepted, but never read -- see architecture/supported-subset.md).
-    The top-level `networks` block is a narrower case: its *contents* are
-    still never read, but `_validate_network_references` does read its own
-    *keys*, to check a per-service `networks` reference names one that's
-    declared. That reader only ever hashes a key into a `set` for a `not in`
-    membership test against an already-string-checked per-service value --
-    never `sorted()`s, `startswith()`s, or f-string-interpolates it -- so a
-    non-string top-level network name cannot crash or leak a repr into the
-    script the way this sweep exists to prevent; it would just never match
-    any per-service reference, which is a separate, narrower correctness
-    question this function does not need to answer.
+    per-service) and `build`'s contents.
     """
     require_string_keys("compose document", compose)
     services = compose.get("services")
@@ -684,7 +686,7 @@ def _sweep_document(compose: dict[str, Any]) -> None:
         for name, svc in services.items():
             if isinstance(svc, dict):
                 _sweep_service(name, svc)
-    for top_key in ("secrets", "configs"):
+    for top_key in ("secrets", "configs", "networks", "volumes"):
         defs = compose.get(top_key)
         if isinstance(defs, dict):
             require_string_keys(f"compose document.{top_key}", defs)
@@ -823,6 +825,293 @@ def _validate_network_entries(services: dict[str, Any]) -> None:
                 _validate_network_entry_value(name, network, value)
 
 
+def _validate_definition_string(label: str) -> Callable[[str, str, Any], None]:
+    """Build a validator for a plain-string field on a top-level `networks`/`volumes` definition (`driver`, `name`)."""
+
+    def validate(ident: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+        if not isinstance(value, str):
+            msg = f"{label} {ident!r}: {key!r} must be a string"
+            raise UnsupportedComposeError(msg)
+
+    return validate
+
+
+def _validate_definition_bool(label: str) -> Callable[[str, str, Any], None]:
+    """Build a validator for a strict-boolean field (`internal`/`attachable`/`enable_ipv6`), with a `${VAR}` carve-out.
+
+    Measured against `docker compose config` v5.1.2: each casts a *string*
+    value through the same YAML-1.1-style boolean interpolation every other
+    boolean key in this project already defers (`planning/deferred.md`) --
+    `internal: "true"` is accepted, `internal: "notabool"` is refused, and a
+    genuine `${VAR}` reference is resolved and cast at read time
+    ("error while interpolating ... failed to cast to expected type"), so its
+    verdict is a fact about the reading shell, not the document --
+    `has_variable` carves that case out, matching `_validate_build_bool`. A
+    literal quoted string is still refused here, a cataloged over-reject.
+    """
+
+    def validate(ident: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+        if values.has_variable(value):
+            return
+        if not isinstance(value, bool):
+            msg = f"{label} {ident!r}: {key!r} must be a boolean"
+            raise UnsupportedComposeError(msg)
+
+    return validate
+
+
+def _validate_definition_driver_opts(label: str) -> Callable[[str, str, Any], None]:
+    """Build a `driver_opts` validator: a mapping of string -> (number or string), shared by networks and volumes.
+
+    Measured against `docker compose config` v5.1.2: identical grammar to a
+    service's long-form `networks` entry `driver_opts`
+    (`_validate_network_driver_opts`) -- a bool/null/list value is refused
+    even though the key itself may be any string.
+    """
+
+    def validate(ident: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+        if not isinstance(value, dict):
+            msg = f"{label} {ident!r}: {key!r} must be a mapping"
+            raise UnsupportedComposeError(msg)
+        require_string_keys(f"{label} {ident!r}: {key!r}", value)
+        for val in value.values():
+            if isinstance(val, bool) or not isinstance(val, int | float | str):
+                msg = f"{label} {ident!r}: {key!r} values must be a number or string"
+                raise UnsupportedComposeError(msg)
+
+    return validate
+
+
+def _validate_definition_labels(label: str) -> Callable[[str, str, Any], None]:
+    """Build a `labels` validator: a list of 'KEY[=value]' strings, or a mapping with scalar-or-null values.
+
+    Same grammar `keys.validate_map` already enforces for a service's own
+    `labels`/`environment`, reimplemented here rather than reused: that
+    function's own message hardcodes a "service" prefix, which would misname
+    a network or volume definition.
+    """
+
+    def validate(ident: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+        if isinstance(value, list):
+            for item in value:
+                if not isinstance(item, str):
+                    msg = f"{label} {ident!r}: {key!r} entries must be strings"
+                    raise UnsupportedComposeError(msg)
+            return
+        if isinstance(value, dict):
+            for val in value.values():
+                if val is not None and not is_number(val) and not isinstance(val, bool):
+                    msg = f"{label} {ident!r}: {key!r} values must be a string, number, boolean, or null"
+                    raise UnsupportedComposeError(msg)
+            return
+        msg = f"{label} {ident!r}: {key!r} must be a list or mapping"
+        raise UnsupportedComposeError(msg)
+
+    return validate
+
+
+_EXTERNAL_MAP_KEYS = {"name"}
+
+
+def _validate_definition_external(label: str) -> Callable[[str, str, Any], None]:
+    """Build an `external` validator: a boolean, or a mapping with an optional string `name` (deprecated but accepted).
+
+    Measured against `docker compose config` v5.1.2: `external: {name: x}`
+    still works (with a deprecation warning on stderr, not a rejection) --
+    `external: true` plus a separate `name:` key is the modern spelling, but
+    both are accepted. A bare string (`external: realname`) is refused
+    outright: unlike `internal`/`attachable`/`enable_ipv6`, this field's own
+    type union has no plain-string branch at all -- Docker casts it as a
+    *boolean* interpolation target instead ("invalid boolean: realname"), so
+    the same `has_variable` carve-out applies (a `${VAR}` reference resolves
+    and casts at read time) but a literal non-boolean string never can,
+    document-only like `values.validate_native_number`'s `priority` (Task 11).
+    An explicit null is refused too (measured) -- unlike the *entry* itself,
+    which treats null as "use defaults".
+    """
+
+    def validate(ident: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+        if values.has_variable(value):
+            return
+        if isinstance(value, bool):
+            return
+        if isinstance(value, dict):
+            require_string_keys(f"{label} {ident!r}: {key!r}", value)
+            unknown = set(value) - _EXTERNAL_MAP_KEYS
+            if unknown:
+                msg = f"{label} {ident!r}: {key!r}: unsupported keys {sorted(unknown)}"
+                raise UnsupportedComposeError(msg)
+            if "name" in value and not isinstance(value["name"], str):
+                msg = f"{label} {ident!r}: {key!r} 'name' must be a string"
+                raise UnsupportedComposeError(msg)
+            return
+        msg = f"{label} {ident!r}: {key!r} must be a boolean or mapping"
+        raise UnsupportedComposeError(msg)
+
+    return validate
+
+
+# ipam is network-only (measured: refused as an unknown key on a volume
+# definition) and, unlike every other definition key, validated to a second
+# level of nesting -- `ipam.config` is a list of per-subnet mappings, each
+# with its own strict schema. Measured against `docker compose config` v5.1.2.
+_IPAM_KEYS = {"driver", "config", "options"}
+_IPAM_CONFIG_ENTRY_KEYS = {"subnet", "ip_range", "gateway", "aux_addresses"}
+
+
+def _validate_ipam_aux_addresses(label: str, ident: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    if not isinstance(value, dict):
+        msg = f"{label} {ident!r}: ipam config 'aux_addresses' must be a mapping"
+        raise UnsupportedComposeError(msg)
+    require_string_keys(f"{label} {ident!r}: ipam config 'aux_addresses'", value)
+    for val in value.values():
+        if not isinstance(val, str):
+            msg = f"{label} {ident!r}: ipam config 'aux_addresses' values must be a string"
+            raise UnsupportedComposeError(msg)
+
+
+def _validate_ipam_config_entry(label: str, ident: str, entry: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    if not isinstance(entry, dict):
+        msg = f"{label} {ident!r}: ipam 'config' entries must be a mapping"
+        raise UnsupportedComposeError(msg)
+    require_string_keys(f"{label} {ident!r}: ipam config entry", entry)
+    unknown = set(entry) - _IPAM_CONFIG_ENTRY_KEYS
+    if unknown:
+        msg = f"{label} {ident!r}: ipam config entry: unsupported keys {sorted(unknown)}"
+        raise UnsupportedComposeError(msg)
+    for key in ("subnet", "ip_range", "gateway"):
+        if key in entry and not isinstance(entry[key], str):
+            msg = f"{label} {ident!r}: ipam config entry {key!r} must be a string"
+            raise UnsupportedComposeError(msg)
+    if "aux_addresses" in entry:
+        _validate_ipam_aux_addresses(label, ident, entry["aux_addresses"])
+
+
+def _validate_ipam_options(label: str, ident: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+    # Measured divergence from driver_opts: ipam.options values must be
+    # strings -- a number is refused, unlike driver_opts' number-or-string.
+    if not isinstance(value, dict):
+        msg = f"{label} {ident!r}: ipam 'options' must be a mapping"
+        raise UnsupportedComposeError(msg)
+    require_string_keys(f"{label} {ident!r}: ipam options", value)
+    for val in value.values():
+        if not isinstance(val, str):
+            msg = f"{label} {ident!r}: ipam 'options' values must be a string"
+            raise UnsupportedComposeError(msg)
+
+
+def _validate_definition_ipam(label: str) -> Callable[[str, str, Any], None]:
+    def validate(ident: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
+        if not isinstance(value, dict):
+            msg = f"{label} {ident!r}: {key!r} must be a mapping"
+            raise UnsupportedComposeError(msg)
+        require_string_keys(f"{label} {ident!r}: {key!r}", value)
+        unknown = set(value) - _IPAM_KEYS
+        if unknown:
+            msg = f"{label} {ident!r}: {key!r}: unsupported keys {sorted(unknown)}"
+            raise UnsupportedComposeError(msg)
+        if "driver" in value and not isinstance(value["driver"], str):
+            msg = f"{label} {ident!r}: ipam 'driver' must be a string"
+            raise UnsupportedComposeError(msg)
+        if "config" in value:
+            if not isinstance(value["config"], list):
+                msg = f"{label} {ident!r}: ipam 'config' must be a list"
+                raise UnsupportedComposeError(msg)
+            for entry in value["config"]:
+                _validate_ipam_config_entry(label, ident, entry)
+        if "options" in value:
+            _validate_ipam_options(label, ident, value["options"])
+
+    return validate
+
+
+# Docker's own schema for a top-level `networks`/`volumes` DEFINITION -- not a
+# service's *reference* to one (that's `_DOCKER_NETWORK_ENTRY_KEYS`, above, a
+# different, per-service sub-schema entirely). compose2pod never reads either
+# block's contents (every service shares the pod namespace; podman creates
+# named volumes on first reference), but Docker still validates a document's
+# own declarations, the same "ignored but still validated" stance `build` has
+# always had. The two definitions share five keys; networks adds four more
+# (`ipam`, `internal`, `attachable`, `enable_ipv6`) that measurably do not
+# exist on a volume definition (refused there as unknown keys). Measured
+# against `docker compose config` v5.1.2 by probing every candidate key
+# individually against both block types.
+_NETWORK_DEFINITION_KEYS: dict[str, Callable[[str, str, Any], None]] = {
+    "attachable": _validate_definition_bool("network"),
+    "driver": _validate_definition_string("network"),
+    "driver_opts": _validate_definition_driver_opts("network"),
+    "enable_ipv6": _validate_definition_bool("network"),
+    "external": _validate_definition_external("network"),
+    "internal": _validate_definition_bool("network"),
+    "ipam": _validate_definition_ipam("network"),
+    "labels": _validate_definition_labels("network"),
+    "name": _validate_definition_string("network"),
+}
+_VOLUME_DEFINITION_KEYS: dict[str, Callable[[str, str, Any], None]] = {
+    "driver": _validate_definition_string("volume"),
+    "driver_opts": _validate_definition_driver_opts("volume"),
+    "external": _validate_definition_external("volume"),
+    "labels": _validate_definition_labels("volume"),
+    "name": _validate_definition_string("volume"),
+}
+
+
+def _validate_top_level_definition(
+    label: str,
+    ident: str,
+    definition: Any,  # noqa: ANN401 - untyped YAML/JSON
+    keys: dict[str, Callable[[str, str, Any], None]],
+) -> None:
+    if definition is None:
+        # Measured: means "use default settings" -- same as an explicit {}.
+        return
+    if not isinstance(definition, dict):
+        msg = f"{label} {ident!r} must be a mapping or null"
+        raise UnsupportedComposeError(msg)
+    require_string_keys(f"{label} {ident!r}", definition)
+    unknown = {key for key in definition if key not in keys and not key.startswith("x-")}
+    if unknown:
+        msg = f"{label} {ident!r}: unsupported keys {sorted(unknown)}"
+        raise UnsupportedComposeError(msg)
+    for key, validator in keys.items():
+        if key in definition:
+            validator(ident, key, definition[key])
+
+
+def _validate_network_definitions(compose: dict[str, Any]) -> None:
+    """Every top-level `networks:` definition's own shape -- not a service's reference to one.
+
+    Unlike `_validate_volume_definitions`, below, this does not re-check the
+    top-level mapping shape itself: `_validate_network_references` already
+    does (and runs first, from `validate()`), raising "top-level 'networks'
+    must be a mapping" before this function is ever reached -- duplicating
+    that check here would be dead code no test could cover honestly.
+    """
+    defs = compose.get("networks")
+    if not isinstance(defs, dict):
+        return
+    for ident, definition in defs.items():
+        _validate_top_level_definition("network", ident, definition, _NETWORK_DEFINITION_KEYS)
+
+
+def _validate_volume_definitions(compose: dict[str, Any]) -> None:
+    """Every top-level `volumes:` definition's own shape -- previously entirely unchecked.
+
+    Unlike `networks`, nothing else in `validate()` ever confirmed the
+    top-level `volumes:` block itself was even a mapping -- the "ignoring
+    top-level 'volumes'" warning ran unconditionally on key presence, never
+    inspecting the value.
+    """
+    defs = compose.get("volumes")
+    if defs is None:
+        return
+    if not isinstance(defs, dict):
+        msg = "top-level 'volumes' must be a mapping"
+        raise UnsupportedComposeError(msg)
+    for ident, definition in defs.items():
+        _validate_top_level_definition("volume", ident, definition, _VOLUME_DEFINITION_KEYS)
+
+
 def _validate_build_secret_references(compose: dict[str, Any], services: dict[str, Any]) -> None:
     """Every service's `build.secrets` entry must reference a declared top-level secret.
 
@@ -906,6 +1195,8 @@ def validate(compose: dict[str, Any]) -> list[str]:
     hostnames(services)  # validate hostname/container_name/networks shapes at the gate
     _validate_network_references(compose, services)
     _validate_network_entries(services)
+    _validate_network_definitions(compose)
+    _validate_volume_definitions(compose)
     _validate_depends_on(services)
     stores.validate(compose)
     _validate_build_secret_references(compose, services)

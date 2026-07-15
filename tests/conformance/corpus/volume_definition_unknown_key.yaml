@@ -1,0 +1,8 @@
+services:
+  app:
+    image: nginx
+    volumes:
+      - v:/data
+volumes:
+  v:
+    bogus: 1

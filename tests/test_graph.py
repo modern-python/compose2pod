@@ -58,6 +58,44 @@ class TestDependsOn:
         with pytest.raises(UnsupportedComposeError, match="depends_on"):
             validate({"services": {"app": {"image": "nginx", "depends_on": ""}}})
 
+    def test_unknown_sub_key_rejected(self) -> None:
+        # Strict schema, measured against `docker compose config` v5.1.2:
+        # "additional properties 'bogus' not allowed".
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            depends_on({"depends_on": {"db": {"condition": "service_started", "bogus": 1}}})
+
+    def test_x_prefixed_extension_key_accepted(self) -> None:
+        assert depends_on({"depends_on": {"db": {"condition": "service_started", "x-custom": 1}}}) == {
+            "db": "service_started"
+        }
+
+    def test_restart_must_be_a_boolean(self) -> None:
+        # Measured: `restart: 5` is refused ("must be a boolean or string" --
+        # the "or string" half is the quoted-boolean cast, a known deferred
+        # limitation, planning/deferred.md).
+        with pytest.raises(UnsupportedComposeError, match=r"'restart' must be a boolean"):
+            depends_on({"depends_on": {"db": {"restart": 5}}})
+
+    def test_required_must_be_a_boolean(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'required' must be a boolean"):
+            depends_on({"depends_on": {"db": {"required": "notabool"}}})
+
+    def test_restart_and_required_true_and_false_accepted(self) -> None:
+        assert depends_on(
+            {"depends_on": {"db": {"condition": "service_started", "restart": True, "required": False}}}
+        ) == {"db": "service_started"}
+
+    def test_restart_variable_reference_passes_through(self) -> None:
+        # Host-dependent, measured: Docker interpolates the reference *then*
+        # casts the result to a boolean ("error while interpolating ...
+        # failed to cast to expected type"), so its verdict is a fact about
+        # the reading shell's environment, not the document -- the same
+        # carve-out as `_validate_build_bool`.
+        assert depends_on({"depends_on": {"db": {"restart": "${MYVAR}"}}}) == {"db": "service_started"}
+
+    def test_required_variable_reference_passes_through(self) -> None:
+        assert depends_on({"depends_on": {"db": {"required": "${MYVAR}"}}}) == {"db": "service_started"}
+
 
 class TestHostnames:
     def test_collects_service_names_and_aliases(self, chats_compose: dict) -> None:

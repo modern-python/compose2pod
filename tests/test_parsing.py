@@ -861,13 +861,13 @@ class TestSweepServiceNamedExtensionPrefix:
 
 
 class TestSweepSkipsUnreadRegions:
-    """`build`'s own `x-` extensions and the ignored top-level `networks`/`volumes` blocks are never read.
+    """`build`'s own `x-` extensions are never read; the top-level `networks`/`volumes` blocks now are.
 
-    compose2pod accepts these regions but never inspects their contents (see
-    architecture/supported-subset.md), so a non-string key inside them can
-    never reach the generated script and must not be rejected. The
-    `environment`/other emitted-map divergence (`{3306: db}` rejected) is
-    unaffected: those keys do reach the script.
+    `build`'s contents stay genuinely unread (`image_for` never uses them),
+    so a non-string key inside a `build.x-*` extension can never reach the
+    generated script and must not be rejected. The `environment`/other
+    emitted-map divergence (`{3306: db}` rejected) is unaffected: those keys
+    do reach the script.
 
     `build`'s own *known* keys are the one exception, and a narrower one than
     this class used to claim: their values are now type-checked against
@@ -879,25 +879,44 @@ class TestSweepSkipsUnreadRegions:
     `test_build_args_non_string_key_rejected`, below `_validate_build`'s other
     tests. Only a build key `docker compose config` does not itself define --
     an `x-` extension -- stays genuinely unread.
+
+    The top-level `networks`/`volumes` blocks used to be this class's other
+    two members: compose2pod never *emits* from either (every service shares
+    the pod namespace; podman creates named volumes on first reference), but
+    Task 12 gave both a definition schema (`_validate_network_definitions`/
+    `_validate_volume_definitions`, `parsing.py`) -- Docker still validates a
+    document's own `networks:`/`volumes:` block contents even though
+    compose2pod ignores their effect, the same "ignored but still validated"
+    stance `build` has always had. Both blocks are swept now, like
+    `secrets`/`configs`, so the two tests below assert rejection, not
+    acceptance -- see git history for the pre-Task-12 accept-with-warning
+    version if the contrast is useful.
     """
 
     def test_build_x_prefixed_extension_contents_accepted(self) -> None:
         compose = {"services": {"app": {"build": {"context": ".", "x-custom": {True: 1}}}}}
         assert validate(compose) == []
 
-    def test_top_level_volumes_contents_non_string_key_accepted(self) -> None:
+    def test_top_level_volumes_contents_non_string_key_now_rejected(self) -> None:
+        # Was accepted (this class used to be genuinely unread); Task 12 added
+        # a definition schema for the top-level `volumes:` block, so its
+        # contents are swept like `secrets`/`configs` now, not skipped.
         compose = {
             "services": {"app": {"image": "alpine"}},
             "volumes": {"data": {"driver_opts": {True: 1}}},
         }
-        assert any("ignoring top-level 'volumes'" in w for w in validate(compose))
+        with pytest.raises(UnsupportedComposeError, match=r"volumes\.data\.driver_opts: key True must be a string"):
+            validate(compose)
 
-    def test_top_level_networks_contents_non_string_key_accepted(self) -> None:
+    def test_top_level_networks_contents_non_string_key_now_rejected(self) -> None:
+        # Same as volumes, above -- Task 12 added a definition schema for the
+        # top-level `networks:` block.
         compose = {
             "services": {"app": {"image": "alpine"}},
             "networks": {"net1": {"driver_opts": {True: 1}}},
         }
-        assert any("ignoring top-level 'networks'" in w for w in validate(compose))
+        with pytest.raises(UnsupportedComposeError, match=r"networks\.net1\.driver_opts: key True must be a string"):
+            validate(compose)
 
     def test_environment_non_string_key_still_rejected(self) -> None:
         # The `environment: {3306: db}` divergence from Docker stands: that
@@ -1508,6 +1527,232 @@ class TestNetworkEntrySchema:
         # unaffected by this change.
         compose = {"services": {"app": {"image": "nginx", "networks": ["n"]}}, "networks": {"n": None}}
         assert validate(compose) is not None
+
+
+def _net_def_doc(definition: object) -> dict:
+    """One declared top-level network 'mynet', referenced by a service, with 'definition' as its own body."""
+    return {"services": {"app": {"image": "nginx", "networks": ["mynet"]}}, "networks": {"mynet": definition}}
+
+
+def _vol_def_doc(definition: object) -> dict:
+    """One declared top-level volume 'v', referenced by a service, with 'definition' as its own body."""
+    return {"services": {"app": {"image": "nginx", "volumes": ["v:/data"]}}, "volumes": {"v": definition}}
+
+
+# Task 12: the top-level `networks:`/`volumes:` blocks' own DEFINITION contents
+# ("networks.mynet: {...}", not a service's *reference* to a network) were
+# never validated at all -- compose2pod ignores their effect (every service
+# shares the pod namespace; podman creates named volumes on first reference),
+# but Docker still validates a document's own declarations, the same "ignored
+# but still validated" stance `build` and the per-service `networks` entry
+# schema (`TestNetworkEntrySchema`, above) already have. Full key sets and
+# per-key grammars measured against live `docker compose config` v5.1.2.
+class TestNetworkDefinitionSchema:
+    def test_non_mapping_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must be a mapping or null"):
+            validate(_net_def_doc("somestring"))
+
+    def test_null_value_accepted(self) -> None:
+        # Measured: means "use default settings" -- the same as an omitted
+        # top-level network or an explicit {}.
+        assert validate(_net_def_doc(None)) is not None
+
+    def test_empty_mapping_accepted(self) -> None:
+        assert validate(_net_def_doc({})) is not None
+
+    def test_unknown_key_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_def_doc({"bogus": 1}))
+
+    def test_extension_key_accepted(self) -> None:
+        assert validate(_net_def_doc({"x-foo": 1})) is not None
+
+    def test_non_mapping_non_string_entry_does_not_crash(self) -> None:
+        # Crash-class guard: a list value must fail clean, not TypeError from
+        # an unguarded set()/hash of an untrusted value.
+        with pytest.raises(UnsupportedComposeError, match="must be a mapping or null"):
+            validate(_net_def_doc([{"a": 1}]))
+
+    def test_non_string_key_in_definition_rejected_cleanly(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="key 123 must be a string"):
+            validate(_net_def_doc({123: "x"}))
+
+    @pytest.mark.parametrize("key", ["driver", "name"])
+    def test_string_fields_accept_string_reject_non_string(self, key: str) -> None:
+        assert validate(_net_def_doc({key: "value"})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_def_doc({key: 123}))
+
+    @pytest.mark.parametrize("key", ["internal", "attachable", "enable_ipv6"])
+    def test_bool_fields_accept_bool_reject_non_bool(self, key: str) -> None:
+        assert validate(_net_def_doc({key: True})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_def_doc({key: 1}))
+
+    @pytest.mark.parametrize("key", ["internal", "attachable", "enable_ipv6"])
+    def test_bool_fields_reject_a_quoted_string_but_accept_a_variable_reference(self, key: str) -> None:
+        # Measured: Docker casts a *literal* quoted string through the same
+        # YAML-1.1-style boolean cast every other boolean key in this project
+        # already defers (planning/deferred.md) -- refused here on purpose, a
+        # cataloged over-reject, not a bug. A genuine `${VAR}` reference is
+        # different: Docker resolves and casts it at read time, so its
+        # verdict is a fact about the reading shell, not the document.
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_def_doc({key: "true"}))
+        assert validate(_net_def_doc({key: "${MYVAR}"})) is not None
+
+    def test_driver_opts_is_a_mapping_of_number_or_string(self) -> None:
+        assert validate(_net_def_doc({"driver_opts": {"foo": "bar"}})) is not None
+        assert validate(_net_def_doc({"driver_opts": {"foo": 3}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_def_doc({"driver_opts": "notamap"}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_def_doc({"driver_opts": {"foo": True}}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_net_def_doc({"driver_opts": {"foo": None}}))
+
+    def test_labels_list_and_map_forms_accepted(self) -> None:
+        assert validate(_net_def_doc({"labels": ["foo=bar"]})) is not None
+        assert validate(_net_def_doc({"labels": {"foo": "bar"}})) is not None
+        assert validate(_net_def_doc({"labels": {"foo": None}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="labels"):
+            validate(_net_def_doc({"labels": 123}))
+        with pytest.raises(UnsupportedComposeError, match="labels"):
+            validate(_net_def_doc({"labels": {"foo": [1, 2]}}))
+        with pytest.raises(UnsupportedComposeError, match="labels"):
+            validate(_net_def_doc({"labels": [123]}))
+
+    def test_external_bool_and_mapping_forms_accepted(self) -> None:
+        assert validate(_net_def_doc({"external": True})) is not None
+        assert validate(_net_def_doc({"external": False})) is not None
+        assert validate(_net_def_doc({"external": {}})) is not None
+        assert validate(_net_def_doc({"external": {"name": "realnet"}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="external"):
+            validate(_net_def_doc({"external": "notabool"}))
+        with pytest.raises(UnsupportedComposeError, match="external"):
+            validate(_net_def_doc({"external": 123}))
+        with pytest.raises(UnsupportedComposeError, match="external"):
+            validate(_net_def_doc({"external": None}))
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_def_doc({"external": {"bogus": 1}}))
+        with pytest.raises(UnsupportedComposeError, match="name"):
+            validate(_net_def_doc({"external": {"name": 123}}))
+
+    def test_external_variable_reference_passes_through(self) -> None:
+        assert validate(_net_def_doc({"external": "${MYVAR}"})) is not None
+
+    def test_ipam_top_level_shape(self) -> None:
+        assert validate(_net_def_doc({"ipam": {}})) is not None
+        assert validate(_net_def_doc({"ipam": {"driver": "default"}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="ipam"):
+            validate(_net_def_doc({"ipam": "notamap"}))
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_def_doc({"ipam": {"bogus": 1}}))
+        with pytest.raises(UnsupportedComposeError, match="driver"):
+            validate(_net_def_doc({"ipam": {"driver": 123}}))
+
+    def test_ipam_config_is_a_list_of_mappings(self) -> None:
+        assert validate(_net_def_doc({"ipam": {"config": [{"subnet": "172.28.0.0/16"}]}})) is not None
+        assert validate(_net_def_doc({"ipam": {"config": [{}]}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="config"):
+            validate(_net_def_doc({"ipam": {"config": "notalist"}}))
+        with pytest.raises(UnsupportedComposeError, match="config"):
+            validate(_net_def_doc({"ipam": {"config": ["notamap"]}}))
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_net_def_doc({"ipam": {"config": [{"bogus": 1}]}}))
+
+    @pytest.mark.parametrize("key", ["subnet", "ip_range", "gateway"])
+    def test_ipam_config_entry_string_fields(self, key: str) -> None:
+        assert validate(_net_def_doc({"ipam": {"config": [{key: "value"}]}})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_def_doc({"ipam": {"config": [{key: 123}]}}))
+
+    def test_ipam_config_aux_addresses_is_a_mapping_of_strings(self) -> None:
+        assert validate(_net_def_doc({"ipam": {"config": [{"aux_addresses": {"host1": "172.28.1.5"}}]}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="aux_addresses"):
+            validate(_net_def_doc({"ipam": {"config": [{"aux_addresses": "notamap"}]}}))
+        with pytest.raises(UnsupportedComposeError, match="aux_addresses"):
+            validate(_net_def_doc({"ipam": {"config": [{"aux_addresses": {"host1": 123}}]}}))
+
+    def test_ipam_options_is_a_mapping_of_strings(self) -> None:
+        # Measured divergence from driver_opts: ipam.options values must be
+        # strings -- a number is refused, unlike driver_opts' number-or-string.
+        assert validate(_net_def_doc({"ipam": {"options": {"foo": "bar"}}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="options"):
+            validate(_net_def_doc({"ipam": {"options": "notamap"}}))
+        with pytest.raises(UnsupportedComposeError, match="options"):
+            validate(_net_def_doc({"ipam": {"options": {"foo": 123}}}))
+
+
+# Same pattern as networks, above, but a narrower key set -- measured: no
+# `ipam`/`internal`/`attachable`/`enable_ipv6` (all refused as unknown keys
+# on a volume definition).
+class TestVolumeDefinitionSchema:
+    def test_non_mapping_value_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must be a mapping or null"):
+            validate(_vol_def_doc("somestring"))
+
+    def test_null_value_accepted(self) -> None:
+        assert validate(_vol_def_doc(None)) is not None
+
+    def test_empty_mapping_accepted(self) -> None:
+        assert validate(_vol_def_doc({})) is not None
+
+    def test_unknown_key_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_vol_def_doc({"bogus": 1}))
+
+    @pytest.mark.parametrize("key", ["ipam", "internal", "attachable", "enable_ipv6"])
+    def test_network_only_keys_rejected_as_unknown(self, key: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_vol_def_doc({key: True}))
+
+    def test_extension_key_accepted(self) -> None:
+        assert validate(_vol_def_doc({"x-foo": 1})) is not None
+
+    def test_non_string_key_in_definition_rejected_cleanly(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="key 123 must be a string"):
+            validate(_vol_def_doc({123: "x"}))
+
+    @pytest.mark.parametrize("key", ["driver", "name"])
+    def test_string_fields_accept_string_reject_non_string(self, key: str) -> None:
+        assert validate(_vol_def_doc({key: "value"})) is not None
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_vol_def_doc({key: 123}))
+
+    def test_driver_opts_is_a_mapping_of_number_or_string(self) -> None:
+        assert validate(_vol_def_doc({"driver_opts": {"type": "nfs"}})) is not None
+        assert validate(_vol_def_doc({"driver_opts": {"type": 3}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_vol_def_doc({"driver_opts": "notamap"}))
+        with pytest.raises(UnsupportedComposeError, match="driver_opts"):
+            validate(_vol_def_doc({"driver_opts": {"type": True}}))
+
+    def test_labels_list_and_map_forms_accepted(self) -> None:
+        assert validate(_vol_def_doc({"labels": ["foo=bar"]})) is not None
+        assert validate(_vol_def_doc({"labels": {"foo": "bar"}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="labels"):
+            validate(_vol_def_doc({"labels": 123}))
+
+    def test_external_bool_and_mapping_forms_accepted(self) -> None:
+        assert validate(_vol_def_doc({"external": True})) is not None
+        assert validate(_vol_def_doc({"external": {"name": "realvol"}})) is not None
+        with pytest.raises(UnsupportedComposeError, match="external"):
+            validate(_vol_def_doc({"external": "notabool"}))
+        with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
+            validate(_vol_def_doc({"external": {"bogus": 1}}))
+
+    def test_external_variable_reference_passes_through(self) -> None:
+        assert validate(_vol_def_doc({"external": "${MYVAR}"})) is not None
+
+
+def test_top_level_volumes_non_mapping_rejected() -> None:
+    # Measured: `volumes: somestring` and `volumes: [1, 2]` are both refused
+    # ("volumes must be a mapping") -- previously entirely unchecked, since
+    # only the ignored-with-warning branch ever looked at this key.
+    compose = {"services": {"app": {"image": "nginx"}}, "volumes": "somestring"}
+    with pytest.raises(UnsupportedComposeError, match="top-level 'volumes' must be a mapping"):
+        validate(compose)
 
 
 _BUILD_SECRETS_UNDECLARED_STORE = {"declared": {"environment": "MYVAR"}}

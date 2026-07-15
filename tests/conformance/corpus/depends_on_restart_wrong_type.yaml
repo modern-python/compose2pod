@@ -1,0 +1,9 @@
+services:
+  app:
+    image: nginx
+    depends_on:
+      db:
+        condition: service_started
+        restart: 5
+  db:
+    image: postgres

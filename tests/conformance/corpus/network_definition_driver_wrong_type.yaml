@@ -1,0 +1,8 @@
+services:
+  app:
+    image: nginx
+    networks:
+      - mynet
+networks:
+  mynet:
+    driver: 123

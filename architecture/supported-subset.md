@@ -48,14 +48,28 @@ consecutive hand-found divergences once did.
   mapping raises "no services defined"), `version`, `name`, `networks`,
   `volumes`, `secrets`, `configs` (see Stores, below).
 - **Ignored (warns):** `networks` — every service shares the pod's single
-  network namespace, so top-level network definitions have no effect. Its
-  *shape* is still checked, though: it must be a mapping when present, as
-  Docker requires ("networks must be a mapping") — a list crashed raw
-  (`TypeError: unhashable type`) before this check existed, when a list entry
-  was itself a dict (see Per-service `networks`, below, for the matching
-  per-service hazard). `volumes` — podman creates named volumes implicitly on
-  first reference, so the top-level block's drivers/options are never read
-  (see Volumes, below).
+  network namespace, so top-level network definitions have no *effect*.
+  Their *shape* is still fully validated, though (`_validate_network_definitions`,
+  `parsing.py`): the block itself must be a mapping when present, as Docker
+  requires ("networks must be a mapping") — a list crashed raw (`TypeError:
+  unhashable type`) before that outer check existed, when a list entry was
+  itself a dict (see Per-service `networks`, below, for the matching
+  per-service hazard) — and, since Task 12 (2026-07-15), each individual
+  network *definition* is checked against Docker's own schema too: exactly
+  nine keys (`driver`, `driver_opts`, `external`, `name`, `labels`, `ipam`,
+  `internal`, `attachable`, `enable_ipv6`), an unknown key or a wrong-typed
+  value raises, and `ipam` is validated two levels deep (`driver`, a `config`
+  list of per-subnet `{subnet, ip_range, gateway, aux_addresses}` mappings,
+  and an `options` mapping of strings). None of this changes what
+  compose2pod *does* with the block — it is still never read for its effect
+  — only what it refuses. `volumes` — podman creates named volumes
+  implicitly on first reference, so the top-level block's drivers/options
+  are never read for effect either (see Volumes, below), but since Task 12
+  its shape is validated the same way: the block itself must be a mapping
+  (previously unchecked entirely), and each definition against a narrower
+  five-key schema (`driver`, `driver_opts`, `external`, `name`, `labels` —
+  no `ipam`/`internal`/`attachable`/`enable_ipv6`, measured absent from a
+  volume definition and refused there as unknown keys).
 - **Extension fields:** any key prefixed `x-` is accepted and ignored
   silently, per the Compose spec — including a top-level `x-*` block used to
   hold shared config reused via YAML anchors.
@@ -76,8 +90,10 @@ filter (a service literally named `x-web` is swept like any other service,
 not skipped as an extension field); each service's body — every structural
 key, `healthcheck`, `deploy` and its nested resources, per-service
 `secrets`/`configs` references, and so on — except `build`'s own contents
-and the service's own `x-`-prefixed keys; each top-level `secrets`/`configs`
-definition, swept by name for the same reason. Three service keys key their
+and the service's own `x-`-prefixed keys; each top-level `secrets`/`configs`/
+`networks`/`volumes` definition, swept by name for the same reason (the last
+two joined this list in Task 12, 2026-07-15, once their contents gained a
+validated schema — see Top-level keys, above). Three service keys key their
 mapping form by another entity's *identifier* rather than by content —
 `depends_on` (dependency name), `networks` (network name), `ulimits` (limit
 category name) — and get the same name-not-content treatment
@@ -91,12 +107,7 @@ non-string key inside one can never reach the generated script: `x-` blocks
 itself is still checked); `build`'s own contents (never emitted — see
 `build`, below, for the narrower value-*type* check that covers a
 mapping-shaped build key's own keys through a different path than this
-sweep); and the ignored top-level `volumes` block. The top-level `networks`
-block is narrower: its contents stay unread, but its own *keys* are read —
-see Per-service `networks`, below — to check that a service's `networks`
-reference names something declared; that check only ever hashes a key into
-a membership test, never sorts, `startswith`s, or emits it, so a non-string
-top-level network name still can't reach the script.
+sweep).
 
 Rejecting a non-string key **matches Docker**, which refuses one too
 (`non-string key in services.app.environment: 3306`). So `environment:
@@ -898,6 +909,16 @@ string, so a mapping or list condition raises there instead of crashing raw
 at the later `condition not in DEPENDS_ON_CONDITIONS` set-membership check
 in `parsing.py`. This check lives in `graph.py`, not `parsing.py`, so every
 caller of `depends_on` — not only `validate()` — gets the same protection.
+
+A long-form entry is a strict schema (Task 12, 2026-07-15): exactly three
+keys — `condition` (read above), `restart` and `required` (both a plain
+boolean; neither is read for effect, since podman has no equivalent of
+either, but a malformed value is still a document Docker refuses) — plus the
+usual `^x-` extension pattern; an unrecognized key raises. `restart`/
+`required` share the six top-level boolean keys' quoted-boolean limitation
+(`planning/deferred.md`): a literal `"true"` is refused even though Docker
+itself casts it, but a genuine `${VAR}` reference is carved out, since its
+verdict is a fact about the reading shell, not the document.
 
 Separately, at emit time, `startup_order` (`compose2pod/graph.py`) walks the
 target's `depends_on` closure and raises if a dependency names a service
