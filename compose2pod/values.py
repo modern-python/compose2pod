@@ -31,8 +31,17 @@ _DIGITS = r"[0-9]+(?:_[0-9]+)*"
 # `0.5g` are both valid. `b` alone and the `<unit>b` spellings (`mb`, `gb`) are
 # accepted alongside the bare unit letters. There is no exabyte unit: `e`/`eb`
 # is not a suffix Docker recognizes -- it collides with scientific notation.
+#
+# Whitespace is exactly one optional literal space (` ?`, not `\s*`), and only in
+# the single position between the digits and an optional unit -- never leading,
+# never doubled, never a tab, and never trailing a unit letter. Measured against
+# `docker compose config` v5.1.2 with a lead x mid x unit x trail probe: "512 m"
+# and the unit-less "512 " both ACCEPT (the space is legal even with no unit
+# following it, since the unit group is itself optional); " 512m", "512m ",
+# "512  m", and "512\tm" all REJECT ("strconv.ParseFloat: ... invalid syntax" /
+# "invalid suffix").
 _SIZE = re.compile(
-    rf"^\s*{_DIGITS}(?:\.{_DIGITS})?(?:[eE][+-]?{_DIGITS})?\s*(?:[bkmgtp]b?)?\s*$",
+    rf"^{_DIGITS}(?:\.{_DIGITS})?(?:[eE][+-]?{_DIGITS})? ?(?:[bkmgtp]b?)?$",
     re.IGNORECASE,
 )
 
@@ -121,12 +130,19 @@ def validate_size(
 
 
 def validate_number(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    """Check `value` is a number, or a string that parses as one."""
+    """Check `value` is a number, or a string that parses as one.
+
+    Go's strconv.ParseFloat (used for `cpus`) permits no surrounding whitespace at
+    all -- Python's own `float()` is more lenient (`float(" 1.5 ") == 1.5`) and is
+    guarded against explicitly, or this would over-accept what Docker refuses
+    ('strconv.ParseFloat: parsing " 1.5 ": invalid syntax'), measured against
+    `docker compose config` v5.1.2.
+    """
     if has_variable(value):
         return
     if _is_int(value) or (isinstance(value, float) and math.isfinite(value)):
         return
-    if isinstance(value, str):
+    if isinstance(value, str) and value == value.strip():
         try:
             parsed = float(value)
         except ValueError:
@@ -218,7 +234,11 @@ def validate_integer(
                 return
         # Go's ParseInt (used for oom_score_adj etc.) does not permit the digit-grouping
         # underscores its float parser allows; unlike Python's int(), it is "invalid syntax".
-        elif "_" not in value:
+        # It also permits no surrounding whitespace at all -- Python's own int() is more
+        # lenient (int(" 5 ") == 5) and is guarded against explicitly here, or this would
+        # over-accept what Docker refuses ("strconv.ParseInt: parsing \" 5 \": invalid
+        # syntax"), measured against `docker compose config` v5.1.2.
+        elif "_" not in value and value == value.strip():
             try:
                 int(value)
             except ValueError:

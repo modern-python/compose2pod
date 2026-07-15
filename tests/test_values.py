@@ -103,6 +103,26 @@ def test_validate_size_int_only_accepts_digit_grouping() -> None:
     validate_size("app", "mem_swappiness", "1_0", allow_fractional=False)
 
 
+# Whitespace boundary, measured against `docker compose config` v5.1.2: a single
+# space is legal in exactly one position -- immediately after the digits, before an
+# optional unit ("512 m" and the unit-less "512 " both ACCEPT). Any other placement
+# -- leading, doubled, a tab, or trailing *after* a unit letter -- is "invalid
+# size"/"invalid syntax" and must be refused. Confirmed with a 4x4x3x4
+# (lead x mid x unit x trail) probe against the live CLI, not just this table.
+@pytest.mark.parametrize("value", ["512 m", "512 mb", "512 "])
+def test_validate_size_accepts_single_space_before_unit(value: str) -> None:
+    validate_size("app", "mem_limit", value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [" 512m", "512m ", "512  m", "512\tm", " 512", "512  ", " 512 m", "512\t"],
+)
+def test_validate_size_rejects_whitespace_padding(value: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match="mem_limit"):
+        validate_size("app", "mem_limit", value)
+
+
 # string_only: deploy.resources.limits.memory / reservations.memory are typed
 # as a Go string field, unlike mem_limit/mem_reservation -- a native number is
 # refused outright, only a size *string* is accepted. Measured against
@@ -150,6 +170,17 @@ def test_validate_number_rejects_non_finite(value: object) -> None:
 # I4: Go's float parser permits digit-grouping underscores between digits.
 def test_validate_number_accepts_digit_grouping() -> None:
     validate_number("app", "cpus", "1_000")
+
+
+# Whitespace, measured against `docker compose config` v5.1.2: unlike the size
+# grammar, `cpus` (Go's bare strconv.ParseFloat, no unit) permits NO surrounding
+# whitespace at all -- Python's own float() is more lenient (float(" 1.5 ") == 1.5)
+# and must be guarded against explicitly, or this over-accepts what Docker refuses
+# ("strconv.ParseFloat: parsing \" 1.5 \": invalid syntax").
+@pytest.mark.parametrize("value", [" 1.5 ", "1.5 ", " 1.5", "1.5\t", "\t1.5"])
+def test_validate_number_rejects_whitespace_padding(value: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match="cpus"):
+        validate_number("app", "cpus", value)
 
 
 # validate_native_number: networks entry priority/gw_priority. Measured against
@@ -244,6 +275,18 @@ def test_validate_integer_allow_whole_float_accepts_whole() -> None:
 def test_validate_integer_allow_whole_float_still_rejects_fractional() -> None:
     with pytest.raises(UnsupportedComposeError, match="oom_score_adj"):
         validate_integer("app", "oom_score_adj", 0.5, allow_whole_float=True)
+
+
+# Whitespace, measured against `docker compose config` v5.1.2: the lenient (non
+# strict_string) branch delegates to Go's strconv.ParseInt (via oom_score_adj),
+# which permits NO surrounding whitespace -- "strconv.ParseInt: parsing \" 5 \":
+# invalid syntax". Python's int() is more lenient (int(" 5 ") == 5) and must be
+# guarded against explicitly here, distinct from the already-anchored
+# strict_string=True branch (_STRICT_INT_STRING), which this does not touch.
+@pytest.mark.parametrize("value", [" 5 ", "5 ", " 5", "5\t", "\t5"])
+def test_validate_integer_rejects_whitespace_padding(value: str) -> None:
+    with pytest.raises(UnsupportedComposeError, match="oom_score_adj"):
+        validate_integer("app", "oom_score_adj", value)
 
 
 @pytest.mark.parametrize("value", ["0-3", "0,1", "", "abc"])

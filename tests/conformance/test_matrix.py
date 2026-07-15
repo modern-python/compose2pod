@@ -39,6 +39,14 @@ SHAPES: dict[str, Any] = {
     # ("somevalue") does *not* reach this: Docker refuses an arbitrary string on a boolean
     # key just as compose2pod does, so it never revealed the gap.
     "quoted-bool": "true",
+    # Every prior shape is structural (null/empty/bool/int/list/map/bare-string) -- none
+    # carry padded or internal whitespace, which is exactly how the size/number/integer
+    # false green (planning/changes/2026-07-15.16) survived the matrix undetected: Docker's
+    # Go parsers refuse a leading/trailing/doubled space Python's float()/int() silently
+    # strip. "512m" is a plain value on a size/number/integer key -- padded with a leading
+    # and trailing space, it reaches every key's own grammar, not just the three this shape
+    # was added to guard.
+    "padded-scalar": " 512m ",
 }
 
 # `env_file`'s shapes that carry a bare string -- "" (empty-str), "somevalue"
@@ -58,6 +66,9 @@ CARVE_OUT: set[tuple[str, str]] = {
     ("env_file", "str"),
     ("env_file", "quoted-bool"),
     ("env_file", "list-of-str"),
+    # Same file-existence host-state carve-out: docker reads " 512m " as a (missing)
+    # path ("env file ... not found: stat ..."), exactly as the four string shapes above.
+    ("env_file", "padded-scalar"),
 }
 
 

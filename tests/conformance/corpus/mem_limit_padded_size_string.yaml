@@ -1,0 +1,4 @@
+services:
+  app:
+    image: nginx:alpine
+    mem_limit: " 512m "

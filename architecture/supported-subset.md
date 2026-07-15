@@ -609,7 +609,12 @@ v5.1.2, not a blanket "number or string" — `values.py` implements the five
 non-boolean ones:
 
 - **size** (`validate_size`): a number, or a string like `512m`/`1gb`/`1e3`
-  (Docker's byte-size grammar, an optional unit suffix on a float). Refused:
+  (Docker's byte-size grammar, an optional unit suffix on a float). Whitespace
+  is exactly one optional space, and only between the number and the unit:
+  `"512 m"` and the unit-less `"512 "` are both accepted, but a leading,
+  trailing-after-a-unit, doubled, or tab space is refused (`" 512m"`,
+  `"512m "`, `"512  m"`, `"512\tm"` — Go's `ParseFloat` grammar, not Python's
+  whitespace-stripping `float()`). Refused:
   `''`, a non-finite float, a string with no unit Docker recognizes.
   `mem_reservation`/`mem_swappiness` additionally refuse a *native* float
   with a fractional part (`0.5` — Docker: "must be a integer"; `60.0` is
@@ -620,7 +625,9 @@ non-boolean ones:
   plain Go string, not the size-or-string union `mem_limit`/
   `mem_reservation` are, so only a size string is ever accepted.
 - **number** (`validate_number`, `cpus` only): a number, or a string that
-  parses as one — Docker's `ParseFloat`, unrestricted.
+  parses as one — Docker's `ParseFloat`, unrestricted except that (unlike a
+  size) it permits no surrounding whitespace at all (`" 1.5 "` is refused),
+  matching Go rather than Python's whitespace-stripping `float()`.
 - **count** (`validate_count`; `cpu_shares`/`cpu_quota`/`cpu_period`/
   `pids_limit`): a native number is cast leniently (`0.5` accepted), but a
   *string* must be a strict integer — no decimal point, exponent, or
@@ -634,7 +641,9 @@ non-boolean ones:
 - **integer** (`validate_integer`, `oom_score_adj` only, `allow_whole_float`):
   an integer, or a string that parses as one; a native whole-valued float
   (`1000.0`) is accepted the same way `mem_reservation`'s size grammar
-  accepts one, but a fractional float is refused.
+  accepts one, but a fractional float is refused. The string form goes
+  through Go's `ParseInt` — no digit-grouping underscore and no surrounding
+  whitespace (`" 5 "` is refused), unlike Python's lenient `int()`.
 
 Every grammar short-circuits on a value carrying a `${VAR}` reference and
 passes it through unvalidated, live at run time — not merely because
