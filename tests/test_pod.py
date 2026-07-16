@@ -199,7 +199,9 @@ class TestExtraHostsSeparators:
 
     def _flags(self, entries: object) -> list[str]:
         services = {"a": {"image": "x", "extra_hosts": entries}}
-        return [t.value if isinstance(t, Expand) else t for t in pod_create_flags(services, ["a"], [])]
+        # pod.py never emits a GuardedEnvFile (only emit.py's env_file path does), so this
+        # is always str at runtime; the Token union just doesn't narrow that far statically.
+        return [t.value if isinstance(t, Expand) else t for t in pod_create_flags(services, ["a"], [])]  # ty: ignore[invalid-return-type]
 
     def test_equals_separator_is_split_correctly(self) -> None:
         # Used to emit the whole string as the hostname: 'somehost=1.2.3.4:'

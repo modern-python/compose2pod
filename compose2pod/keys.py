@@ -41,7 +41,26 @@ class Expand:
             raise UnsupportedComposeError(msg)
 
 
-Token = str | Expand
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class GuardedEnvFile:
+    """A `required: false` env_file entry, emitted only if the file exists at run time.
+
+    Renders inline as `${var:+"$var"}` (present -> the `--env-file=PATH` flag as one
+    shell word, absent -> nothing); its assignment lives in a prelude line emit.py
+    places before the `podman run` line. `value` is the resolved path and may carry
+    `${VAR}` references (expanded identically in the guard test and the flag).
+    """
+
+    var: str
+    value: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.var, str) or not isinstance(self.value, str):
+            msg = f"internal: GuardedEnvFile fields must be strings, got {self.var!r}, {self.value!r}"
+            raise UnsupportedComposeError(msg)
+
+
+Token = str | Expand | GuardedEnvFile
 
 
 def _render_scalar(value: Any) -> str:  # noqa: ANN401 - Compose values are untyped YAML/JSON

@@ -9,6 +9,7 @@ from compose2pod.emit import (
     _SCRIPT_HEADER,
     EmitOptions,
     Expand,
+    GuardedEnvFile,
     command_tokens,
     emit_script,
     entrypoint_tokens,
@@ -76,6 +77,29 @@ class TestRunFlags:
             "--env-file",
             Expand(value="/builds/x/b.env"),
         ]
+
+    def test_env_file_long_form_mapping_path_resolved(self) -> None:
+        svc = {"image": "x", "env_file": [{"path": "a.env"}, "b.env"]}
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:8] == [
+            "--env-file",
+            Expand(value="/proj/a.env"),
+            "--env-file",
+            Expand(value="/proj/b.env"),
+        ]
+
+    def test_env_file_mixed_entries_preserve_order(self) -> None:
+        svc = {
+            "image": "x",
+            "env_file": [
+                {"path": "base.env"},
+                {"path": "opt.env", "required": False},
+            ],
+        }
+        flags = run_flags("app", svc, "p", "/proj")
+        # base.env unconditional, then the guarded opt.env, in list order.
+        assert flags[4:6] == ["--env-file", Expand(value="/proj/base.env")]
+        assert flags[6] == GuardedEnvFile(var="c2p_envfile_1", value="/proj/opt.env")
 
     def test_tmpfs_string_form(self) -> None:
         # S108 flags "/tmp" as an insecure hardcoded temp path; this is a
@@ -709,6 +733,20 @@ class TestEmitScript:
         script = self._single({"image": "x"})
         assert "podman pod create --name p --add-host app:127.0.0.1\n" in script
 
+    def test_env_file_required_false_is_guarded(self) -> None:
+        svc = {"image": "x", "env_file": [{"path": "opt.env", "required": False}]}
+        script = self._single(svc)
+        assert "c2p_envfile_0=" in script
+        assert '[ -f "/proj/opt.env" ] && c2p_envfile_0=--env-file="/proj/opt.env"' in script
+        run_line = next(line for line in script.splitlines() if "podman run" in line and "--name p-app" in line)
+        assert '${c2p_envfile_0:+"$c2p_envfile_0"}' in run_line
+
+    def test_env_file_required_true_stays_unconditional(self) -> None:
+        svc = {"image": "x", "env_file": [{"path": "req.env", "required": True}]}
+        script = self._single(svc)
+        assert "c2p_envfile" not in script
+        assert '--env-file "/proj/req.env"' in script
+
 
 class TestReferencedVariables:
     def _options(self, command: str = "") -> EmitOptions:
@@ -742,6 +780,10 @@ class TestReferencedVariables:
             }
         }
         assert referenced_variables(compose, self._options()) == ["EDIR", "LIVE"]
+
+    def test_env_file_guarded_path_variable_is_reported(self) -> None:
+        doc = {"services": {"app": {"image": "x", "env_file": [{"path": "${EDIR}/opt.env", "required": False}]}}}
+        assert referenced_variables(doc, self._options()) == ["EDIR"]
 
     def test_command_override_vars_are_excluded(self) -> None:
         compose = {"services": {"app": {"image": "x", "command": "run ${CMDVAR}"}}}
@@ -1064,3 +1106,55 @@ class TestAddHostClosureScope:
         script = emit_script(compose=compose, options=self._options("app"))
         for host in ("app", "db", "db-host", "db-alias"):
             assert f"--add-host {host}:127.0.0.1" in script
+
+
+class TestGuardedEnvFileDependencyWiring:
+    def test_env_file_guarded_on_dependency_service(self) -> None:
+        # Proves the prelude wiring on the `-d` dependency branch (not just the target),
+        # and that the prelude precedes the dependency's own `podman run -d` line.
+        compose = {
+            "services": {
+                "app": {"image": "x", "depends_on": ["db"]},
+                "db": {"image": "y", "env_file": [{"path": "db.env", "required": False}]},
+            }
+        }
+        options = EmitOptions(
+            target="app",
+            ci_image="ci",
+            command="",
+            pod="p",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        script = emit_script(compose=compose, options=options)
+        prelude = '[ -f "/proj/db.env" ] && c2p_envfile_0=--env-file="/proj/db.env"'
+        db_run = next(line for line in script.splitlines() if "podman run -d" in line and "p-db" in line)
+        assert prelude in script
+        assert '${c2p_envfile_0:+"$c2p_envfile_0"}' in db_run
+        assert script.index(prelude) < script.index(db_run)
+
+    def test_env_file_guarded_on_completion_gated_dependency(self) -> None:
+        # Proves the prelude wiring on the `--rm` completion-gated branch (a dependency
+        # gated with service_completed_successfully renders via `podman run --rm`).
+        compose = {
+            "services": {
+                "app": {"image": "x", "depends_on": {"job": {"condition": "service_completed_successfully"}}},
+                "job": {"image": "y", "env_file": [{"path": "job.env", "required": False}]},
+            }
+        }
+        options = EmitOptions(
+            target="app",
+            ci_image="ci",
+            command="",
+            pod="p",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        script = emit_script(compose=compose, options=options)
+        prelude = '[ -f "/proj/job.env" ] && c2p_envfile_0=--env-file="/proj/job.env"'
+        rm_run = next(line for line in script.splitlines() if "podman run --rm" in line and "p-job" in line)
+        assert prelude in script
+        assert '${c2p_envfile_0:+"$c2p_envfile_0"}' in rm_run
+        assert script.index(prelude) < script.index(rm_run)

@@ -5,6 +5,7 @@ from compose2pod.keys import (
     SERVICE_KEYS,
     STRUCTURAL_KEYS,
     Expand,
+    GuardedEnvFile,
     _merge_map,
     _validate_list,
     concat_list,
@@ -33,6 +34,12 @@ class TestExpand:
         # class in one place, regardless of which key leaked it.
         with pytest.raises(UnsupportedComposeError, match="must be a string"):
             Expand(value=123)  # ty: ignore[invalid-argument-type]
+
+
+class TestGuardedEnvFile:
+    def test_guarded_env_file_rejects_non_string_fields(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="internal: GuardedEnvFile"):
+            GuardedEnvFile(var="v", value=5)  # ty: ignore[invalid-argument-type]
 
 
 class TestRequireStringKeys:
