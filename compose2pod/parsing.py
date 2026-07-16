@@ -160,8 +160,12 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
     return "bind", None
 
 
+_VOLUME_LONG_TYPES = ("bind", "volume", "tmpfs")
+_VOLUME_LONG_KEYS = {"type", "source", "target", "read_only", "consistency"}
+
+
 def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
-    """Check volumes is a list of short bind-mount entries."""
+    """Check volumes is a list of short-syntax strings or long-syntax mappings."""
     volumes = svc.get("volumes")
     if volumes is None:
         return
@@ -170,8 +174,11 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         msg = f"service {name!r}: 'volumes' must be a list"
         raise UnsupportedComposeError(msg)
     for volume in volumes:
+        if isinstance(volume, dict):
+            _validate_volume_long_form(name, volume)
+            continue
         if not isinstance(volume, str):
-            msg = f"service {name!r}: only short volume syntax is supported"
+            msg = f"service {name!r}: volume entry must be a string or mapping"
             raise UnsupportedComposeError(msg)
         kind, _ = _classify_volume(volume)
         if kind == "anonymous" and not volume.startswith("/"):
@@ -183,9 +190,68 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         # that cross-checks a named entry's source against a declaration.
 
 
-def _named_volume_source(volume: str) -> str | None:
-    """Return a colon-form volume entry's bare-identifier source, or None if it needs no declaration."""
-    kind, source = _classify_volume(volume)
+def _validate_volume_long_form(name: str, entry: dict[str, Any]) -> None:
+    """Check one long-syntax volume mapping against Docker's strict schema (measured, v5.1.2).
+
+    Scope A: type (bind/volume/tmpfs), source, target, read_only, consistency.
+    The nested bind/volume/tmpfs option maps fall out as unknown keys (refused,
+    tracked in planning/deferred.md); cluster/npipe/image types are refused
+    (podman cannot express them).
+    """
+    require_string_keys(f"service {name!r}: volume", entry)
+    unknown = set(entry) - _VOLUME_LONG_KEYS
+    if unknown:
+        msg = f"service {name!r}: volume: unsupported keys {sorted(unknown)}"
+        raise UnsupportedComposeError(msg)
+    vtype = entry.get("type")
+    if vtype not in _VOLUME_LONG_TYPES:
+        msg = f"service {name!r}: volume 'type' must be one of {list(_VOLUME_LONG_TYPES)}"
+        raise UnsupportedComposeError(msg)
+    if not isinstance(entry.get("target"), str):
+        msg = f"service {name!r}: volume 'target' must be a string"
+        raise UnsupportedComposeError(msg)
+    _validate_volume_long_form_source(name, vtype, entry.get("source"))
+    if "read_only" in entry and not values.is_bool_like(entry["read_only"]):
+        msg = f"service {name!r}: volume 'read_only' must be a boolean"
+        raise UnsupportedComposeError(msg)
+    if "consistency" in entry and not isinstance(entry["consistency"], str):
+        msg = f"service {name!r}: volume 'consistency' must be a string"
+        raise UnsupportedComposeError(msg)
+
+
+def _validate_volume_long_form_source(name: str, vtype: str, source: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Check a long-form volume entry's 'source': required for bind, refused for tmpfs, optional string for volume."""
+    if vtype == "bind":
+        if not isinstance(source, str):
+            msg = f"service {name!r}: bind volume 'source' must be a string"
+            raise UnsupportedComposeError(msg)
+    elif vtype == "tmpfs":
+        if source is not None:
+            msg = f"service {name!r}: tmpfs volume takes no 'source'"
+            raise UnsupportedComposeError(msg)
+    elif source is not None and not isinstance(source, str):  # volume
+        msg = f"service {name!r}: volume 'source' must be a string"
+        raise UnsupportedComposeError(msg)
+
+
+def _named_volume_source(volume: object) -> str | None:
+    """Return a volume entry's bare-identifier named source, or None if it needs no declaration.
+
+    A colon-form short-syntax string is classified via `_classify_volume`. A
+    long-syntax mapping needs its own check: only a `volume`-type entry names
+    a volume at all, and only when its `source` is a bare identifier (an
+    absent source is an anonymous volume; a `bind`/`tmpfs` entry's `source`,
+    if any, is a host path, never a name to cross-check).
+    """
+    if isinstance(volume, dict):
+        source = volume.get("source")
+        if volume.get("type") == "volume" and isinstance(source, str) and stores.NAME_PATTERN.fullmatch(source):
+            return source
+        return None
+    # _validate_service_volumes has already confirmed every non-dict entry is
+    # a str -- the signature is `object`, not `str | dict`, purely so a
+    # caller need not narrow first; ty cannot see that upstream guarantee.
+    kind, source = _classify_volume(volume)  # ty: ignore[invalid-argument-type]
     return source if kind == "named" else None
 
 
@@ -848,8 +914,9 @@ def _validate_volume_references(compose: dict[str, Any], services: dict[str, Any
 
     Runs after the per-service loop in `validate()` (`_validate_service` ->
     `_validate_service_volumes` has already confirmed every service's `volumes`
-    is a list of strings, and that a colon-less entry is an absolute path), so
-    `svc.get("volumes") or []` here is safe to iterate.
+    is a list of strings or long-form mappings, and that a colon-less string
+    entry is an absolute path), so `svc.get("volumes") or []` here is safe to
+    iterate -- `_named_volume_source` handles both shapes.
 
     A `${VAR}`-carrying source needs no separate carve-out the way other
     host-state-dependent grammars in this file need `values.has_variable`:

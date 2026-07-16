@@ -80,10 +80,62 @@ class TestValidate:
         }
         assert any("volumes" in w for w in validate(compose))
 
-    def test_long_volume_syntax_raises(self) -> None:
-        compose = {"services": {"app": {"image": "x", "volumes": [{"type": "bind", "source": ".", "target": "/s"}]}}}
-        with pytest.raises(UnsupportedComposeError, match="short volume syntax"):
-            validate(compose)
+    def test_long_volume_syntax_accepted(self) -> None:
+        # No top-level volumes here, so these accept cleanly (== []); the named
+        # source case is separate (it warns about the ignored top-level block).
+        for entry in (
+            {"type": "bind", "source": "./data", "target": "/data"},
+            {"type": "bind", "source": "/abs", "target": "/data", "read_only": True},
+            {"type": "volume", "target": "/data"},
+            {"type": "tmpfs", "target": "/tmp"},  # noqa: S108
+            {"type": "bind", "source": "/a", "target": "/d", "read_only": "yes", "consistency": "cached"},
+        ):
+            assert validate({"services": {"app": {"image": "x", "volumes": [entry]}}}) == []
+
+    def test_long_volume_declared_named_source_accepted(self) -> None:
+        doc = {
+            "services": {"app": {"image": "x", "volumes": [{"type": "volume", "source": "v", "target": "/d"}]}},
+            "volumes": {"v": {}},
+        }
+        # Reference resolves; the only message is the top-level-volumes-ignored warning.
+        assert "ignoring top-level 'volumes'" in " ".join(validate(doc))
+
+    def test_long_volume_undefined_named_source_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"undefined volume 'ghost'"):
+            validate(
+                {
+                    "services": {
+                        "app": {"image": "x", "volumes": [{"type": "volume", "source": "ghost", "target": "/d"}]}
+                    }
+                }
+            )
+
+    def test_long_volume_entry_rejects(self) -> None:
+        # Each case drives one distinct reject branch (all six needed for 100% coverage).
+        cases = [
+            ([5], r"volume entry must be a string or mapping"),
+            ([{"type": "cluster", "source": "x", "target": "/d"}], r"volume 'type' must be one of"),
+            ([{"type": "volume", "target": 5}], r"volume 'target' must be a string"),
+            ([{"type": "bind", "target": "/d"}], r"bind volume 'source' must be a string"),
+            ([{"type": "tmpfs", "source": "x", "target": "/t"}], r"tmpfs volume takes no 'source'"),
+            ([{"type": "volume", "source": 5, "target": "/d"}], r"volume 'source' must be a string"),
+            (
+                [{"type": "bind", "source": "/a", "target": "/d", "read_only": 5}],
+                r"volume 'read_only' must be a boolean",
+            ),
+            (
+                [{"type": "bind", "source": "/a", "target": "/d", "consistency": 5}],
+                r"volume 'consistency' must be a string",
+            ),
+            (
+                [{"type": "bind", "source": "/a", "target": "/d", "bind": {"propagation": "rshared"}}],
+                r"volume: unsupported keys",
+            ),
+            ([{"type": "volume", "source": "v", "target": "/d", "bogus": 1}], r"volume: unsupported keys"),
+        ]
+        for vols, msg in cases:
+            with pytest.raises(UnsupportedComposeError, match=msg):
+                validate({"services": {"app": {"image": "x", "volumes": vols}}})
 
     def test_anonymous_volume_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "volumes": ["/var/cache/models"]}}}) == []
