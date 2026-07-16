@@ -330,9 +330,14 @@ class TestValidate:
         svc = {"image": "x", "read_only": True, "init": True, "privileged": False}
         assert validate({"services": {"app": svc}}) == []
 
+    def test_read_only_quoted_boolean_accepted(self) -> None:
+        # Measured (docker compose config v5.1.2): a YAML-1.1 boolean spelling as
+        # a string runs on a boolean field. See planning/deferred.md (now closed).
+        assert validate({"services": {"app": {"image": "x", "read_only": "yes"}}}) == []
+
     def test_read_only_non_bool_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'read_only' must be a boolean"):
-            validate({"services": {"app": {"image": "x", "read_only": "yes"}}})
+            validate({"services": {"app": {"image": "x", "read_only": "notabool"}}})
 
     def test_pull_policy_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "pull_policy": "always"}}}) == []

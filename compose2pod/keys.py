@@ -83,7 +83,7 @@ def _validate_scalar(name: str, key: str, value: Any) -> None:  # noqa: ANN401 -
 
 
 def _validate_bool(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    if not isinstance(value, bool):
+    if not values.is_bool_like(value):
         msg = f"service {name!r}: '{key}' must be a boolean"
         raise UnsupportedComposeError(msg)
 
@@ -188,7 +188,7 @@ def _scalar(flag: str) -> KeySpec:
 
 def _bool(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-        return [flag] if value else []
+        return [flag] if values.as_bool(value) else []
 
     return KeySpec(validate=_validate_bool, emit=emit)
 

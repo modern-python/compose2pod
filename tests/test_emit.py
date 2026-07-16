@@ -226,6 +226,17 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", "/b")
         assert flags[4:7] == ["--init", "--read-only", "--privileged"]
 
+    def test_quoted_true_boolean_emits_flag(self) -> None:
+        # A quoted YAML-1.1 true-spelling must set the flag, like a real bool.
+        assert run_flags("app", {"image": "x", "read_only": "yes"}, "p", "/b")[4:5] == ["--read-only"]
+
+    def test_quoted_false_boolean_emits_no_flag(self) -> None:
+        # The truthiness trap: a non-empty string "false"/"no"/"off" is truthy in
+        # Python, so a naive `[flag] if value else []` would wrongly set the flag.
+        # `as_bool` coerces first.
+        for spelling in ("false", "no", "off"):
+            assert "--read-only" not in run_flags("app", {"image": "x", "read_only": spelling}, "p", "/b")
+
     def test_boolean_flag_false_or_absent_is_omitted(self) -> None:
         flags = run_flags("app", {"image": "x", "read_only": False}, "p", "/b")
         assert "--read-only" not in flags
