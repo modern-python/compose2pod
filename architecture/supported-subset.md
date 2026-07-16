@@ -42,6 +42,11 @@ positions, top-level keys. A key added to the registry is probed the moment
 it exists; the rule cannot decay silently as the subset grows the way five
 consecutive hand-found divergences once did.
 
+Every regex-anchored value grammar in `values.py` (size, duration,
+strict-integer-string, port) rejects surrounding whitespace and a trailing
+newline, matching Docker — so a block-scalar value like `mem_limit: |` (which
+YAML resolves to `"512m\n"`) is refused, not silently accepted.
+
 ## Top-level keys
 
 - **Supported:** `services` (required — a non-mapping value raises, an empty

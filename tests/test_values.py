@@ -125,6 +125,25 @@ def test_validate_size_rejects_whitespace_padding(value: str) -> None:
         validate_size("app", "mem_limit", value)
 
 
+# Python's `$` regex anchor matches before a trailing newline, not just at the true
+# end of string -- so a `$`-anchored grammar would over-accept a value carrying one
+# (reachable via a YAML block scalar like `mem_limit: |\n  512m\n`), which Docker
+# refuses. Each grammar below is anchored with `\Z` (true end-of-string only) to
+# close that gap.
+@pytest.mark.parametrize(
+    ("validate", "key", "good", "bad"),
+    [
+        (validate_size, "mem_limit", "512m", "512m\n"),
+        (validate_count, "cpu_shares", "1024", "1024\n"),
+        (validate_duration, "stop_grace_period", "5s", "5s\n"),
+    ],
+)
+def test_grammar_rejects_trailing_newline(validate, key, good, bad) -> None:  # noqa: ANN001
+    validate("app", key, good)  # newline-free form still validates
+    with pytest.raises(UnsupportedComposeError):
+        validate("app", key, bad)
+
+
 # string_only: deploy.resources.limits.memory / reservations.memory are typed
 # as a Go string field, unlike mem_limit/mem_reservation -- a native number is
 # refused outright, only a size *string* is accepted. Measured against
@@ -350,6 +369,12 @@ def test_validate_ports_accepts(value: object) -> None:
 def test_validate_ports_rejects(value: object) -> None:
     with pytest.raises(UnsupportedComposeError, match="ports"):
         validate_ports("app", "ports", value)
+
+
+def test_validate_ports_rejects_trailing_newline() -> None:
+    validate_ports("app", "ports", ["8080"])  # newline-free form still validates
+    with pytest.raises(UnsupportedComposeError):
+        validate_ports("app", "ports", ["8080\n"])
 
 
 # C3: a host range is fine on its own, or matched 1:1 against a container range, but

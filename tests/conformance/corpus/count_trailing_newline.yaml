@@ -1,0 +1,4 @@
+services:
+  app:
+    image: nginx
+    cpu_shares: "1024\n"
