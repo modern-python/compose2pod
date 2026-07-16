@@ -83,6 +83,39 @@ def has_variable(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyp
     return isinstance(value, str) and bool(variable_names(value))
 
 
+# YAML 1.1's boolean spellings, split by truth value. Measured against
+# `docker compose config` v5.1.2: Docker casts a *string* on any boolean field
+# through exactly this set -- "yes"/"on"/"y" -> true, "no"/"off"/"n" -> false;
+# "1"/"0"/"t"/"f"/"banana"/"" are refused. compose2pod's YAML-1.2 reader
+# (read.py) demotes a bare on/off/yes/no to a string, so this field-level cast
+# is what re-accepts the quoted form, matching Docker. The two readers below
+# (accept and coerce) share these sets, so a set flag can never disagree with
+# the accept-test -- the same single-seam discipline the registry keys use.
+_BOOL_TRUE = frozenset({"y", "Y", "yes", "Yes", "YES", "true", "True", "TRUE", "on", "On", "ON"})
+_BOOL_FALSE = frozenset({"n", "N", "no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF"})
+
+
+def is_bool_like(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Check whether `value` is a real bool or a YAML-1.1 boolean spelling as a string.
+
+    The `isinstance(value, str)` guard is load-bearing: an unhashable dict/list
+    value would otherwise crash the frozenset `in` membership test with a raw
+    TypeError instead of returning a clean False.
+    """
+    return isinstance(value, bool) or (isinstance(value, str) and (value in _BOOL_TRUE or value in _BOOL_FALSE))
+
+
+def as_bool(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Coerce a value already accepted by `is_bool_like` to a real bool.
+
+    A real bool passes through; a bool-spelling string maps by membership in the
+    true-set. Any other value returns False (defense-in-depth on the emit path,
+    which is reachable without the gate), so a leaked non-bool-like string never
+    emits a set flag.
+    """
+    return value if isinstance(value, bool) else value in _BOOL_TRUE
+
+
 def _is_int(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     # bool IS an int in Python, so a plain isinstance check would let `true` through.
     return not isinstance(value, bool) and isinstance(value, int)

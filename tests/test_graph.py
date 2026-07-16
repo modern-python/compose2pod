@@ -86,9 +86,9 @@ class TestDependsOn:
 
     def test_restart_must_be_a_boolean(self) -> None:
         # Measured: `restart: 5` is refused ("must be a boolean or string" --
-        # the "or string" half is the quoted-boolean cast, a known deferred
-        # limitation, planning/deferred.md). `condition` is present so this
-        # exercises the `restart` check specifically, not the missing-condition one.
+        # 5 is neither a bool nor a YAML-1.1 boolean spelling, so it is
+        # refused). `condition` is present so this exercises the `restart`
+        # check specifically, not the missing-condition one.
         with pytest.raises(UnsupportedComposeError, match=r"'restart' must be a boolean"):
             depends_on({"depends_on": {"db": {"condition": "service_started", "restart": 5}}})
 
@@ -100,6 +100,12 @@ class TestDependsOn:
         assert depends_on(
             {"depends_on": {"db": {"condition": "service_started", "restart": True, "required": False}}}
         ) == {"db": "service_started"}
+
+    def test_restart_quoted_boolean_accepted(self) -> None:
+        # Measured (docker compose config v5.1.2): a YAML-1.1 boolean string runs.
+        assert depends_on({"depends_on": {"db": {"condition": "service_started", "restart": "yes"}}}) == {
+            "db": "service_started"
+        }
 
     def test_restart_variable_reference_passes_through(self) -> None:
         # Host-dependent, measured: Docker interpolates the reference *then*

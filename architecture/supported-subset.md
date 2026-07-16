@@ -273,6 +273,15 @@ boolean mapping value (`labels: {enabled: true}`) is normalized like
 | `pull_policy` | `--pull` (`if_not_present` → `missing`, rest verbatim) | enum: `always`/`never`/`missing`/`if_not_present` |
 | `ulimits` | `--ulimit` (`name=value` or `name=soft:hard`) | mapping, see below |
 
+Every boolean field in the subset — `init`/`read_only`/`privileged`/
+`oom_kill_disable` above, `tty`/`stdin_open`, the `build` and network/volume
+definition bools, and `depends_on`'s `restart`/`required` — accepts a quoted
+YAML-1.1 boolean spelling (`"yes"`, `"on"`, bare `yes`, ...) as a string, cast
+via `values.is_bool_like`/`as_bool`, matching `docker compose config`'s own
+cast. A `${VAR}` reference on an *emitting* bool (`init: ${X}`) still refuses:
+a static script cannot conditionally emit a flag from a run-time variable, so
+that stays a can't-express limit, not an over-reject.
+
 `ulimits` is per limit: a scalar (`nproc: 65535` → `--ulimit nproc=65535`,
 podman sets soft = hard) or a `{soft, hard}` mapping exactly (`nofile:
 {soft, hard}` → `--ulimit nofile=soft:hard`), each bound an int or string. A
@@ -318,10 +327,11 @@ slot (`architecture/glossary.md`).
   `dockerfile_inline`, `target`, `network`, `isolation`); a **size**
   (`shm_size` — a number or size string, but unlike the top-level `shm_size`
   service key, a *fractional* native float is refused, whole or not); a
-  strict **bool** (`no_cache`, `pull`, `privileged` — a quoted `"true"` is a
-  deferred over-rejection, same limitation as the top-level six boolean keys,
-  `planning/deferred.md`; a `${VAR}` reference passes through, since Docker's
-  own cast of it is host-state-dependent); a **list of strings** (`cache_from`,
+  strict **bool** (`no_cache`, `pull`, `privileged` — a quoted YAML-1.1
+  boolean spelling (`"true"`, `"yes"`, ...) is accepted via
+  `values.is_bool_like`, matching Docker's own cast, same as the top-level
+  six boolean keys; a `${VAR}` reference passes through, since Docker's own
+  cast of it is host-state-dependent); a **list of strings** (`cache_from`,
   `cache_to`, `tags`, `platforms`, `entitlements`); a **list-or-map**, itself
   three different grammars (`args`/`labels` share one — a list of
   `'KEY[=value]'` strings or a mapping with scalar-or-null values; `ssh`
@@ -967,10 +977,10 @@ keys — `condition` (read above), `restart` and `required` (both a plain
 boolean; neither is read for effect, since podman has no equivalent of
 either, but a malformed value is still a document Docker refuses) — plus the
 usual `^x-` extension pattern; an unrecognized key raises. `restart`/
-`required` share the six top-level boolean keys' quoted-boolean limitation
-(`planning/deferred.md`): a literal `"true"` is refused even though Docker
-itself casts it, but a genuine `${VAR}` reference is carved out, since its
-verdict is a fact about the reading shell, not the document.
+`required` share the six top-level boolean keys' quoted-boolean acceptance: a
+literal `"true"` (or any other YAML-1.1 boolean spelling) is accepted, since
+Docker itself casts it, and a genuine `${VAR}` reference is carved out too,
+since its verdict is a fact about the reading shell, not the document.
 
 Separately, at emit time, `startup_order` (`compose2pod/graph.py`) walks the
 target's `depends_on` closure and raises if a dependency names a service

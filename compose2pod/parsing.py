@@ -23,7 +23,7 @@ SUPPORTED_SERVICE_KEYS = set(SERVICE_KEYS) | STRUCTURAL_KEYS
 
 
 def _validate_bool(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
-    if not isinstance(value, bool):
+    if not values.is_bool_like(value):
         msg = f"service {name!r}: {key!r} must be a boolean"
         raise UnsupportedComposeError(msg)
 
@@ -212,20 +212,17 @@ def _validate_build_shm_size(name: str, key: str, value: Any) -> None:  # noqa: 
 
 
 def _validate_build_bool(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
-    """Strict bool for build's own no_cache/pull/privileged -- `${VAR}` passes through.
+    """Strict bool for build's own no_cache/pull/privileged, plus the YAML-1.1 quoted forms.
 
-    A quoted `"true"` is refused, unlike the top-level six boolean keys' deferred
-    limitation note in `planning/deferred.md` (this is the same limitation, just
-    on a different set of keys, kept consistent on purpose). `${VAR}` is
-    different: measured against `docker compose config` v5.1.2, `no_cache:
-    ${MYVAR}` is accepted when `MYVAR=true` and refused when unset or non-boolean
-    -- genuinely host-state-dependent, so it is not this refusal's business
-    (`values.has_variable`, the same carve-out every other grammar in `values.py`
-    applies).
+    A quoted `"true"`/`"yes"`/`"on"` is accepted (via `values.is_bool_like`),
+    matching `docker compose config` v5.1.2. `${VAR}` is a separate,
+    host-state-dependent case (`values.has_variable`): `no_cache: ${MYVAR}` is
+    accepted when `MYVAR=true` and refused when unset or non-boolean, so it is
+    carved out ahead of the shape check, not judged here.
     """
     if values.has_variable(value):
         return
-    if not isinstance(value, bool):
+    if not values.is_bool_like(value):
         msg = f"service {name!r}: build {key!r} must be a boolean"
         raise UnsupportedComposeError(msg)
 
@@ -943,19 +940,18 @@ def _validate_definition_bool(label: str) -> Callable[[str, str, Any], None]:
 
     Measured against `docker compose config` v5.1.2: each casts a *string*
     value through the same YAML-1.1-style boolean interpolation every other
-    boolean key in this project already defers (`planning/deferred.md`) --
+    boolean key in this project accepts (`values.is_bool_like`) --
     `internal: "true"` is accepted, `internal: "notabool"` is refused, and a
     genuine `${VAR}` reference is resolved and cast at read time
     ("error while interpolating ... failed to cast to expected type"), so its
     verdict is a fact about the reading shell, not the document --
-    `has_variable` carves that case out, matching `_validate_build_bool`. A
-    literal quoted string is still refused here, a cataloged over-reject.
+    `has_variable` carves that case out, matching `_validate_build_bool`.
     """
 
     def validate(ident: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
         if values.has_variable(value):
             return
-        if not isinstance(value, bool):
+        if not values.is_bool_like(value):
             msg = f"{label} {ident!r}: {key!r} must be a boolean"
             raise UnsupportedComposeError(msg)
 
@@ -1021,21 +1017,23 @@ def _validate_definition_external(label: str) -> Callable[[str, str, Any], None]
     Measured against `docker compose config` v5.1.2: `external: {name: x}`
     still works (with a deprecation warning on stderr, not a rejection) --
     `external: true` plus a separate `name:` key is the modern spelling, but
-    both are accepted. A bare string (`external: realname`) is refused
-    outright: unlike `internal`/`attachable`/`enable_ipv6`, this field's own
-    type union has no plain-string branch at all -- Docker casts it as a
-    *boolean* interpolation target instead ("invalid boolean: realname"), so
-    the same `has_variable` carve-out applies (a `${VAR}` reference resolves
-    and casts at read time) but a literal non-boolean string never can,
-    document-only like `values.validate_native_number`'s `priority` (Task 11).
-    An explicit null is refused too (measured) -- unlike the *entry* itself,
-    which treats null as "use defaults".
+    both are accepted. A quoted YAML-1.1 boolean spelling (`external: "yes"`)
+    is accepted too, via `values.is_bool_like`, same as
+    `internal`/`attachable`/`enable_ipv6`. A bare non-boolean string
+    (`external: realname`) is refused outright: unlike those three keys, this
+    field's own type union has no plain-string branch at all -- Docker casts
+    it as a *boolean* interpolation target instead ("invalid boolean:
+    realname"), so the same `has_variable` carve-out applies (a `${VAR}`
+    reference resolves and casts at read time) but a literal non-boolean
+    string never can, document-only like `values.validate_native_number`'s
+    `priority` (Task 11). An explicit null is refused too (measured) --
+    unlike the *entry* itself, which treats null as "use defaults".
     """
 
     def validate(ident: str, key: str, value: Any) -> None:  # noqa: ANN401 - untyped YAML/JSON
         if values.has_variable(value):
             return
-        if isinstance(value, bool):
+        if values.is_bool_like(value):
             return
         if isinstance(value, dict):
             require_string_keys(f"{label} {ident!r}: {key!r}", value)

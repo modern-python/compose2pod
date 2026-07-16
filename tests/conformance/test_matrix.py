@@ -29,15 +29,16 @@ SHAPES: dict[str, Any] = {
     "list-of-map": [{"a": 1}],
     "map-str": {"a": "b"},
     "nested-map": {"a": {"b": 1}},
-    # Reaches the quoted-boolean limitation (planning/deferred.md): Docker casts a
-    # YAML-1.1-style *string* on a boolean field ("true", "yes", "on", bare `yes`) but
-    # compose2pod's `_validate_bool` requires a real YAML boolean regardless of spelling.
-    # One spelling is enough to surface every boolean key as an over-reject -- the other
-    # accepted spellings ("yes", "on") would only repeat the identical compose2pod-side
-    # verdict (any non-bool is refused, independent of what the string says), so adding
-    # them would inflate the report without adding signal. The generic "str" shape above
-    # ("somevalue") does *not* reach this: Docker refuses an arbitrary string on a boolean
-    # key just as compose2pod does, so it never revealed the gap.
+    # Docker casts a YAML-1.1-style *string* on a boolean field ("true", "yes", "on",
+    # bare `yes`) rather than requiring a real YAML boolean. compose2pod now matches:
+    # every boolean field routes through `values.is_bool_like` (measured against
+    # `docker compose config` v5.1.2), so this shape verifies conformance rather than
+    # surfacing an over-reject. One spelling is enough to guard every boolean key --
+    # the other accepted spellings ("yes", "on") would only repeat the identical
+    # compose2pod-side verdict (accepted, same as Docker), so adding them would inflate
+    # the report without adding signal. The generic "str" shape above ("somevalue")
+    # does *not* reach this: Docker refuses an arbitrary string on a boolean key just as
+    # compose2pod does, so it never exercises the coercion path.
     "quoted-bool": "true",
     # Every prior shape is structural (null/empty/bool/int/list/map/bare-string) -- none
     # carry padded or internal whitespace, which is exactly how the size/number/integer
