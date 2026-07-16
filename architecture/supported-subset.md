@@ -718,15 +718,20 @@ boolean-typed exception in this group, validated as an actual bool like
   string raise, matching `docker compose config` v5.1.2 — these used to be
   silently accepted (`is_number`/`interval_seconds`'s bare-number fallback),
   producing a script for a file Docker itself refuses.
-  `interval` is parsed to whole seconds by `interval_seconds`, which floors
-  at 1 second: the interval only paces the script's `podman healthcheck run`
-  polling loop, which has no sub-second resolution, so `"500ms"` and `"0"`
-  both poll once a second. `interval` additionally rejects compound
-  durations (`"1h30m"`) and the hour unit (`"1h"`) that `timeout` and
-  `start_period` accept — a deliberate, deferred limitation
-  (`planning/deferred.md`), not a grammar gap: each raises rather than being
-  silently truncated or misinterpreted. An explicit `null` (or an absent
-  `interval`) defaults to 1 second.
+  `interval` is parsed to whole seconds by `interval_seconds`, which never
+  reaches podman (it only paces compose2pod's own `wait_healthy` polling
+  loop), so it honors the full compose-go duration grammar rather than the
+  narrower one `timeout`/`start_period` forward to podman's `--health-*`
+  flags: a signed sequence of `<number><unit>` components, units
+  `ns`/`us`/`µs`/`ms`/`s`/`m`/`h`/`d`/`w` (`d` = 86400s, `w` = 604800s —
+  compose-go additions over Go's `time.ParseDuration`), compound
+  (`"1h30m"`), fractional (`"1.5d"`), and signed (`"-1h"`) forms — measured
+  against `docker compose config` v5.1.2. Whitespace and uppercase units are
+  refused, matching Docker (`" 1h "`, `"1H"` both raise). It floors at 1
+  second: the polling loop has no sub-second resolution, so `"500ms"` and
+  `"0"` both poll once a second, and a negative result (`"-1h"`) also floors
+  to 1 rather than producing a nonsensical negative interval. An explicit
+  `null` (or an absent `interval`) defaults to 1 second.
 - **`retries`:** an int64 count (`values.validate_count`): a native number
   casts leniently (`0.5` is accepted), but a string form must be a strict
   integer — no decimal point, no exponent (`"1.5"`, `"30s"` raise). A mapping

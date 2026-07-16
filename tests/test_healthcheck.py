@@ -6,6 +6,12 @@ from compose2pod.healthcheck import has_healthcheck, health_cmd, interval_second
 
 _FIVE_SECONDS = 5
 _ONE_HUNDRED_TWENTY_SECONDS = 120
+_ONE_HOUR_SECONDS = 3600
+_ONE_HOUR_THIRTY_MINUTES_SECONDS = 5400
+_ONE_DAY_SECONDS = 86400
+_ONE_WEEK_SECONDS = 604800
+_ONE_AND_A_HALF_DAYS_SECONDS = 129600
+_COMPOUND_DURATION_SECONDS = 2 * _ONE_HOUR_SECONDS + 45 * 60 + 30
 
 
 class TestHealthCmd:
@@ -75,9 +81,32 @@ class TestIntervalSeconds:
         assert interval_seconds("0") == 1
 
     def test_unparseable_interval_raises(self) -> None:
-        for bad in ("1h30m", "abc", "5x"):
+        for bad in ("abc", "5x"):
             with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
                 interval_seconds(bad)
+
+    def test_hour_and_compound_and_larger_units(self) -> None:
+        assert interval_seconds("1h") == _ONE_HOUR_SECONDS
+        assert interval_seconds("1h30m") == _ONE_HOUR_THIRTY_MINUTES_SECONDS
+        assert interval_seconds("1d") == _ONE_DAY_SECONDS
+        assert interval_seconds("1w") == _ONE_WEEK_SECONDS
+        assert interval_seconds("1.5d") == _ONE_AND_A_HALF_DAYS_SECONDS
+        assert interval_seconds("2h45m30s500ms") == _COMPOUND_DURATION_SECONDS
+
+    def test_negative_interval_floors_to_one(self) -> None:
+        # Docker accepts `-1h`; a negative poll interval is nonsensical, floored to 1.
+        assert interval_seconds("-1h") == 1
+
+    def test_whitespace_and_uppercase_rejected(self) -> None:
+        # Measured: Docker rejects any whitespace or uppercase in a duration.
+        for bad in (" 1h ", "1h ", " 1h", "1 h", "1h 30m", "1H"):
+            with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+                interval_seconds(bad)
+
+    def test_overflowing_duration_raises_not_crashes(self) -> None:
+        # A giant integer floats to inf; must raise cleanly, not OverflowError.
+        with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+            interval_seconds("1" + "0" * 400 + "s")
 
     def test_non_finite_interval_raises(self) -> None:
         # inf/nan are valid YAML floats; they must be refused, not crash raw.
