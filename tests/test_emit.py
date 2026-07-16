@@ -1133,3 +1133,28 @@ class TestGuardedEnvFileDependencyWiring:
         assert prelude in script
         assert '${c2p_envfile_0:+"$c2p_envfile_0"}' in db_run
         assert script.index(prelude) < script.index(db_run)
+
+    def test_env_file_guarded_on_completion_gated_dependency(self) -> None:
+        # Proves the prelude wiring on the `--rm` completion-gated branch (a dependency
+        # gated with service_completed_successfully renders via `podman run --rm`).
+        compose = {
+            "services": {
+                "app": {"image": "x", "depends_on": {"job": {"condition": "service_completed_successfully"}}},
+                "job": {"image": "y", "env_file": [{"path": "job.env", "required": False}]},
+            }
+        }
+        options = EmitOptions(
+            target="app",
+            ci_image="ci",
+            command="",
+            pod="p",
+            project_dir="/proj",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+        script = emit_script(compose=compose, options=options)
+        prelude = '[ -f "/proj/job.env" ] && c2p_envfile_0=--env-file="/proj/job.env"'
+        rm_run = next(line for line in script.splitlines() if "podman run --rm" in line and "p-job" in line)
+        assert prelude in script
+        assert '${c2p_envfile_0:+"$c2p_envfile_0"}' in rm_run
+        assert script.index(prelude) < script.index(rm_run)
