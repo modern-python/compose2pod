@@ -94,10 +94,27 @@ def _env_file_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
     return flags
 
 
+def _mount_flag(entry: dict[str, Any], project_dir: str) -> list[Token]:
+    """Render one long-form volume mapping as a `--mount` value."""
+    parts = [f"type={entry['type']}"]
+    source = entry.get("source")
+    if source is not None:
+        if entry["type"] == "bind" and source.startswith("."):
+            source = str(Path(project_dir, source))
+        parts.append(f"source={source}")
+    parts.append(f"target={entry['target']}")
+    if as_bool(entry.get("read_only", False)):
+        parts.append("ro")
+    return ["--mount", Expand(value=",".join(parts))]
+
+
 def _volume_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
-    """-v and --tmpfs flag tokens."""
+    """-v, --mount and --tmpfs flag tokens."""
     flags: list[Token] = []
     for volume in svc.get("volumes") or []:
+        if isinstance(volume, dict):
+            flags += _mount_flag(volume, project_dir)
+            continue
         if ":" not in volume:
             # Anonymous volume: a bare container path, no host source to translate.
             flags += ["-v", Expand(value=volume)]
