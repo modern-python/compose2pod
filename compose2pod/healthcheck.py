@@ -48,7 +48,7 @@ def health_cmd(test: object) -> str | None:
 # so compose2pod can honor the full set -- unlike timeout/start_period, which
 # flow to podman's Go-parser --health-* flags (see values._DURATION).
 _UNITS = "ns|us|µs|ms|s|m|h|d|w"
-_INTERVAL_DURATION = re.compile(rf"^[+-]?(?:[0-9]+(?:\.[0-9]+)?(?:{_UNITS}))+$")
+_INTERVAL_DURATION = re.compile(rf"^[+-]?(?:[0-9]+(?:\.[0-9]+)?(?:{_UNITS}))+\Z")
 _DURATION_COMPONENT = re.compile(rf"([0-9]+(?:\.[0-9]+)?)({_UNITS})")
 _UNIT_SECONDS: dict[str, float] = {
     "ns": 1e-9,

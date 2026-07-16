@@ -106,6 +106,14 @@ class TestIntervalSeconds:
             with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
                 interval_seconds(bad)
 
+    def test_trailing_newline_rejected(self) -> None:
+        # A YAML block scalar (`interval: |\n  5s\n`) parses to "5s\n". Python's
+        # `$` (non-MULTILINE) matches before a trailing newline, so a naive regex
+        # wrongly accepts it; Docker refuses it ('unknown unit "s\n"').
+        for bad in ("5s\n", "1h\n", "1h30m\n"):
+            with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
+                interval_seconds(bad)
+
     def test_overflowing_duration_raises_not_crashes(self) -> None:
         # A giant integer floats to inf; must raise cleanly, not OverflowError.
         with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
