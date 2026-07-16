@@ -13,11 +13,6 @@ never written. Every one was measured against `docker compose config` v5.1.2.
 
 - **Long-form `volumes`.** The mapping form raises; podman expresses it with
   `--mount`.
-- **`volumes: ["a"]`** — a colon-less relative entry. Docker accepts it;
-  compose2pod requires an anonymous volume to be an absolute path. Worth
-  re-measuring what podman does with it before deciding whether this is a
-  legitimate refusal (like `sysctls: ["a"]`, which genuinely cannot form a flag)
-  or another unfinished form.
 - **Windows drive-letter volume source.** `volumes: ["C:\data:/var"]` with no
   top-level declaration: Docker ACCEPTS (measured, `docker compose config`
   v5.1.2 -- it special-cases a leading `<letter>:\` so the drive letter stays
@@ -37,6 +32,11 @@ never written. Every one was measured against `docker compose config` v5.1.2.
 compose2pod refuses — most likely long-form `volumes`, a common form in
 hand-written and generated compose files alike. The conformance harness reports
 these as `over-reject`, so they stay visible rather than forgotten.
+
+Two other `over-reject` cells the harness reports — `sysctls: ["a"]` and
+`volumes: ["a"]` — are *not* deferred parsers: they are measured legitimate
+refusals (podman cannot form the flag), recorded in
+`decisions/2026-07-16-list-of-str-refusals.md`, not here.
 
 ## Non-target `depends_on` graph is not validated outside the target's closure
 
