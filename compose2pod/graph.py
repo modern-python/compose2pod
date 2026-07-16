@@ -4,7 +4,7 @@ import re
 from typing import Any, cast
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.values import has_variable
+from compose2pod.values import has_variable, is_bool_like
 
 
 # Docker's own schema for a long-form `depends_on` entry (measured against
@@ -21,18 +21,17 @@ def _validate_depends_on_flag(dep: str, key: str, value: Any) -> None:  # noqa: 
 
     Measured against `docker compose config` v5.1.2: both cast a *string*
     value through the same YAML-1.1-style boolean interpolation every other
-    quoted-boolean field in this project already defers (`planning/deferred.md`)
+    quoted-boolean field in this project already accepts (`values.is_bool_like`)
     -- `restart: "true"` is accepted, `restart: "notabool"` is refused, and a
     genuine `${VAR}` reference is resolved and cast at read time, so its
     verdict is a fact about the reading shell's environment, not the
     document (`error while interpolating ... failed to cast to expected
     type`). `has_variable` carves that case out, matching
-    `parsing._validate_build_bool`; a literal quoted string is still refused
-    like every other boolean key here (a cataloged over-reject, not a bug).
+    `parsing._validate_build_bool`.
     """
     if has_variable(value):
         return
-    if not isinstance(value, bool):
+    if not is_bool_like(value):
         msg = f"depends_on entry {dep!r}: {key!r} must be a boolean"
         raise UnsupportedComposeError(msg)
 
