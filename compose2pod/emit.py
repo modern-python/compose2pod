@@ -10,11 +10,12 @@ from compose2pod import stores
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
-from compose2pod.keys import SERVICE_KEYS, Expand, Token
+from compose2pod.keys import SERVICE_KEYS, Expand, GuardedEnvFile, Token
 from compose2pod.parsing import validate
 from compose2pod.pod import pod_create_flags
 from compose2pod.resources import deploy_resource_flags
 from compose2pod.shell import to_shell, variable_names
+from compose2pod.values import as_bool
 
 
 HEALTHY_WAIT_BUDGET_SECONDS = 120
@@ -70,14 +71,26 @@ def _health_flags(healthcheck: dict[str, Any]) -> list[Token]:
 
 
 def _env_file_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
-    """--env-file flag tokens. `environment` is a SERVICE_KEYS registry key (_map("-e"))."""
+    """--env-file flag tokens.
+
+    `environment` is a SERVICE_KEYS registry key (_map("-e")). A `required: false`
+    long-form entry becomes a run-time-guarded token (see `GuardedEnvFile`) instead
+    of an unconditional flag, so a missing optional file doesn't fail the run.
+    """
     flags: list[Token] = []
     env_files = svc.get("env_file") or []
     if isinstance(env_files, str):
         env_files = [env_files]
-    for entry in env_files:
-        path = entry if isinstance(entry, str) else entry["path"]
-        flags += ["--env-file", Expand(value=str(Path(project_dir, path)))]
+    for i, entry in enumerate(env_files):
+        if isinstance(entry, str):
+            path, required = entry, True
+        else:
+            path, required = entry["path"], as_bool(entry.get("required", True))
+        resolved = str(Path(project_dir, path))
+        if required:
+            flags += ["--env-file", Expand(value=resolved)]
+        else:
+            flags.append(GuardedEnvFile(var=f"c2p_envfile_{i}", value=resolved))
     return flags
 
 
@@ -179,14 +192,38 @@ class PlannedScript:
 
 
 def _render(tokens: list[Token]) -> str:
-    return " ".join(to_shell(token.value) if isinstance(token, Expand) else shlex.quote(token) for token in tokens)
+    parts: list[str] = []
+    for token in tokens:
+        if isinstance(token, Expand):
+            parts.append(to_shell(token.value))
+        elif isinstance(token, GuardedEnvFile):
+            parts.append("${" + token.var + ':+"$' + token.var + '"}')
+        else:
+            parts.append(shlex.quote(token))
+    return " ".join(parts)
 
 
 def _collect_vars(tokens: list[Token], names: set[str]) -> None:
-    """Add the run-time variables any `Expand` tokens expand to `names`."""
+    """Add the run-time variables any `Expand`/`GuardedEnvFile` tokens expand to `names`."""
     for token in tokens:
-        if isinstance(token, Expand):
+        if isinstance(token, Expand | GuardedEnvFile):
             names.update(variable_names(token.value))
+
+
+def _env_file_preludes(tokens: list[Token]) -> list[str]:
+    """Build assignment lines for each guarded env_file, set right before the service's `podman run`.
+
+    `${var}` is set to the `--env-file=PATH` flag only if the file exists at run time;
+    `_render` references it inline as `${var:+"$var"}`. The `[ -f ] && ...` list is
+    set -e-safe (the failing test is the left operand of `&&`).
+    """
+    lines: list[str] = []
+    for token in tokens:
+        if isinstance(token, GuardedEnvFile):
+            path = to_shell(token.value)
+            lines.append(f"{token.var}=")
+            lines.append(f"[ -f {path} ] && {token.var}=--env-file={path}")
+    return lines
 
 
 def run_tokens(name: str, services: dict[str, Any], options: EmitOptions) -> list[Token]:
@@ -209,6 +246,7 @@ def run_tokens(name: str, services: dict[str, Any], options: EmitOptions) -> lis
 def _emit_target(lines: list[str], tokens: list[Token], options: EmitOptions) -> None:
     target_ctr = shlex.quote(f"{options.pod}-{options.target}")
     lines.append("rc=0")
+    lines.extend(_env_file_preludes(tokens))
     lines.append(f"podman run {_render(tokens)} || rc=$?")
     for artifact in options.artifacts:
         source, destination = artifact.split(":", 1)
@@ -310,8 +348,10 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
         if name == options.target:
             _emit_target(lines, tokens, options)
         elif name in completion_gated:
+            lines.extend(_env_file_preludes(tokens))
             lines.append(f"podman run --rm {_render(tokens)}")
         else:
+            lines.extend(_env_file_preludes(tokens))
             lines.append(f"podman run -d {_render(tokens)}")
     return PlannedScript(script="\n".join(lines) + "\n", variables=sorted(names))
 
