@@ -11,11 +11,6 @@ subset, not a bug and not a design position. Each item below is a **form** of a
 capability compose2pod already supports, refused only because the parser was
 never written. Every one was measured against `docker compose config` v5.1.2.
 
-- **Compound and hour healthcheck durations.** `interval: 1h30m` and `1h` raise;
-  Docker accepts both. `1h30m` is 5400 seconds and the value only paces the
-  script's polling loop, so podman can honor it. `architecture/supported-subset.md`
-  presents this refusal as a safety choice ("rather than being silently
-  truncated"); under rule two it is simply an unfinished parser.
 - **Long-form `volumes`.** The mapping form raises; podman expresses it with
   `--mount`.
 - **`volumes: ["a"]`** — a colon-less relative entry. Docker accepts it;
@@ -39,10 +34,9 @@ never written. Every one was measured against `docker compose config` v5.1.2.
   tilde-bind-mount fix that discovered it.
 
 **Revisit trigger:** a user reports a compose file that `docker compose` runs and
-compose2pod refuses — most likely the compound/hour healthcheck duration or
-long-form `volumes`, since both are common in hand-written and generated compose
-files alike. The conformance harness reports these as `over-reject`, so they
-stay visible rather than forgotten.
+compose2pod refuses — most likely long-form `volumes`, a common form in
+hand-written and generated compose files alike. The conformance harness reports
+these as `over-reject`, so they stay visible rather than forgotten.
 
 ## Non-target `depends_on` graph is not validated outside the target's closure
 

@@ -397,7 +397,7 @@ class TestValidate:
             validate({"services": {"app": {"image": "x", "healthcheck": ["CMD", "true"]}}})
 
     def test_unparseable_healthcheck_interval_raises(self) -> None:
-        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "interval": "1h30m"}}}}
+        compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "interval": "abc"}}}}
         with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
             validate(compose)
 

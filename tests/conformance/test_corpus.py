@@ -52,3 +52,33 @@ def test_volume_tilde_bind_is_no_longer_an_over_rejection(
     """
     path = Path(__file__).parent / "corpus" / "volume_tilde_bind_no_declaration.yaml"
     assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
+
+
+def test_healthcheck_hour_duration_is_no_longer_an_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """`interval_seconds` now parses the full compose-go duration grammar, including `h`.
+
+    Same reasoning as the over-rejection tests above: the generic corpus run alone
+    would stay green even pre-fix, filing `healthcheck_hour_duration` under the
+    allowed 'over-reject' verdict instead of catching a regression. The stronger
+    claim -- both oracles ACCEPT `interval: 1h` -- needs this dedicated assertion
+    on the verdict itself.
+    """
+    path = Path(__file__).parent / "corpus" / "healthcheck_hour_duration.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
+
+
+def test_healthcheck_compound_duration_is_no_longer_an_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """`interval_seconds` now parses compound compose-go durations such as `1h30m`.
+
+    Same reasoning as the over-rejection tests above: the generic corpus run alone
+    would stay green even pre-fix, filing `healthcheck_compound_duration` under the
+    allowed 'over-reject' verdict instead of catching a regression. The stronger
+    claim -- both oracles ACCEPT `interval: 1h30m` -- needs this dedicated assertion
+    on the verdict itself.
+    """
+    path = Path(__file__).parent / "corpus" / "healthcheck_compound_duration.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
