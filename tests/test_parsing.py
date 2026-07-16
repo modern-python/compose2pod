@@ -624,8 +624,44 @@ class TestValidate:
 
     def test_env_file_list_with_non_string_entry_rejected_at_gate(self) -> None:
         # Used to reach emit and crash with TypeError: argument should be a str or an os.PathLike object.
-        with pytest.raises(UnsupportedComposeError, match=r"'env_file' entry must be a string"):
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' entry must be a string or mapping"):
             validate({"services": {"app": {"image": "x", "env_file": [5]}}})
+
+    def test_env_file_long_form_accepted(self) -> None:
+        doc = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "env_file": [
+                        "plain.env",
+                        {"path": "a.env"},
+                        {"path": "b.env", "required": False},
+                        {"path": "c.env", "required": "no", "format": "raw"},
+                    ],
+                }
+            }
+        }
+        assert validate(doc) == []
+
+    def test_env_file_bare_mapping_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' must be a string or list"):
+            validate({"services": {"app": {"image": "x", "env_file": {"path": "a.env"}}}})
+
+    def test_env_file_mapping_missing_path_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' entry 'path' must be a string"):
+            validate({"services": {"app": {"image": "x", "env_file": [{"required": False}]}}})
+
+    def test_env_file_mapping_unknown_key_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' entry: unsupported keys"):
+            validate({"services": {"app": {"image": "x", "env_file": [{"path": "a.env", "bogus": 1}]}}})
+
+    def test_env_file_mapping_bad_format_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' entry 'format' must be 'raw'"):
+            validate({"services": {"app": {"image": "x", "env_file": [{"path": "a.env", "format": "dotenv"}]}}})
+
+    def test_env_file_mapping_non_bool_required_rejected(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'env_file' entry 'required' must be a boolean"):
+            validate({"services": {"app": {"image": "x", "env_file": [{"path": "a.env", "required": 5}]}}})
 
     def test_service_with_neither_image_nor_build_rejected_at_gate(self) -> None:
         # Used to reach emit and crash with KeyError: 'image' (image_for).

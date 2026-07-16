@@ -472,7 +472,7 @@ def _validate_command(name: str, svc: dict[str, Any]) -> None:
 
 
 def _validate_string_or_string_list(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    """Check a key is a string or list of strings (emit iterates it), shared by tmpfs and env_file."""
+    """Check a key is a string or list of strings (emit iterates it), used by tmpfs."""
     if value is None:
         return
     if not isinstance(value, str | list):
@@ -490,9 +490,44 @@ def _validate_tmpfs(name: str, svc: dict[str, Any]) -> None:
     _validate_string_or_string_list(name, "tmpfs", svc.get("tmpfs"))
 
 
+_ENV_FILE_ENTRY_KEYS = {"path", "required", "format"}
+
+
 def _validate_env_file(name: str, svc: dict[str, Any]) -> None:
-    """Check env_file is a string or list of strings (emit iterates it)."""
-    _validate_string_or_string_list(name, "env_file", svc.get("env_file"))
+    """Check env_file: a string, or a list of (string | strict {path, required, format} mapping)."""
+    value = svc.get("env_file")
+    if value is None:
+        return
+    if isinstance(value, str):
+        return
+    if not isinstance(value, list):
+        msg = f"service {name!r}: 'env_file' must be a string or list"
+        raise UnsupportedComposeError(msg)
+    for entry in value:
+        if isinstance(entry, str):
+            continue
+        if not isinstance(entry, dict):
+            msg = f"service {name!r}: 'env_file' entry must be a string or mapping"
+            raise UnsupportedComposeError(msg)
+        _validate_env_file_mapping(name, entry)
+
+
+def _validate_env_file_mapping(name: str, entry: dict[str, Any]) -> None:
+    """Check one long-form env_file mapping against Docker's strict schema (measured, v5.1.2)."""
+    require_string_keys(f"service {name!r}: 'env_file'", entry)
+    unknown = set(entry) - _ENV_FILE_ENTRY_KEYS
+    if unknown:
+        msg = f"service {name!r}: 'env_file' entry: unsupported keys {sorted(unknown)}"
+        raise UnsupportedComposeError(msg)
+    if not isinstance(entry.get("path"), str):
+        msg = f"service {name!r}: 'env_file' entry 'path' must be a string"
+        raise UnsupportedComposeError(msg)
+    if "required" in entry and not values.is_bool_like(entry["required"]):
+        msg = f"service {name!r}: 'env_file' entry 'required' must be a boolean"
+        raise UnsupportedComposeError(msg)
+    if "format" in entry and entry["format"] != "raw":
+        msg = f"service {name!r}: 'env_file' entry 'format' must be 'raw'"
+        raise UnsupportedComposeError(msg)
 
 
 def _reject_null_values(name: str, svc: dict[str, Any]) -> None:

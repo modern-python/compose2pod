@@ -75,8 +75,9 @@ def _env_file_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
     env_files = svc.get("env_file") or []
     if isinstance(env_files, str):
         env_files = [env_files]
-    for env_file in env_files:
-        flags += ["--env-file", Expand(value=str(Path(project_dir, env_file)))]
+    for entry in env_files:
+        path = entry if isinstance(entry, str) else entry["path"]
+        flags += ["--env-file", Expand(value=str(Path(project_dir, path)))]
     return flags
 
 

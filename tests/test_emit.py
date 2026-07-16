@@ -77,6 +77,16 @@ class TestRunFlags:
             Expand(value="/builds/x/b.env"),
         ]
 
+    def test_env_file_long_form_mapping_path_resolved(self) -> None:
+        svc = {"image": "x", "env_file": [{"path": "a.env"}, "b.env"]}
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:8] == [
+            "--env-file",
+            Expand(value="/proj/a.env"),
+            "--env-file",
+            Expand(value="/proj/b.env"),
+        ]
+
     def test_tmpfs_string_form(self) -> None:
         # S108 flags "/tmp" as an insecure hardcoded temp path; this is a
         # pass-through string being tested, not a file write.
