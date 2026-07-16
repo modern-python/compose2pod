@@ -2,7 +2,9 @@ import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.values import (
+    as_bool,
     has_variable,
+    is_bool_like,
     validate_count,
     validate_duration,
     validate_integer,
@@ -537,3 +539,30 @@ def test_validate_ports_long_form_string_fields_reject_non_string(field: str) ->
 def test_validate_ports_long_form_fields_accept_variable_reference() -> None:
     validate_ports("app", "ports", _port(published="${P}", host_ip="${H}", protocol="${PR}"))
     validate_ports("app", "ports", [{"target": "${T}"}])
+
+
+BOOL_TRUE_SPELLINGS = ["y", "Y", "yes", "Yes", "YES", "true", "True", "TRUE", "on", "On", "ON"]
+BOOL_FALSE_SPELLINGS = ["n", "N", "no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF"]
+
+
+@pytest.mark.parametrize("value", [True, False, *BOOL_TRUE_SPELLINGS, *BOOL_FALSE_SPELLINGS])
+def test_is_bool_like_true(value: object) -> None:
+    assert is_bool_like(value) is True
+
+
+# "t"/"f"/"1"/"0"/"banana"/"" and non-strings are NOT the YAML-1.1 boolean set
+# (measured against `docker compose config` v5.1.2). Unhashable dict/list must
+# return False, not crash the `in` membership test.
+@pytest.mark.parametrize("value", ["t", "f", "1", "0", "banana", "", 3, 1.5, None, {"a": 1}, ["a"]])
+def test_is_bool_like_false(value: object) -> None:
+    assert is_bool_like(value) is False
+
+
+@pytest.mark.parametrize("value", [True, *BOOL_TRUE_SPELLINGS])
+def test_as_bool_true(value: object) -> None:
+    assert as_bool(value) is True
+
+
+@pytest.mark.parametrize("value", [False, *BOOL_FALSE_SPELLINGS])
+def test_as_bool_false(value: object) -> None:
+    assert as_bool(value) is False
