@@ -41,19 +41,19 @@ _DIGITS = r"[0-9]+(?:_[0-9]+)*"
 # "512  m", and "512\tm" all REJECT ("strconv.ParseFloat: ... invalid syntax" /
 # "invalid suffix").
 _SIZE = re.compile(
-    rf"^{_DIGITS}(?:\.{_DIGITS})?(?:[eE][+-]?{_DIGITS})? ?(?:[bkmgtp]b?)?$",
+    rf"^{_DIGITS}(?:\.{_DIGITS})?(?:[eE][+-]?{_DIGITS})? ?(?:[bkmgtp]b?)?\Z",
     re.IGNORECASE,
 )
 
 # Go's duration grammar, as used by `stop_grace_period`. A unit is mandatory --
 # Docker refuses a bare `90` with "missing unit in duration".
-_DURATION = re.compile(r"^[+-]?(?:[0-9]+(?:\.[0-9]+)?(?:ns|us|µs|ms|s|m|h))+$")
+_DURATION = re.compile(r"^[+-]?(?:[0-9]+(?:\.[0-9]+)?(?:ns|us|µs|ms|s|m|h))+\Z")
 
 # Go's strconv.ParseInt grammar, used for the *string* form of an int64 field
 # (cpu_shares/cpu_quota/cpu_period/pids_limit): an optional sign then digits
 # only -- no decimal point, no exponent, no digit-grouping underscore. The
 # *native* number form of these fields is far more permissive (see validate_count).
-_STRICT_INT_STRING = re.compile(r"^[+-]?[0-9]+$")
+_STRICT_INT_STRING = re.compile(r"^[+-]?[0-9]+\Z")
 
 # The highest valid TCP/UDP port number, per Docker's own bound.
 _MAX_PORT = 65535
@@ -69,7 +69,7 @@ _PORT = re.compile(
     )?
     (?P<container> {_PORT_RANGE} )
     (?: / (?P<proto> [A-Za-z]+ ) )?
-    $""",
+    \Z""",
     re.VERBOSE,
 )
 
