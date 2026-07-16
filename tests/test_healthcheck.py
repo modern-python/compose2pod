@@ -99,7 +99,10 @@ class TestIntervalSeconds:
 
     def test_whitespace_and_uppercase_rejected(self) -> None:
         # Measured: Docker rejects any whitespace or uppercase in a duration.
-        for bad in (" 1h ", "1h ", " 1h", "1 h", "1h 30m", "1H"):
+        # " 5s "/"5s "/" 2m " are the real strip-defect demonstrators: the old
+        # `.strip()`-based parser accepted them (strips to "5s"/"2m", both valid
+        # units), silently diverging from Docker, which refuses any whitespace.
+        for bad in (" 1h ", "1h ", " 1h", "1 h", "1h 30m", "1H", " 5s ", "5s ", " 2m "):
             with pytest.raises(UnsupportedComposeError, match="unsupported healthcheck interval"):
                 interval_seconds(bad)
 
