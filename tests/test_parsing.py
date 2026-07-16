@@ -339,6 +339,16 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"'read_only' must be a boolean"):
             validate({"services": {"app": {"image": "x", "read_only": "notabool"}}})
 
+    def test_tty_quoted_boolean_accepted(self) -> None:
+        # tty is an IGNORED_SERVICE_KEY (see _validate_bool): a supported shape
+        # is accepted with a warning, not silently -- unlike read_only above.
+        warnings = validate({"services": {"app": {"image": "x", "tty": "on"}}})
+        assert any("tty" in w for w in warnings)
+
+    def test_tty_non_bool_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'tty' must be a boolean"):
+            validate({"services": {"app": {"image": "x", "tty": "banana"}}})
+
     def test_pull_policy_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "pull_policy": "always"}}}) == []
 
@@ -1261,11 +1271,20 @@ def test_build_bool_keys_are_strict(key: str) -> None:
     assert validate(_build(key, False)) == []
     with pytest.raises(UnsupportedComposeError, match=key):
         validate(_build(key, 1))
+
+
+@pytest.mark.parametrize("key", ["no_cache", "pull", "privileged"])
+def test_build_bool_keys_accept_a_quoted_boolean(key: str) -> None:
+    # Measured (docker compose config v5.1.2): a YAML-1.1 boolean spelling as a
+    # string runs on a boolean field, via values.is_bool_like.
+    assert validate(_build(key, "true")) == []
+    assert validate(_build(key, "yes")) == []
+
+
+@pytest.mark.parametrize("key", ["no_cache", "pull", "privileged"])
+def test_build_bool_keys_reject_non_bool_string(key: str) -> None:
     with pytest.raises(UnsupportedComposeError, match=key):
-        # Deferred over-rejection, matching the top-level boolean keys'
-        # documented limitation (planning/deferred.md): Docker itself casts
-        # this quoted string, compose2pod does not yet.
-        validate(_build(key, "true"))
+        validate(_build(key, "banana"))
 
 
 @pytest.mark.parametrize("key", ["no_cache", "pull", "privileged"])
@@ -1705,16 +1724,21 @@ class TestNetworkDefinitionSchema:
             validate(_net_def_doc({key: 1}))
 
     @pytest.mark.parametrize("key", ["internal", "attachable", "enable_ipv6"])
-    def test_bool_fields_reject_a_quoted_string_but_accept_a_variable_reference(self, key: str) -> None:
-        # Measured: Docker casts a *literal* quoted string through the same
-        # YAML-1.1-style boolean cast every other boolean key in this project
-        # already defers (planning/deferred.md) -- refused here on purpose, a
-        # cataloged over-reject, not a bug. A genuine `${VAR}` reference is
-        # different: Docker resolves and casts it at read time, so its
-        # verdict is a fact about the reading shell, not the document.
-        with pytest.raises(UnsupportedComposeError, match=key):
-            validate(_net_def_doc({key: "true"}))
+    def test_bool_fields_accept_a_quoted_boolean_and_a_variable_reference(self, key: str) -> None:
+        # Measured (docker compose config v5.1.2): Docker casts a *literal*
+        # quoted string through the same YAML-1.1-style boolean cast every
+        # other boolean key in this project accepts, via values.is_bool_like.
+        # A genuine `${VAR}` reference is different: Docker resolves and casts
+        # it at read time, so its verdict is a fact about the reading shell,
+        # not the document -- values.has_variable carves that case out ahead
+        # of the shape check.
+        assert validate(_net_def_doc({key: "true"})) is not None
         assert validate(_net_def_doc({key: "${MYVAR}"})) is not None
+
+    @pytest.mark.parametrize("key", ["internal", "attachable", "enable_ipv6"])
+    def test_bool_fields_reject_non_bool_string(self, key: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match=key):
+            validate(_net_def_doc({key: "notabool"}))
 
     def test_driver_opts_is_a_mapping_of_number_or_string(self) -> None:
         assert validate(_net_def_doc({"driver_opts": {"foo": "bar"}})) is not None
@@ -1752,6 +1776,11 @@ class TestNetworkDefinitionSchema:
             validate(_net_def_doc({"external": {"bogus": 1}}))
         with pytest.raises(UnsupportedComposeError, match="name"):
             validate(_net_def_doc({"external": {"name": 123}}))
+
+    def test_external_quoted_boolean_accepted(self) -> None:
+        # Measured (docker compose config v5.1.2): the boolean branch casts a
+        # YAML-1.1 spelling as a string, same as internal/attachable/enable_ipv6.
+        assert validate(_net_def_doc({"external": "yes"})) is not None
 
     def test_external_variable_reference_passes_through(self) -> None:
         assert validate(_net_def_doc({"external": "${MYVAR}"})) is not None
@@ -1856,6 +1885,9 @@ class TestVolumeDefinitionSchema:
             validate(_vol_def_doc({"external": "notabool"}))
         with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
             validate(_vol_def_doc({"external": {"bogus": 1}}))
+
+    def test_external_quoted_boolean_accepted(self) -> None:
+        assert validate(_vol_def_doc({"external": "yes"})) is not None
 
     def test_external_variable_reference_passes_through(self) -> None:
         assert validate(_vol_def_doc({"external": "${MYVAR}"})) is not None
