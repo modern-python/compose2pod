@@ -376,8 +376,17 @@ slot (`architecture/glossary.md`).
   the same Docker shell-form `ENTRYPOINT` semantic, not a
   compose2pod-specific limitation. Use a list (exec-form) entrypoint, or
   none, if the override needs to actually run.
-- **`env_file`:** a string or list of strings. Each resolved path passes
-  through `--project-dir` when relative, then is emitted as `--env-file`.
+- **`env_file`:** a string, or a list whose entries are each a string or a
+  mapping `{path, required, format}`. `path` resolves through `--project-dir`
+  when relative and emits `--env-file`, same as the string form. `format:
+  raw` is accepted then ignored: compose2pod hands the file to podman's own
+  `--env-file` parser, and Compose's `format` governs only Compose's own
+  parser, which compose2pod never runs. `required: true` (the default) and
+  every string entry emit the flag unconditionally; `required: false` is
+  honored with an in-position run-time `[ -f path ]` guard (`c2p_envfile_<i>`
+  prelude lines plus a `${c2p_envfile_<i>:+"$c2p_envfile_<i>"}` token) that
+  drops the flag when the optional file is absent at run time, so an
+  optional env file missing at container-start time never trips `set -eu`.
 - **`tmpfs`:** a string or list of strings, each `<path>` or
   `<path>:<options>` (e.g. `/tmp:mode=1777`), passed through verbatim as
   `--tmpfs <value>` — Compose's short syntax maps directly onto podman's
