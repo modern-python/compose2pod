@@ -167,6 +167,37 @@ class TestRunFlags:
         tmp = run_flags("app", {"image": "x", "volumes": [{"type": "tmpfs", "target": "/t"}]}, "p", "/proj")
         assert tmp[4:6] == ["--mount", Expand(value="type=tmpfs,target=/t")]
 
+    def test_mount_bind_propagation_and_selinux(self) -> None:
+        svc = {
+            "image": "x",
+            "volumes": [
+                {"type": "bind", "source": "/a", "target": "/d", "bind": {"propagation": "rshared", "selinux": "z"}}
+            ],
+        }
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:6] == [
+            "--mount",
+            Expand(value="type=bind,source=/a,target=/d,bind-propagation=rshared,relabel=shared"),
+        ]
+
+    def test_mount_selinux_uppercase_z_is_relabel_private(self) -> None:
+        svc = {"image": "x", "volumes": [{"type": "bind", "source": "/a", "target": "/d", "bind": {"selinux": "Z"}}]}
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:6] == ["--mount", Expand(value="type=bind,source=/a,target=/d,relabel=private")]
+
+    def test_mount_volume_subpath(self) -> None:
+        svc = {
+            "image": "x",
+            "volumes": [{"type": "volume", "source": "v", "target": "/d", "volume": {"subpath": "sub"}}],
+        }
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:6] == ["--mount", Expand(value="type=volume,source=v,target=/d,subpath=sub")]
+
+    def test_mount_tmpfs_size_and_mode(self) -> None:
+        svc = {"image": "x", "volumes": [{"type": "tmpfs", "target": "/d", "tmpfs": {"size": "1m", "mode": 1777}}]}
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:6] == ["--mount", Expand(value="type=tmpfs,target=/d,tmpfs-size=1m,tmpfs-mode=1777")]
+
     def test_secret_flag_emitted(self) -> None:
         flags = run_flags("app", {"image": "x", "secrets": ["db"]}, "test-pod", "/b")
         assert flags[-2:] == ["--secret", "source=test-pod-db,target=db"]
