@@ -112,6 +112,13 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", "/builds/x")
         assert flags[4:8] == ["--tmpfs", Expand(value="/tmp:mode=1777"), "--tmpfs", Expand(value="/run")]  # noqa: S108
 
+    def test_tmpfs_emitted_alongside_another_registry_key(self) -> None:
+        svc = {"image": "x", "tmpfs": "/tmp", "read_only": True}  # noqa: S108
+        flags = run_flags("app", svc, "p", "/b")
+        assert "--tmpfs" in flags
+        assert Expand(value="/tmp") in flags  # noqa: S108
+        assert "--read-only" in flags
+
     def test_absolute_volume_source_is_kept_as_is(self) -> None:
         flags = run_flags("app", {"image": "x", "volumes": ["/data/app:/srv/www/"]}, "p", "/builds/x")
         assert flags[4:6] == ["-v", Expand(value="/data/app:/srv/www/")]

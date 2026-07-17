@@ -545,25 +545,6 @@ def _validate_command(name: str, svc: dict[str, Any]) -> None:
         _validate_argv_list(name, "command", command)
 
 
-def _validate_string_or_string_list(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    """Check a key is a string or list of strings (emit iterates it), used by tmpfs."""
-    if value is None:
-        return
-    if not isinstance(value, str | list):
-        msg = f"service {name!r}: '{key}' must be a string or list"
-        raise UnsupportedComposeError(msg)
-    if isinstance(value, list):
-        for entry in value:
-            if not isinstance(entry, str):
-                msg = f"service {name!r}: '{key}' entry must be a string"
-                raise UnsupportedComposeError(msg)
-
-
-def _validate_tmpfs(name: str, svc: dict[str, Any]) -> None:
-    """Check tmpfs is a string or list of strings (emit iterates it)."""
-    _validate_string_or_string_list(name, "tmpfs", svc.get("tmpfs"))
-
-
 _ENV_FILE_ENTRY_KEYS = {"path", "required", "format"}
 
 
@@ -652,7 +633,6 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
     _validate_service_volumes(name, svc)
     _validate_entrypoint(name, svc)
     _validate_command(name, svc)
-    _validate_tmpfs(name, svc)
     _validate_env_file(name, svc)
     validate_deploy(name, svc)
     validate_pod_options(name, svc)
