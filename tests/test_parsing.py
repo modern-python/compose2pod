@@ -220,6 +220,13 @@ class TestValidate:
             ),
             ({"type": "tmpfs", "target": "/d", "tmpfs": {"size": 1.5}}, r"tmpfs size", None),
             ({"type": "tmpfs", "target": "/d", "tmpfs": {"mode": "0755"}}, r"tmpfs mode", None),
+            # unsigned: docker rejects a negative size/mode outright (hard rule).
+            ({"type": "tmpfs", "target": "/d", "tmpfs": {"size": -5}}, r"tmpfs size", None),
+            ({"type": "tmpfs", "target": "/d", "tmpfs": {"mode": -1}}, r"tmpfs mode", None),
+            # a float mode: docker accepts and round-trips it, but podman's crun
+            # fails to mount it at run time (rule two).
+            ({"type": "tmpfs", "target": "/d", "tmpfs": {"mode": 0.5}}, r"tmpfs mode", None),
+            ({"type": "tmpfs", "target": "/d", "tmpfs": {"mode": 1777.0}}, r"tmpfs mode", None),
         ]
         for entry, msg, top in cases:
             doc = {"services": {"app": {"image": "x", "volumes": [entry]}}}

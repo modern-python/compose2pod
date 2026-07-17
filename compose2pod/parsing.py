@@ -279,11 +279,28 @@ def _validate_volume_type_options(name: str, options: dict[str, Any]) -> None:
 
 
 def _validate_tmpfs_options(name: str, options: dict[str, Any]) -> None:
-    """Check a long-form volume entry's `tmpfs:` sub-map (measured, v5.1.2)."""
+    """Check a long-form volume entry's `tmpfs:` sub-map (measured, v5.1.2).
+
+    `size` and `mode` are both unsigned in Docker's own decoder: a negative
+    native number is refused ("size"/"cannot parse as uint32: -1 overflows"),
+    measured against `docker compose config` v5.1.2. `mode` additionally
+    tightens `validate_native_number`'s float acceptance down to integers
+    only -- Docker itself accepts a float `mode` (it round-trips it verbatim),
+    but podman 6.0.1's `crun` fails to mount it at run time ("crun: mount
+    tmpfs: Invalid argument"), so accepting one here would be a real green in
+    `docker compose config` that is a false green for the generated script.
+    """
     if "size" in options:
-        values.validate_size(name, "tmpfs size", options["size"], allow_fractional=False)
+        size = options["size"]
+        values.validate_size(name, "tmpfs size", size, allow_fractional=False)
+        if isinstance(size, (int, float)) and not isinstance(size, bool) and size < 0:
+            msg = f"service {name!r}: tmpfs size must be non-negative"
+            raise UnsupportedComposeError(msg)
     if "mode" in options:
-        values.validate_native_number(name, "tmpfs mode", options["mode"])
+        mode = options["mode"]
+        if isinstance(mode, bool) or not isinstance(mode, int) or mode < 0:
+            msg = f"service {name!r}: tmpfs mode must be a non-negative integer"
+            raise UnsupportedComposeError(msg)
 
 
 _VOLUME_OPTION_VALIDATORS: dict[str, Callable[[str, dict[str, Any]], None]] = {
