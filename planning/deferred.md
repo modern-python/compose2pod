@@ -11,14 +11,6 @@ subset, not a bug and not a design position. Each item below is a **form** of a
 capability compose2pod already supports, refused only because the parser was
 never written. Every one was measured against `docker compose config` v5.1.2.
 
-- **Long-form `volumes` nested option maps.** The mapping form itself
-  (`type`/`source`/`target`/`read_only`/`consistency`) is now accepted and
-  emitted as `--mount` (`2026-07-16.05-volumes-long-form`). Still refused:
-  the nested `bind:`/`volume:`/`tmpfs:` option map a long-form entry may
-  carry (`propagation`, `subpath`, `tmpfs.size`/`tmpfs.mode`) — podman's
-  `--mount` can express these, so they are a genuine parser gap, not a
-  design position; `nocopy` is podman-inexpressible and would stay refused
-  either way.
 - **Long-form `volumes` `image` mount type.** `type: image` (docker: ACCEPTS,
   measured `docker compose config` v5.1.2) is refused by scope A's parser
   (`type` must be `bind`/`volume`/`tmpfs`), but podman *can* express it
@@ -41,10 +33,9 @@ never written. Every one was measured against `docker compose config` v5.1.2.
   tilde-bind-mount fix that discovered it.
 
 **Revisit trigger:** a user reports a compose file that `docker compose` runs and
-compose2pod refuses — most likely a long-form `volumes` entry's nested
-`bind:`/`volume:`/`tmpfs:` option map, now that the mapping form itself is
-accepted, or the Windows drive-letter bind above. The conformance harness
-reports these as `over-reject`, so they stay visible rather than forgotten.
+compose2pod refuses — most likely a long-form `volumes` entry's `type: image`,
+or the Windows drive-letter bind above. The conformance harness reports these
+as `over-reject`, so they stay visible rather than forgotten.
 
 Two other `over-reject` cells the harness reports — `sysctls: ["a"]` and
 `volumes: ["a"]` — are *not* deferred parsers: they are measured legitimate

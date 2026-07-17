@@ -762,10 +762,22 @@ limitations — podman's `--mount` rejects them (`invalid filesystem type`) and
 can never express them. `image` is refused too, but for a different reason:
 docker accepts it and podman *can* express it (`--mount type=image,...`
 succeeds) — scope A's parser simply does not parse it yet, so it is a
-deferred parser gap (`planning/deferred.md`), not a rule-two refusal. The
-nested `bind:`/`volume:`/`tmpfs:` option maps (`propagation`, `subpath`,
-`tmpfs.size`/`tmpfs.mode`, etc.) fall out as unsupported keys and raise for
-the same deferred-parser reason; `nocopy` is podman-inexpressible regardless.
+deferred parser gap (`planning/deferred.md`), not a rule-two refusal. A
+long-form entry may also carry the nested option sub-map matching its own
+`type` — `bind: {propagation, selinux}`, `volume: {subpath}`, `tmpfs: {size,
+mode}` — each accepted and appended to the emitted `--mount` value:
+`propagation` (narrowed to podman's enum `private`/`rprivate`/`shared`/
+`rshared`/`slave`/`rslave`) becomes `bind-propagation=<value>`; `selinux`
+(`z`/`Z`) becomes `relabel=shared`/`relabel=private`; `subpath` becomes
+`subpath=<value>`; `tmpfs.size`/`tmpfs.mode` become `tmpfs-size=<value>`/
+`tmpfs-mode=<value>`. Two options stay refused as permanent rule-two
+limitations because podman's `--mount` cannot express them at all:
+`bind.create_host_path` and `volume.nocopy`. A sub-map that does not match
+the entry's own `type` (a `bind:` map on a `type: volume` entry, for
+example) is refused too — docker accepts and silently ignores a mismatched
+sub-map, but compose2pod treats it as a likely mistake and refuses it, a
+deliberate stricter-than-docker check.
+
 A `target` must be an absolute path (a `${VAR}` reference is accepted, being
 host-dependent) — podman's `--mount` rejects a relative target for every
 type (`invalid container path "rel", must be an absolute path`) even though

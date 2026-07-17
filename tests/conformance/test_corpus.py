@@ -97,3 +97,19 @@ def test_volumes_long_form_is_no_longer_an_over_rejection(
     """
     path = Path(__file__).parent / "corpus" / "volumes_long_form.yaml"
     assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
+
+
+def test_volumes_long_form_bind_options_is_no_longer_an_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """The long-form entry's nested `bind:` option map now parses instead of raising.
+
+    Same reasoning as the over-rejection tests above: the generic corpus run alone
+    would stay green even pre-fix, filing `volumes_long_form_bind_options` under
+    the allowed 'over-reject' verdict instead of catching a regression. The
+    stronger claim -- both oracles ACCEPT a `bind: {propagation: rshared}` sub-map
+    on a `type: bind` entry -- needs this dedicated assertion on the verdict
+    itself.
+    """
+    path = Path(__file__).parent / "corpus" / "volumes_long_form_bind_options.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
