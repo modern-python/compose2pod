@@ -19,6 +19,12 @@ never written. Every one was measured against `docker compose config` v5.1.2.
   `--mount` can express these, so they are a genuine parser gap, not a
   design position; `nocopy` is podman-inexpressible and would stay refused
   either way.
+- **Long-form `volumes` `image` mount type.** `type: image` (docker: ACCEPTS,
+  measured `docker compose config` v5.1.2) is refused by scope A's parser
+  (`type` must be `bind`/`volume`/`tmpfs`), but podman *can* express it
+  (`--mount type=image,source=busybox:1.36,target=/img` succeeds, measured
+  podman 6.0.1) — a genuine parser gap, not a rule-two refusal like
+  `cluster`/`npipe` (podman: `invalid filesystem type`).
 - **Windows drive-letter volume source.** `volumes: ["C:\data:/var"]` with no
   top-level declaration: Docker ACCEPTS (measured, `docker compose config`
   v5.1.2 -- it special-cases a leading `<letter>:\` so the drive letter stays

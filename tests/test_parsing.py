@@ -137,6 +137,24 @@ class TestValidate:
             with pytest.raises(UnsupportedComposeError, match=msg):
                 validate({"services": {"app": {"image": "x", "volumes": vols}}})
 
+    def test_long_volume_relative_target_rejected(self) -> None:
+        # podman rejects a relative --mount target for every type ("must be an
+        # absolute path"); docker accepts it. Matches the short-form
+        # anonymous-volume refusal above.
+        for entry in (
+            {"type": "volume", "target": "rel"},
+            {"type": "bind", "source": "/a", "target": "rel"},
+        ):
+            with pytest.raises(UnsupportedComposeError, match=r"volume 'target' must be an absolute path"):
+                validate({"services": {"app": {"image": "x", "volumes": [entry]}}})
+
+    def test_long_volume_variable_target_accepted(self) -> None:
+        # A ${VAR}-carrying target is host-dependent -- accepted, matching
+        # every other values.has_variable carve-out in parsing.py.
+        assert (
+            validate({"services": {"app": {"image": "x", "volumes": [{"type": "volume", "target": "${MNT}"}]}}}) == []
+        )
+
     def test_anonymous_volume_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "volumes": ["/var/cache/models"]}}}) == []
 

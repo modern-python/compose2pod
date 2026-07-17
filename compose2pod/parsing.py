@@ -207,8 +207,16 @@ def _validate_volume_long_form(name: str, entry: dict[str, Any]) -> None:
     if vtype not in _VOLUME_LONG_TYPES:
         msg = f"service {name!r}: volume 'type' must be one of {list(_VOLUME_LONG_TYPES)}"
         raise UnsupportedComposeError(msg)
-    if not isinstance(entry.get("target"), str):
+    target = entry.get("target")
+    if not isinstance(target, str):
         msg = f"service {name!r}: volume 'target' must be a string"
+        raise UnsupportedComposeError(msg)
+    if not target.startswith("/") and not values.has_variable(target):
+        # podman rejects a relative --mount target for every type ("must be
+        # an absolute path"); docker accepts it. A ${VAR} target is
+        # host-dependent, so it is carved out like every other
+        # values.has_variable case in this file.
+        msg = f"service {name!r}: volume 'target' must be an absolute path"
         raise UnsupportedComposeError(msg)
     _validate_volume_long_form_source(name, vtype, entry.get("source"))
     if "read_only" in entry and not values.is_bool_like(entry["read_only"]):
