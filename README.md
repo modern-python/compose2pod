@@ -57,15 +57,35 @@ sh ./run.sh
 
 ## Supported compose subset
 
-compose2pod supports an honest subset and errors clearly on anything outside
-it: `image`/`build`, `command`, `environment`/`env_file`, short-form bind
-`volumes`, `healthcheck` (CMD/CMD-SHELL), `depends_on` (all conditions), and
-network `aliases`. Compose extension fields (any `x-`-prefixed key) and YAML
-anchors are accepted as-is, so a top-level `x-*` anchor block for shared
-config just works. `${VAR}`-style variable interpolation is left live in the
-generated script, resolved by its shell against the environment present
-when the script runs (no `.env` file support). See
-`architecture/supported-subset.md` for the full accept/ignore/reject matrix.
+compose2pod refuses **every document `docker compose config` refuses** — a
+measured property, checked continuously by a differential conformance harness
+that runs the real Docker CLI and the real compose2pod pipeline over the same
+YAML. So a file that compiles is a file Docker would run; where compose2pod
+still refuses a form Docker accepts, it is because Podman genuinely cannot
+express it (each such case is documented, not guessed).
+
+Within that boundary it covers most of what real compose files use:
+
+- **Services** — `image`/`build`, `command`/`entrypoint`, `environment` and
+  `env_file` (string and long-form `{path, required, format}`), `volumes`
+  (short-form and long-form `--mount`, including the `bind`/`volume`/`tmpfs`
+  option maps), `tmpfs`, `healthcheck`, `depends_on` (all conditions), network
+  `aliases`, `hostname`/`container_name`.
+- **Confinement & metadata** — `user`, `working_dir`, `read_only`, `init`,
+  `privileged`, `cap_add`/`cap_drop`, `security_opt`, `devices`, `group_add`,
+  `platform`, `labels`, `annotations`, `pull_policy` (the quoted-boolean and
+  YAML-1.1 spellings Docker accepts, too).
+- **Resources** — the legacy keys (`mem_limit`, `cpus`, `pids_limit`,
+  `ulimits`, …) and the modern `deploy.resources` block.
+- **Pod-wide** — `dns`/`dns_search`/`dns_opt`, `sysctls`, `extra_hosts`.
+- **Composition** — same-file `extends`, `secrets`/`configs`, `profiles`.
+
+Compose extension fields (any `x-`-prefixed key) and YAML anchors are accepted
+as-is, so a top-level `x-*` anchor block for shared config just works.
+`${VAR}`-style variable interpolation is left live in the generated script,
+resolved by its shell against the environment present when the script runs (no
+`.env` file support). See `architecture/supported-subset.md` for the full
+accept/ignore/reject matrix and `planning/decisions/` for the boundary rulings.
 
 ## Status
 
