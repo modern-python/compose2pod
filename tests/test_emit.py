@@ -217,6 +217,13 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", "/proj")
         assert flags[4:6] == ["--mount", Expand(value="type=image,source=nginx,target=/img")]
 
+    def test_mount_image_source_not_path_resolved(self) -> None:
+        # An image source is an image reference, not a path: a leading "." must NOT
+        # resolve against project_dir (unlike a bind source).
+        svc = {"image": "x", "volumes": [{"type": "image", "source": "./local", "target": "/img"}]}
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:6] == ["--mount", Expand(value="type=image,source=./local,target=/img")]
+
     def test_secret_flag_emitted(self) -> None:
         flags = run_flags("app", {"image": "x", "secrets": ["db"]}, "test-pod", "/b")
         assert flags[-2:] == ["--secret", "source=test-pod-db,target=db"]
