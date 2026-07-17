@@ -119,6 +119,15 @@ class TestRunFlags:
         assert Expand(value="/tmp") in flags  # noqa: S108
         assert "--read-only" in flags
 
+    def test_tmpfs_empty_string_emits_nothing(self) -> None:
+        # Byte-identical with the pre-refactor `svc.get("tmpfs") or []` drop.
+        assert "--tmpfs" not in run_flags("app", {"image": "x", "tmpfs": ""}, "p", "/b")
+
+    def test_tmpfs_list_with_empty_string_still_emits(self) -> None:
+        # A non-empty list is truthy -> the entry emits, matching the old behavior.
+        flags = run_flags("app", {"image": "x", "tmpfs": [""]}, "p", "/b")
+        assert flags[4:6] == ["--tmpfs", Expand(value="")]
+
     def test_absolute_volume_source_is_kept_as_is(self) -> None:
         flags = run_flags("app", {"image": "x", "volumes": ["/data/app:/srv/www/"]}, "p", "/builds/x")
         assert flags[4:6] == ["-v", Expand(value="/data/app:/srv/www/")]

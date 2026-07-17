@@ -259,7 +259,10 @@ def _list(flag: str) -> KeySpec:
 
 def _scalar_or_list(flag: str) -> KeySpec:
     def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-        items = [value] if isinstance(value, str) else value
+        # `value or []`: a falsy scalar/list (e.g. "") drops to no-emit, matching
+        # the pre-refactor `svc.get("tmpfs") or []` truthiness drop exactly.
+        normalized = value or []
+        items = [normalized] if isinstance(normalized, str) else normalized
         tokens: list[Token] = []
         for item in items:
             tokens += [flag, Expand(value=str(item))]
