@@ -151,6 +151,35 @@ class TestValidate:
             validate({"services": {"app": {"image": "x", "volumes": [{"type": "volume", "target": "${MNT}"}]}}}) == []
         )
 
+    def test_image_mount_accepted(self) -> None:
+        for entry in (
+            {"type": "image", "source": "nginx", "target": "/img"},
+            {"type": "image", "source": "nginx", "target": "/img", "read_only": True},
+            {"type": "image", "source": "nginx", "target": "/img", "read_only": False},
+            {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": "sub"}},
+        ):
+            assert validate({"services": {"app": {"image": "x", "volumes": [entry]}}}) == []
+
+    def test_image_mount_rejects(self) -> None:
+        cases = [
+            ({"type": "image", "target": "/img"}, r"image volume 'source' must be a string"),
+            (
+                {"type": "image", "source": "nginx", "target": "/img", "image": {"bogus": 1}},
+                r"image options: unsupported keys",
+            ),
+            (
+                {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": 5}},
+                r"image 'subpath' must be a string",
+            ),
+            (
+                {"type": "image", "source": "nginx", "target": "/img", "bind": {"propagation": "rshared"}},
+                r"volume: unsupported keys",
+            ),
+        ]
+        for entry, msg in cases:
+            with pytest.raises(UnsupportedComposeError, match=msg):
+                validate({"services": {"app": {"image": "x", "volumes": [entry]}}})
+
     def test_nested_options_accepted(self) -> None:
         # No top-level volumes here, so each accepts cleanly (== []).
         for entry in (
