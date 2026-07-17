@@ -8,6 +8,7 @@ from compose2pod.keys import (
     GuardedEnvFile,
     _merge_map,
     _validate_list,
+    _validate_string_or_string_list,
     concat_list,
     pairs_to_mapping,
     require_string_keys,
@@ -119,8 +120,19 @@ def test_merge_present_iff_list_or_map_shaped(key: str) -> None:
     end up with no merge callable.
     """
     spec = SERVICE_KEYS[key]
-    is_list_or_map_shaped = spec.validate in (_validate_list, validate_map, validate_ulimits)
+    is_list_or_map_shaped = spec.validate in (
+        _validate_list,
+        validate_map,
+        validate_ulimits,
+        _validate_string_or_string_list,
+    )
     assert (spec.merge is not None) == is_list_or_map_shaped
+
+
+def test_tmpfs_is_a_registry_key_with_concat_merge() -> None:
+    assert "tmpfs" not in STRUCTURAL_KEYS
+    spec = SERVICE_KEYS["tmpfs"]
+    assert spec.merge is concat_list
 
 
 class TestElementLevelShapeChecks:

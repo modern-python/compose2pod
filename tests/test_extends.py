@@ -302,6 +302,17 @@ class TestResolveExtends:
             resolve_extends(doc)
 
 
+def test_tmpfs_concatenates_across_extends() -> None:
+    compose = {
+        "services": {
+            "base": {"image": "x", "tmpfs": ["/a"]},
+            "app": {"extends": {"service": "base"}, "tmpfs": "/b"},
+        },
+    }
+    resolved = resolve_extends(compose)
+    assert resolved["services"]["app"]["tmpfs"] == ["/a", "/b"]  # base then local, scalar normalized
+
+
 class TestNonStringKeysAheadOfTheGate:
     """resolve_extends() runs before validate()'s document-wide string-key sweep.
 

@@ -12,13 +12,16 @@ from compose2pod.keys import SERVICE_KEYS, as_list, split_extra_host
 # only through a form that key actually has, so it can never accept a shape the
 # gate would reject standalone.
 _STRUCTURAL_MERGE_KEYS = {"extra_hosts", "healthcheck", "depends_on"}
-_STRUCTURAL_CONCAT_KEYS = {"secrets", "configs", "volumes", "tmpfs", "env_file"}
+_STRUCTURAL_CONCAT_KEYS = {"secrets", "configs", "volumes", "env_file"}
 
-# The only concat keys Compose gives a bare-string form. The gate accepts a
-# scalar for exactly these two and requires a list for the rest, so only these
-# two may be normalized scalar -> [scalar] on a merged side; normalizing any
-# other would accept a shape the gate refuses standalone.
-_SCALAR_FORM_KEYS = {"tmpfs", "env_file"}
+# The only concat key (of the remaining structural ones) Compose gives a
+# bare-string form. The gate accepts a scalar for exactly this one and
+# requires a list for the rest, so only this one may be normalized scalar ->
+# [scalar] on a merged side; normalizing any other would accept a shape the
+# gate refuses standalone. ("tmpfs" used to be here too -- it is now a
+# SERVICE_KEYS registry key, whose own merge=concat_list branch in _merge
+# wins first, so this set never sees it.)
+_SCALAR_FORM_KEYS = {"env_file"}
 
 # The keys where an explicit null in the extending service RESETS the inherited
 # value rather than meaning "not specified". Docker erases a child's null
@@ -75,10 +78,11 @@ def _as_concat_list(name: str, key: str, value: Any) -> list[Any]:  # noqa: ANN4
     """Normalize a structural concat key's value to a list, without widening the gate.
 
     `keys.as_list` turns a bare string into a one-element list, which is right
-    for `tmpfs`/`env_file` (Compose gives them a scalar form and the gate accepts
-    one) and wrong for `volumes`/`secrets`/`configs`, where the gate requires a
+    for `env_file` (Compose gives it a scalar form and the gate accepts one)
+    and wrong for `volumes`/`secrets`/`configs`, where the gate requires a
     list -- normalizing there would let `extends` accept a scalar the same
-    document would be refused for standalone.
+    document would be refused for standalone. (`tmpfs` used to be handled
+    here too -- see `_SCALAR_FORM_KEYS`.)
     """
     if isinstance(value, str) and key not in _SCALAR_FORM_KEYS:
         msg = f"service {name!r}: '{key}' must be a list"

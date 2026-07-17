@@ -109,7 +109,7 @@ def _mount_flag(entry: dict[str, Any], project_dir: str) -> list[Token]:
 
 
 def _volume_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
-    """-v, --mount and --tmpfs flag tokens."""
+    """-v and --mount flag tokens."""
     flags: list[Token] = []
     for volume in svc.get("volumes") or []:
         if isinstance(volume, dict):
@@ -126,11 +126,6 @@ def _volume_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
         # Absolute bind mount (starts with "/") and named volume (bare
         # identifier) are both kept as-is — neither is a path to translate.
         flags += ["-v", Expand(value=f"{source}:{destination}")]
-    tmpfs = svc.get("tmpfs") or []
-    if isinstance(tmpfs, str):
-        tmpfs = [tmpfs]
-    for mount in tmpfs:
-        flags += ["--tmpfs", Expand(value=mount)]
     return flags
 
 

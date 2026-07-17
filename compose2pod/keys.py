@@ -150,6 +150,18 @@ def _validate_list(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - C
     _validate_list_elements(name, key, value)
 
 
+def _validate_string_or_string_list(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Check a key is a string or list of strings (emit iterates it). Used by tmpfs."""
+    if not isinstance(value, str | list):
+        msg = f"service {name!r}: '{key}' must be a string or list"
+        raise UnsupportedComposeError(msg)
+    if isinstance(value, list):
+        for entry in value:
+            if not isinstance(entry, str):
+                msg = f"service {name!r}: '{key}' entry must be a string"
+                raise UnsupportedComposeError(msg)
+
+
 def validate_map(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     if isinstance(value, list):
         _validate_list_elements(name, key, value)
@@ -243,6 +255,20 @@ def _list(flag: str) -> KeySpec:
         return tokens
 
     return KeySpec(validate=_validate_list, emit=emit, merge=concat_list)
+
+
+def _scalar_or_list(flag: str) -> KeySpec:
+    def emit(value: Any) -> list[Token]:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+        # `value or []`: a falsy scalar/list (e.g. "") drops to no-emit, matching
+        # the pre-refactor `svc.get("tmpfs") or []` truthiness drop exactly.
+        normalized = value or []
+        items = [normalized] if isinstance(normalized, str) else normalized
+        tokens: list[Token] = []
+        for item in items:
+            tokens += [flag, Expand(value=str(item))]
+        return tokens
+
+    return KeySpec(validate=_validate_string_or_string_list, emit=emit, merge=concat_list)
 
 
 def _map(flag: str) -> KeySpec:
@@ -401,6 +427,7 @@ SERVICE_KEYS: dict[str, KeySpec] = {
     # int64 field (validate_integer's default), which refuses any float.
     "oom_score_adj": _integer("--oom-score-adj", allow_whole_float=True),
     "oom_kill_disable": _bool("--oom-kill-disable"),
+    "tmpfs": _scalar_or_list("--tmpfs"),
 }
 
 STRUCTURAL_KEYS: set[str] = {
@@ -411,7 +438,7 @@ STRUCTURAL_KEYS: set[str] = {
     # "environment" removed — now a SERVICE_KEYS registry key (_map("-e")).
     "env_file",
     "volumes",
-    "tmpfs",
+    # "tmpfs" removed — now a SERVICE_KEYS registry key (_scalar_or_list("--tmpfs")).
     "healthcheck",
     "depends_on",
     "networks",
