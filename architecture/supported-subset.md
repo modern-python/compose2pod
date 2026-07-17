@@ -774,7 +774,12 @@ carry the nested option sub-map matching its own `type` — `bind:
 `rshared`/`slave`/`rslave`) becomes `bind-propagation=<value>`; `selinux`
 (`z`/`Z`) becomes `relabel=shared`/`relabel=private`; `subpath` (on either
 `volume` or `image`) becomes `subpath=<value>`; `tmpfs.size`/`tmpfs.mode`
-become `tmpfs-size=<value>`/`tmpfs-mode=<value>`. Two options stay refused as
+become `tmpfs-size=<value>`/`tmpfs-mode=<value>`. An `image` subpath must be
+an absolute path — podman requires one (`must be an absolute path`) while
+docker accepts a relative one, a rule-two narrowing (a `${VAR}` subpath is
+exempt, as host-dependent). A `volume` subpath has no such requirement and
+may stay relative — podman resolves it against the volume root. Two options
+stay refused as
 permanent rule-two limitations because podman's `--mount` cannot express them
 at all: `bind.create_host_path` and `volume.nocopy`. A sub-map that does not
 match the entry's own `type` (a `bind:` map on a `type: volume` entry, for

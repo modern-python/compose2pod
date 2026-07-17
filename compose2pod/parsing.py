@@ -306,9 +306,17 @@ def _validate_tmpfs_options(name: str, options: dict[str, Any]) -> None:
 
 
 def _validate_image_options(name: str, options: dict[str, Any]) -> None:
-    """Check an image entry's nested `image:` option map (measured: strict, `subpath` only)."""
-    if "subpath" in options and not isinstance(options["subpath"], str):
+    """Check an image entry's nested `image:` option map (measured: strict, `subpath` only, absolute)."""
+    if "subpath" not in options:
+        return
+    subpath = options["subpath"]
+    if not isinstance(subpath, str):
         msg = f"service {name!r}: image 'subpath' must be a string"
+        raise UnsupportedComposeError(msg)
+    if not subpath.startswith("/") and not values.has_variable(subpath):
+        # podman requires an absolute image subpath (`must be an absolute path`);
+        # docker accepts a relative one -> a rule-two narrowing. A ${VAR} is host-dependent.
+        msg = f"service {name!r}: image 'subpath' must be an absolute path"
         raise UnsupportedComposeError(msg)
 
 

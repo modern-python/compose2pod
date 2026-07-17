@@ -156,7 +156,9 @@ class TestValidate:
             {"type": "image", "source": "nginx", "target": "/img"},
             {"type": "image", "source": "nginx", "target": "/img", "read_only": True},
             {"type": "image", "source": "nginx", "target": "/img", "read_only": False},
-            {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": "sub"}},
+            {"type": "image", "source": "nginx", "target": "/img", "image": {}},
+            {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": "/sub"}},
+            {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": "${SUB}"}},
         ):
             assert validate({"services": {"app": {"image": "x", "volumes": [entry]}}}) == []
 
@@ -170,6 +172,10 @@ class TestValidate:
             (
                 {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": 5}},
                 r"image 'subpath' must be a string",
+            ),
+            (
+                {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": "bin"}},
+                r"image 'subpath' must be an absolute path",
             ),
             (
                 {"type": "image", "source": "nginx", "target": "/img", "bind": {"propagation": "rshared"}},
