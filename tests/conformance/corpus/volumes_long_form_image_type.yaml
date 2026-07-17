@@ -1,0 +1,7 @@
+services:
+  app:
+    image: nginx
+    volumes:
+      - type: image
+        source: nginx
+        target: /img
