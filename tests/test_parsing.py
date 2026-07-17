@@ -127,10 +127,6 @@ class TestValidate:
                 [{"type": "bind", "source": "/a", "target": "/d", "consistency": 5}],
                 r"volume 'consistency' must be a string",
             ),
-            (
-                [{"type": "bind", "source": "/a", "target": "/d", "bind": {"propagation": "rshared"}}],
-                r"volume: unsupported keys",
-            ),
             ([{"type": "volume", "source": "v", "target": "/d", "bogus": 1}], r"volume: unsupported keys"),
         ]
         for vols, msg in cases:
@@ -154,6 +150,83 @@ class TestValidate:
         assert (
             validate({"services": {"app": {"image": "x", "volumes": [{"type": "volume", "target": "${MNT}"}]}}}) == []
         )
+
+    def test_nested_options_accepted(self) -> None:
+        # No top-level volumes here, so each accepts cleanly (== []).
+        for entry in (
+            {"type": "bind", "source": "/a", "target": "/d", "bind": {"propagation": "rshared", "selinux": "z"}},
+            {"type": "tmpfs", "target": "/d", "tmpfs": {"size": "1m", "mode": 1777}},
+            {"type": "tmpfs", "target": "/d", "tmpfs": {"size": 1000}},
+        ):
+            assert validate({"services": {"app": {"image": "x", "volumes": [entry]}}}) == []
+
+    def test_nested_volume_subpath_accepted(self) -> None:
+        # A declared named source warns about the ignored top-level block but accepts.
+        doc = {
+            "services": {
+                "app": {
+                    "image": "x",
+                    "volumes": [{"type": "volume", "source": "v", "target": "/d", "volume": {"subpath": "sub"}}],
+                }
+            },
+            "volumes": {"v": {}},
+        }
+        assert "ignoring top-level 'volumes'" in " ".join(validate(doc))
+
+    def test_nested_option_rejects(self) -> None:
+        cases = [
+            # mismatched sub-map -> the sub-map key is unknown for this type
+            (
+                {"type": "volume", "source": "v", "target": "/d", "bind": {"propagation": "rshared"}},
+                r"volume: unsupported keys",
+                {"v": {}},
+            ),
+            # rule-two refusals (podman can't express)
+            (
+                {"type": "bind", "source": "/a", "target": "/d", "bind": {"create_host_path": True}},
+                r"'create_host_path' is not supported",
+                None,
+            ),
+            (
+                {"type": "volume", "source": "v", "target": "/d", "volume": {"nocopy": True}},
+                r"'nocopy' is not supported",
+                {"v": {}},
+            ),
+            # per-option schema
+            (
+                {"type": "bind", "source": "/a", "target": "/d", "bind": {"propagation": "bogus"}},
+                r"'propagation' must be one of",
+                None,
+            ),
+            (
+                {"type": "bind", "source": "/a", "target": "/d", "bind": {"selinux": "x"}},
+                r"'selinux' must be 'z' or 'Z'",
+                None,
+            ),
+            (
+                {"type": "bind", "source": "/a", "target": "/d", "bind": {"bogus": 1}},
+                r"bind options: unsupported keys",
+                None,
+            ),
+            (
+                {"type": "bind", "source": "/a", "target": "/d", "bind": "notamap"},
+                r"bind options must be a mapping",
+                None,
+            ),
+            (
+                {"type": "volume", "source": "v", "target": "/d", "volume": {"subpath": 5}},
+                r"'subpath' must be a string",
+                {"v": {}},
+            ),
+            ({"type": "tmpfs", "target": "/d", "tmpfs": {"size": 1.5}}, r"tmpfs size", None),
+            ({"type": "tmpfs", "target": "/d", "tmpfs": {"mode": "0755"}}, r"tmpfs mode", None),
+        ]
+        for entry, msg, top in cases:
+            doc = {"services": {"app": {"image": "x", "volumes": [entry]}}}
+            if top:
+                doc["volumes"] = top
+            with pytest.raises(UnsupportedComposeError, match=msg):
+                validate(doc)
 
     def test_anonymous_volume_is_accepted(self) -> None:
         assert validate({"services": {"app": {"image": "x", "volumes": ["/var/cache/models"]}}}) == []

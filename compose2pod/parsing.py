@@ -162,6 +162,18 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
 
 _VOLUME_LONG_TYPES = ("bind", "volume", "tmpfs")
 _VOLUME_LONG_KEYS = {"type", "source", "target", "read_only", "consistency"}
+# Docker's own per-type nested option map keys (measured, docker compose config
+# v5.1.2). `create_host_path`/`nocopy` are real docker keys, so they land here
+# (not treated as unknown) -- rule-two refuses them separately, in
+# `_validate_volume_options`, with a "not supported" message rather than an
+# "unknown key" one.
+_VOLUME_OPTION_KEYS = {
+    "bind": {"propagation", "selinux", "create_host_path"},
+    "volume": {"subpath", "nocopy"},
+    "tmpfs": {"size", "mode"},
+}
+_PROPAGATION_VALUES = {"private", "rprivate", "shared", "rshared", "slave", "rslave"}
+_SELINUX_VALUES = {"z", "Z"}
 
 
 def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
@@ -193,19 +205,23 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
 def _validate_volume_long_form(name: str, entry: dict[str, Any]) -> None:
     """Check one long-syntax volume mapping against Docker's strict schema (measured, v5.1.2).
 
-    Scope A: type (bind/volume/tmpfs), source, target, read_only, consistency.
-    The nested bind/volume/tmpfs option maps fall out as unknown keys (refused,
-    tracked in planning/deferred.md); cluster/npipe/image types are refused
-    (podman cannot express them).
+    type (bind/volume/tmpfs), source, target, read_only, consistency, plus the
+    one nested option map matching `type` (a mismatched sub-map is refused --
+    a deliberate stricter-than-docker check; docker accepts-and-ignores it).
+    cluster/npipe/image types are refused (podman cannot express them).
+
+    `type` is validated before the unknown-key check (unlike every other field
+    here) because the check itself needs `vtype` to know which sub-map key --
+    `bind`/`volume`/`tmpfs` -- the entry is allowed to carry alongside it.
     """
     require_string_keys(f"service {name!r}: volume", entry)
-    unknown = set(entry) - _VOLUME_LONG_KEYS
-    if unknown:
-        msg = f"service {name!r}: volume: unsupported keys {sorted(unknown)}"
-        raise UnsupportedComposeError(msg)
     vtype = entry.get("type")
     if vtype not in _VOLUME_LONG_TYPES:
         msg = f"service {name!r}: volume 'type' must be one of {list(_VOLUME_LONG_TYPES)}"
+        raise UnsupportedComposeError(msg)
+    unknown = set(entry) - _VOLUME_LONG_KEYS - {vtype}
+    if unknown:
+        msg = f"service {name!r}: volume: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
     target = entry.get("target")
     if not isinstance(target, str):
@@ -225,6 +241,69 @@ def _validate_volume_long_form(name: str, entry: dict[str, Any]) -> None:
     if "consistency" in entry and not isinstance(entry["consistency"], str):
         msg = f"service {name!r}: volume 'consistency' must be a string"
         raise UnsupportedComposeError(msg)
+    if vtype in entry:
+        _validate_volume_options(name, vtype, entry[vtype])
+
+
+def _validate_bind_options(name: str, options: dict[str, Any]) -> None:
+    """Check a long-form volume entry's `bind:` sub-map (measured, v5.1.2).
+
+    `create_host_path` is a real Docker key, but podman's `--mount` cannot
+    express it, so it is refused with a "not supported" message rather than
+    folded into the generic unknown-key check the caller already ran.
+    """
+    if "create_host_path" in options:
+        msg = f"service {name!r}: bind 'create_host_path' is not supported (podman cannot express it)"
+        raise UnsupportedComposeError(msg)
+    if "propagation" in options and options["propagation"] not in _PROPAGATION_VALUES:
+        msg = f"service {name!r}: bind 'propagation' must be one of {sorted(_PROPAGATION_VALUES)}"
+        raise UnsupportedComposeError(msg)
+    if "selinux" in options and options["selinux"] not in _SELINUX_VALUES:
+        msg = f"service {name!r}: bind 'selinux' must be 'z' or 'Z'"
+        raise UnsupportedComposeError(msg)
+
+
+def _validate_volume_type_options(name: str, options: dict[str, Any]) -> None:
+    """Check a long-form volume entry's `volume:` sub-map (measured, v5.1.2).
+
+    `nocopy` is a real Docker key, but podman's `--mount` cannot express it,
+    so it is refused with a "not supported" message rather than folded into
+    the generic unknown-key check the caller already ran.
+    """
+    if "nocopy" in options:
+        msg = f"service {name!r}: volume 'nocopy' is not supported (podman cannot express it)"
+        raise UnsupportedComposeError(msg)
+    if "subpath" in options and not isinstance(options["subpath"], str):
+        msg = f"service {name!r}: volume 'subpath' must be a string"
+        raise UnsupportedComposeError(msg)
+
+
+def _validate_tmpfs_options(name: str, options: dict[str, Any]) -> None:
+    """Check a long-form volume entry's `tmpfs:` sub-map (measured, v5.1.2)."""
+    if "size" in options:
+        values.validate_size(name, "tmpfs size", options["size"], allow_fractional=False)
+    if "mode" in options:
+        values.validate_native_number(name, "tmpfs mode", options["mode"])
+
+
+_VOLUME_OPTION_VALIDATORS: dict[str, Callable[[str, dict[str, Any]], None]] = {
+    "bind": _validate_bind_options,
+    "volume": _validate_volume_type_options,
+    "tmpfs": _validate_tmpfs_options,
+}
+
+
+def _validate_volume_options(name: str, vtype: str, options: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Check a long-form volume entry's nested option map (the one matching `type`), measured v5.1.2."""
+    if not isinstance(options, dict):
+        msg = f"service {name!r}: {vtype} options must be a mapping"
+        raise UnsupportedComposeError(msg)
+    require_string_keys(f"service {name!r}: {vtype} options", options)
+    unknown = set(options) - _VOLUME_OPTION_KEYS[vtype]
+    if unknown:
+        msg = f"service {name!r}: {vtype} options: unsupported keys {sorted(unknown)}"
+        raise UnsupportedComposeError(msg)
+    _VOLUME_OPTION_VALIDATORS[vtype](name, options)
 
 
 def _validate_volume_long_form_source(name: str, vtype: str, source: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
