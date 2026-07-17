@@ -125,6 +125,32 @@ class TestRunFlags:
         flags = run_flags("db", svc, "p", "/builds/x")
         assert flags[4:6] == ["-v", Expand(value="pgdata:/var/lib/postgresql/data")]
 
+    def test_long_form_bind_mount_relative_source_resolved(self) -> None:
+        svc = {"image": "x", "volumes": [{"type": "bind", "source": "./data", "target": "/data"}]}
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:6] == ["--mount", Expand(value="type=bind,source=/proj/data,target=/data")]
+
+    def test_long_form_bind_mount_read_only(self) -> None:
+        svc = {"image": "x", "volumes": [{"type": "bind", "source": "/abs", "target": "/d", "read_only": True}]}
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:6] == ["--mount", Expand(value="type=bind,source=/abs,target=/d,ro")]
+
+    def test_long_form_read_only_quoted_false_omits_ro(self) -> None:
+        svc = {"image": "x", "volumes": [{"type": "bind", "source": "/abs", "target": "/d", "read_only": "false"}]}
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:6] == ["--mount", Expand(value="type=bind,source=/abs,target=/d")]
+
+    def test_long_form_named_volume(self) -> None:
+        svc = {"image": "x", "volumes": [{"type": "volume", "source": "v", "target": "/data"}]}
+        flags = run_flags("app", svc, "p", "/proj")
+        assert flags[4:6] == ["--mount", Expand(value="type=volume,source=v,target=/data")]
+
+    def test_long_form_anonymous_volume_and_tmpfs(self) -> None:
+        anon = run_flags("app", {"image": "x", "volumes": [{"type": "volume", "target": "/d"}]}, "p", "/proj")
+        assert anon[4:6] == ["--mount", Expand(value="type=volume,target=/d")]
+        tmp = run_flags("app", {"image": "x", "volumes": [{"type": "tmpfs", "target": "/t"}]}, "p", "/proj")
+        assert tmp[4:6] == ["--mount", Expand(value="type=tmpfs,target=/t")]
+
     def test_secret_flag_emitted(self) -> None:
         flags = run_flags("app", {"image": "x", "secrets": ["db"]}, "test-pod", "/b")
         assert flags[-2:] == ["--secret", "source=test-pod-db,target=db"]

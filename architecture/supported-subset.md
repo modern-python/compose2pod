@@ -755,7 +755,40 @@ boolean-typed exception in this group, validated as an actual bool like
 
 ## Volumes
 
-Short syntax only; the long mapping form raises. The `volumes` key itself
+A `volumes` entry may be the short string syntax or the long-form mapping
+`{type, source, target, read_only, consistency}`. `type` must be `bind`,
+`volume`, or `tmpfs`. `cluster` and `npipe` are refused as permanent rule-two
+limitations — podman's `--mount` rejects them (`invalid filesystem type`) and
+can never express them. `image` is refused too, but for a different reason:
+docker accepts it and podman *can* express it (`--mount type=image,...`
+succeeds) — scope A's parser simply does not parse it yet, so it is a
+deferred parser gap (`planning/deferred.md`), not a rule-two refusal. The
+nested `bind:`/`volume:`/`tmpfs:` option maps (`propagation`, `subpath`,
+`tmpfs.size`/`tmpfs.mode`, etc.) fall out as unsupported keys and raise for
+the same deferred-parser reason; `nocopy` is podman-inexpressible regardless.
+A `target` must be an absolute path (a `${VAR}` reference is accepted, being
+host-dependent) — podman's `--mount` rejects a relative target for every
+type (`invalid container path "rel", must be an absolute path`) even though
+docker accepts one, matching the short-form anonymous-volume refusal (below).
+A `tmpfs`-type entry's `source` is refused even though docker accepts one:
+podman's `--mount` has no way to express a `source` on a `tmpfs` mount
+(`"source" option not supported for "tmpfs" mount types`), so this is a
+rule-two refusal, not a docker-schema rule.
+
+Each accepted entry is emitted as a single `--mount` flag
+(`compose2pod/emit.py`'s `_mount_flag`) rather than `-v`: `type=<type>`,
+`source=<source>` (a relative bind `source` is resolved against
+`--project-dir`, the same as the short form), `target=<target>`, and a
+trailing `ro` when `read_only` is truthy — `read_only` accepts the quoted
+`"true"`/`"false"` form via the same `is_bool_like` check every other
+boolean field uses. `consistency` is accepted and validated as a string but
+otherwise ignored — podman's `--mount` has no consistency knob. A long-form
+`volume`-type entry whose `source` is a bare identifier is cross-checked
+against the top-level `volumes:` block exactly like a short-form named
+volume (below) — a `bind`/`tmpfs` entry's `source`, or an absent one, needs
+no declaration.
+
+The `volumes` key itself
 must be a list — a bare string raises, rather than being destructured one
 character at a time. A `source:target` entry is one of two kinds, told apart
 by whether `source` matches Docker's own volume-name grammar
