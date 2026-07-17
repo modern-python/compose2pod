@@ -11,12 +11,6 @@ subset, not a bug and not a design position. Each item below is a **form** of a
 capability compose2pod already supports, refused only because the parser was
 never written. Every one was measured against `docker compose config` v5.1.2.
 
-- **Long-form `volumes` `image` mount type.** `type: image` (docker: ACCEPTS,
-  measured `docker compose config` v5.1.2) is refused by scope A's parser
-  (`type` must be `bind`/`volume`/`tmpfs`), but podman *can* express it
-  (`--mount type=image,source=busybox:1.36,target=/img` succeeds, measured
-  podman 6.0.1) — a genuine parser gap, not a rule-two refusal like
-  `cluster`/`npipe` (podman: `invalid filesystem type`).
 - **Windows drive-letter volume source.** `volumes: ["C:\data:/var"]` with no
   top-level declaration: Docker ACCEPTS (measured, `docker compose config`
   v5.1.2 -- it special-cases a leading `<letter>:\` so the drive letter stays
@@ -33,9 +27,9 @@ never written. Every one was measured against `docker compose config` v5.1.2.
   tilde-bind-mount fix that discovered it.
 
 **Revisit trigger:** a user reports a compose file that `docker compose` runs and
-compose2pod refuses — most likely a long-form `volumes` entry's `type: image`,
-or the Windows drive-letter bind above. The conformance harness reports these
-as `over-reject`, so they stay visible rather than forgotten.
+compose2pod refuses — most likely the Windows drive-letter bind above. The
+conformance harness reports these as `over-reject`, so they stay visible
+rather than forgotten.
 
 Two other `over-reject` cells the harness reports — `sysctls: ["a"]` and
 `volumes: ["a"]` — are *not* deferred parsers: they are measured legitimate

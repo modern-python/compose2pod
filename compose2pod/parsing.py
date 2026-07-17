@@ -160,7 +160,7 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
     return "bind", None
 
 
-_VOLUME_LONG_TYPES = ("bind", "volume", "tmpfs")
+_VOLUME_LONG_TYPES = ("bind", "volume", "tmpfs", "image")
 _VOLUME_LONG_KEYS = {"type", "source", "target", "read_only", "consistency"}
 # Docker's own per-type nested option map keys (measured, docker compose config
 # v5.1.2). `create_host_path`/`nocopy` are real docker keys, so they land here
@@ -171,6 +171,7 @@ _VOLUME_OPTION_KEYS = {
     "bind": {"propagation", "selinux", "create_host_path"},
     "volume": {"subpath", "nocopy"},
     "tmpfs": {"size", "mode"},
+    "image": {"subpath"},
 }
 _PROPAGATION_VALUES = {"private", "rprivate", "shared", "rshared", "slave", "rslave"}
 _SELINUX_VALUES = {"z", "Z"}
@@ -205,10 +206,11 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
 def _validate_volume_long_form(name: str, entry: dict[str, Any]) -> None:
     """Check one long-syntax volume mapping against Docker's strict schema (measured, v5.1.2).
 
-    type (bind/volume/tmpfs), source, target, read_only, consistency, plus the
-    one nested option map matching `type` (a mismatched sub-map is refused --
-    a deliberate stricter-than-docker check; docker accepts-and-ignores it).
-    cluster/npipe/image types are refused (podman cannot express them).
+    type (bind/volume/tmpfs/image), source, target, read_only, consistency,
+    plus the one nested option map matching `type` (a mismatched sub-map is
+    refused -- a deliberate stricter-than-docker check; docker
+    accepts-and-ignores it). cluster/npipe types are refused (podman cannot
+    express them).
 
     `type` is validated before the unknown-key check (unlike every other field
     here) because the check itself needs `vtype` to know which sub-map key --
@@ -303,10 +305,26 @@ def _validate_tmpfs_options(name: str, options: dict[str, Any]) -> None:
             raise UnsupportedComposeError(msg)
 
 
+def _validate_image_options(name: str, options: dict[str, Any]) -> None:
+    """Check an image entry's nested `image:` option map (measured: strict, `subpath` only, absolute)."""
+    if "subpath" not in options:
+        return
+    subpath = options["subpath"]
+    if not isinstance(subpath, str):
+        msg = f"service {name!r}: image 'subpath' must be a string"
+        raise UnsupportedComposeError(msg)
+    if not subpath.startswith("/") and not values.has_variable(subpath):
+        # podman requires an absolute image subpath (`must be an absolute path`);
+        # docker accepts a relative one -> a rule-two narrowing. A ${VAR} is host-dependent.
+        msg = f"service {name!r}: image 'subpath' must be an absolute path"
+        raise UnsupportedComposeError(msg)
+
+
 _VOLUME_OPTION_VALIDATORS: dict[str, Callable[[str, dict[str, Any]], None]] = {
     "bind": _validate_bind_options,
     "volume": _validate_volume_type_options,
     "tmpfs": _validate_tmpfs_options,
+    "image": _validate_image_options,
 }
 
 
@@ -324,10 +342,10 @@ def _validate_volume_options(name: str, vtype: str, options: Any) -> None:  # no
 
 
 def _validate_volume_long_form_source(name: str, vtype: str, source: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
-    """Check a long-form volume entry's 'source': required for bind, refused for tmpfs, optional string for volume."""
-    if vtype == "bind":
+    """Check a long-form volume entry's 'source': required for bind/image, refused for tmpfs, optional for volume."""
+    if vtype in ("bind", "image"):
         if not isinstance(source, str):
-            msg = f"service {name!r}: bind volume 'source' must be a string"
+            msg = f"service {name!r}: {vtype} volume 'source' must be a string"
             raise UnsupportedComposeError(msg)
     elif vtype == "tmpfs":
         if source is not None:

@@ -757,23 +757,32 @@ boolean-typed exception in this group, validated as an actual bool like
 
 A `volumes` entry may be the short string syntax or the long-form mapping
 `{type, source, target, read_only, consistency}`. `type` must be `bind`,
-`volume`, or `tmpfs`. `cluster` and `npipe` are refused as permanent rule-two
-limitations — podman's `--mount` rejects them (`invalid filesystem type`) and
-can never express them. `image` is refused too, but for a different reason:
-docker accepts it and podman *can* express it (`--mount type=image,...`
-succeeds) — scope A's parser simply does not parse it yet, so it is a
-deferred parser gap (`planning/deferred.md`), not a rule-two refusal. A
-long-form entry may also carry the nested option sub-map matching its own
-`type` — `bind: {propagation, selinux}`, `volume: {subpath}`, `tmpfs: {size,
-mode}` — each accepted and appended to the emitted `--mount` value:
+`volume`, `tmpfs`, or `image`. `cluster` and `npipe` are refused as permanent
+rule-two limitations — podman's `--mount` rejects them (`invalid filesystem
+type`) and can never express them. A `type: image` entry mounts an image's
+rootfs at `target`: `source` (an image reference) is required — podman
+refuses a sourceless image mount (`must set source and destination for image
+volume`), a rule-two narrowing the same way `bind`'s required `source` is.
+`read_only` is accepted and validated on an image entry but never emitted: an
+image mount is inherently read-only and podman's `--mount` refuses a `ro`
+option on one, so a `true` is a redundant no-op and a `false` a harmless one,
+matching Docker's own accept-and-ignore stance. A long-form entry may also
+carry the nested option sub-map matching its own `type` — `bind:
+{propagation, selinux}`, `volume: {subpath}`, `tmpfs: {size, mode}`, `image:
+{subpath}` — each accepted and appended to the emitted `--mount` value:
 `propagation` (narrowed to podman's enum `private`/`rprivate`/`shared`/
 `rshared`/`slave`/`rslave`) becomes `bind-propagation=<value>`; `selinux`
-(`z`/`Z`) becomes `relabel=shared`/`relabel=private`; `subpath` becomes
-`subpath=<value>`; `tmpfs.size`/`tmpfs.mode` become `tmpfs-size=<value>`/
-`tmpfs-mode=<value>`. Two options stay refused as permanent rule-two
-limitations because podman's `--mount` cannot express them at all:
-`bind.create_host_path` and `volume.nocopy`. A sub-map that does not match
-the entry's own `type` (a `bind:` map on a `type: volume` entry, for
+(`z`/`Z`) becomes `relabel=shared`/`relabel=private`; `subpath` (on either
+`volume` or `image`) becomes `subpath=<value>`; `tmpfs.size`/`tmpfs.mode`
+become `tmpfs-size=<value>`/`tmpfs-mode=<value>`. An `image` subpath must be
+an absolute path — podman requires one (`must be an absolute path`) while
+docker accepts a relative one, a rule-two narrowing (a `${VAR}` subpath is
+exempt, as host-dependent). A `volume` subpath has no such requirement and
+may stay relative — podman resolves it against the volume root. Two options
+stay refused as
+permanent rule-two limitations because podman's `--mount` cannot express them
+at all: `bind.create_host_path` and `volume.nocopy`. A sub-map that does not
+match the entry's own `type` (a `bind:` map on a `type: volume` entry, for
 example) is refused too — docker accepts and silently ignores a mismatched
 sub-map, but compose2pod treats it as a likely mistake and refuses it, a
 deliberate stricter-than-docker check.
@@ -793,12 +802,15 @@ Each accepted entry is emitted as a single `--mount` flag
 `--project-dir`, the same as the short form), `target=<target>`, and a
 trailing `ro` when `read_only` is truthy — `read_only` accepts the quoted
 `"true"`/`"false"` form via the same `is_bool_like` check every other
-boolean field uses. `consistency` is accepted and validated as a string but
+boolean field uses. An `image`-type entry is the one exception: `ro` is never
+appended, regardless of `read_only`, since the mount is read-only by
+construction and podman refuses the option outright. `consistency` is
+accepted and validated as a string but
 otherwise ignored — podman's `--mount` has no consistency knob. A long-form
 `volume`-type entry whose `source` is a bare identifier is cross-checked
 against the top-level `volumes:` block exactly like a short-form named
-volume (below) — a `bind`/`tmpfs` entry's `source`, or an absent one, needs
-no declaration.
+volume (below) — a `bind`/`tmpfs`/`image` entry's `source`, or an absent one,
+needs no declaration.
 
 The `volumes` key itself
 must be a list — a bare string raises, rather than being destructured one
