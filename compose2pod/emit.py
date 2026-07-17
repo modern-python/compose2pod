@@ -94,6 +94,22 @@ def _env_file_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
     return flags
 
 
+def _nested_mount_parts(vtype: str, options: dict[str, Any]) -> list[str]:
+    """Map a long-form volume entry's validated `bind`/`volume`/`tmpfs` sub-map to `--mount` options."""
+    if vtype == "bind":
+        parts = [f"bind-propagation={options['propagation']}"] if "propagation" in options else []
+        if "selinux" in options:
+            parts.append(f"relabel={'shared' if options['selinux'] == 'z' else 'private'}")
+        return parts
+    if vtype == "volume":
+        return [f"subpath={options['subpath']}"] if "subpath" in options else []
+    # vtype == "tmpfs": the gate validates `type` to one of bind/volume/tmpfs, so no other branch is reachable.
+    parts = [f"tmpfs-size={options['size']}"] if "size" in options else []
+    if "mode" in options:
+        parts.append(f"tmpfs-mode={options['mode']}")
+    return parts
+
+
 def _mount_flag(entry: dict[str, Any], project_dir: str) -> list[Token]:
     """Render one long-form volume mapping as a `--mount` value."""
     parts = [f"type={entry['type']}"]
@@ -105,6 +121,8 @@ def _mount_flag(entry: dict[str, Any], project_dir: str) -> list[Token]:
     parts.append(f"target={entry['target']}")
     if as_bool(entry.get("read_only", False)):
         parts.append("ro")
+    vtype = entry["type"]
+    parts += _nested_mount_parts(vtype, entry.get(vtype, {}))
     return ["--mount", Expand(value=",".join(parts))]
 
 
