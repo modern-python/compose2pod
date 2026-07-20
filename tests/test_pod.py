@@ -170,6 +170,33 @@ class TestHostsFileTokens:
             Expand(value="${DB_IP} db"),
         ]
 
+    def test_alias_and_extra_hosts_on_different_hosts_both_appear(self) -> None:
+        services = {"a": {"extra_hosts": ["db:10.0.0.5"]}}
+        assert hosts_file_tokens(services, ["a"], ["web"]) == [
+            "127.0.0.1 localhost",
+            "::1 localhost",
+            "127.0.0.1 web",
+            Expand(value="10.0.0.5 db"),
+        ]
+
+    def test_same_host_same_address_across_sources_dedups_and_renders_as_expand(self) -> None:
+        # An alias fixes "web" at 127.0.0.1; extra_hosts restating the same
+        # address doesn't conflict, but it does flip which token form wins --
+        # extra_hosts membership renders as Expand, not the alias's literal.
+        services = {"a": {"extra_hosts": {"web": "127.0.0.1"}}}
+        assert hosts_file_tokens(services, ["a"], ["web"]) == [
+            "127.0.0.1 localhost",
+            "::1 localhost",
+            Expand(value="127.0.0.1 web"),
+        ]
+
+    def test_non_closure_service_extra_hosts_ignored(self) -> None:
+        services = {"a": {"image": "x"}, "extra": {"extra_hosts": ["db:10.0.0.5"]}}
+        assert hosts_file_tokens(services, ["a"], []) == [
+            "127.0.0.1 localhost",
+            "::1 localhost",
+        ]
+
     def test_conflicting_address_for_same_host_refused(self) -> None:
         services = {"a": {"extra_hosts": ["db:10.0.0.5"]}, "b": {"extra_hosts": ["db:10.0.0.9"]}}
         with pytest.raises(UnsupportedComposeError, match=r"conflicting host 'db'"):
