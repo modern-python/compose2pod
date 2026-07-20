@@ -670,14 +670,11 @@ class TestEmitScript:
         assert "podman healthcheck run" in script
         assert "wait_healthy()" in script
 
-    def test_podman_version_guard_present_in_header(self, chats_compose: dict) -> None:
+    def test_no_podman_version_guard(self, chats_compose: dict) -> None:
         script = self.make_script(chats_compose)
-        assert "podman version --format '{{.Client.Version}}'" in script
-        assert "requires podman >= 6.0.0" in script
-        version_guard_index = script.index("podman_version=")
-        wait_healthy_index = script.index("wait_healthy()")
-        set_eu_index = script.index("set -eu")
-        assert set_eu_index < version_guard_index < wait_healthy_index
+        assert "podman version --format" not in script
+        assert "requires podman" not in script
+        assert "podman_major" not in script
 
     def test_hostname_becomes_add_host_entry(self) -> None:
         compose = {
@@ -1082,44 +1079,6 @@ class TestAllowExitCodesValidation:
         options = self._options([1, 2, 5])
         script = emit_script(compose=chats_compose, options=options)
         assert "in\n  0|1|2|5) ;;" in script
-
-
-class TestPodmanVersionGuard:
-    def _run_header(self, tmp_path: Path, podman_stub_body: str) -> "subprocess.CompletedProcess[str]":
-        assert _SH is not None  # sh is a POSIX baseline binary, always present
-        bin_dir = tmp_path / "bin"
-        bin_dir.mkdir()
-        podman_stub = bin_dir / "podman"
-        podman_stub.write_text(f"#!/bin/sh\n{podman_stub_body}\n")
-        podman_stub.chmod(0o755)
-        header_path = tmp_path / "header.sh"
-        header_path.write_text(_SCRIPT_HEADER)
-        env = dict(os.environ)
-        env["PATH"] = f"{bin_dir}:{env['PATH']}"
-        return subprocess.run(  # noqa: S603 - _SH is an absolute path from shutil.which, not untrusted input
-            [_SH, str(header_path)],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-            timeout=10,
-        )
-
-    def test_warns_when_podman_major_below_six(self, tmp_path: Path) -> None:
-        result = self._run_header(tmp_path, 'echo "5.8.1"')
-        assert result.returncode == 0
-        assert "podman 5.8.1 detected; compose2pod requires podman >= 6.0.0" in result.stderr
-        assert "/etc/hosts" in result.stderr
-
-    def test_silent_when_podman_major_six_or_above(self, tmp_path: Path) -> None:
-        result = self._run_header(tmp_path, 'echo "6.0.1"')
-        assert result.returncode == 0
-        assert result.stderr == ""
-
-    def test_silent_when_podman_version_unparseable(self, tmp_path: Path) -> None:
-        result = self._run_header(tmp_path, "exit 1")
-        assert result.returncode == 0
-        assert result.stderr == ""
 
 
 class TestPublicEntryPointsValidateWithoutBeingToldTo:
