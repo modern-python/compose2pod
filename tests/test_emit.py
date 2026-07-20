@@ -644,13 +644,26 @@ class TestEmitScript:
         assert "OOMKilled={{.State.OOMKilled}}" in script[gate:]
         assert "podman ps -a" in script[gate:]
 
-    def test_add_host_becomes_pod_level(self, chats_compose: dict) -> None:
+    def test_pod_create_carries_no_hosts_and_no_add_host(self, chats_compose: dict) -> None:
         script = self.make_script(chats_compose)
         pod_create = next(line for line in script.splitlines() if line.startswith("podman pod create"))
-        assert "--add-host keydb-test-server-0:127.0.0.1" in pod_create
-        run_lines = [line for line in script.splitlines() if line.startswith("podman run")]
-        for line in run_lines:
-            assert "--add-host" not in line
+        assert "--no-hosts" in pod_create
+        assert "--add-host" not in script
+
+    def test_hosts_file_written_and_mounted(self, chats_compose: dict) -> None:
+        script = self.make_script(chats_compose)
+        assert "hostsfile=$(mktemp)" in script
+        printf_line = next(line for line in script.splitlines() if line.startswith("printf '%s\\n'"))
+        assert "127.0.0.1 localhost" in printf_line
+        assert "127.0.0.1 keydb-test-server-0" in printf_line
+        assert printf_line.rstrip().endswith('> "$hostsfile"')
+        for line in [ln for ln in script.splitlines() if ln.startswith("podman run")]:
+            assert '--no-hosts -v "$hostsfile":/etc/hosts:ro,z' in line
+
+    def test_hostsfile_removed_on_teardown(self, chats_compose: dict) -> None:
+        script = self.make_script(chats_compose)
+        trap = next(line for line in script.splitlines() if line.startswith("trap "))
+        assert 'rm -f "$hostsfile"' in trap
 
     def test_wait_healthy_function_uses_healthcheck_run(self, chats_compose: dict) -> None:
         script = self.make_script(chats_compose)
@@ -684,7 +697,7 @@ class TestEmitScript:
         )
         assert validate(compose) == []
         script = emit_script(compose=compose, options=options)
-        assert "--add-host keydb-test-server-0:127.0.0.1" in script
+        assert "127.0.0.1 keydb-test-server-0" in script
 
     def test_container_name_becomes_add_host_entry(self) -> None:
         compose = {
@@ -703,7 +716,7 @@ class TestEmitScript:
         )
         assert validate(compose) == []
         script = emit_script(compose=compose, options=options)
-        assert "--add-host calutron-ronline:127.0.0.1" in script
+        assert "127.0.0.1 calutron-ronline" in script
 
     def test_named_volume_round_trips_through_validate_and_emit(self) -> None:
         compose = {
@@ -808,7 +821,7 @@ class TestEmitScript:
             '--platform "linux/amd64"',
             '--device "/dev/fuse"',
             '--annotation "team=api"',
-            '--add-host "db.local:10.0.0.5"',
+            '"10.0.0.5 db.local"',
             "--pull missing",
         ):
             assert fragment in script
@@ -822,15 +835,17 @@ class TestEmitScript:
     def test_pod_create_carries_dns_and_sysctl_flags(self) -> None:
         svc = {"image": "x", "dns": ["1.1.1.1", "8.8.8.8"], "sysctls": {"net.core.somaxconn": 1024}}
         script = self._single(svc)
-        # `app` (the service's own name) is always a self-alias, so it precedes dns/sysctls.
-        assert 'podman pod create --name p --add-host app:127.0.0.1 --dns "1.1.1.1" --dns "8.8.8.8"' in script
+        # `--no-hosts` always precedes dns/sysctls now that /etc/hosts is script-owned.
+        assert 'podman pod create --name p --no-hosts --dns "1.1.1.1" --dns "8.8.8.8"' in script
         assert '--sysctl "net.core.somaxconn=1024"' in script
 
     def test_pod_create_carries_only_self_alias_without_pod_options(self) -> None:
         # A service's own name is always a resolvable alias (`graph.hostnames`), so even
-        # with no dns/sysctls/extra_hosts declared, pod create still carries its add-host.
+        # with no dns/sysctls/extra_hosts declared, the alias still lands -- now in the
+        # hosts file rather than on pod create.
         script = self._single({"image": "x"})
-        assert "podman pod create --name p --add-host app:127.0.0.1\n" in script
+        assert "podman pod create --name p --no-hosts\n" in script
+        assert "127.0.0.1 app" in script
 
     def test_env_file_required_false_is_guarded(self) -> None:
         svc = {"image": "x", "env_file": [{"path": "opt.env", "required": False}]}
@@ -1168,7 +1183,7 @@ class TestAddHostClosureScope:
         # A never-run service pointed its name at 127.0.0.1, where nothing listens.
         compose = {"services": {"app": {"image": "x"}, "never_run": {"image": "x"}}}
         script = emit_script(compose=compose, options=self._options("app"))
-        assert "--add-host app:127.0.0.1" in script
+        assert "127.0.0.1 app" in script
         assert "never_run" not in script
 
     def test_out_of_closure_hostname_does_not_veto_extra_hosts(self) -> None:
@@ -1180,7 +1195,7 @@ class TestAddHostClosureScope:
             }
         }
         script = emit_script(compose=compose, options=self._options("app"))
-        assert '--add-host "db:1.2.3.4"' in script
+        assert '"1.2.3.4 db"' in script
 
     def test_in_closure_hostname_still_conflicts_with_extra_hosts(self) -> None:
         # The conflict rule still holds for services that actually run.
@@ -1204,7 +1219,7 @@ class TestAddHostClosureScope:
         }
         script = emit_script(compose=compose, options=self._options("app"))
         for host in ("app", "db", "db-host", "db-alias"):
-            assert f"--add-host {host}:127.0.0.1" in script
+            assert f"127.0.0.1 {host}" in script
 
 
 class TestGuardedEnvFileDependencyWiring:
