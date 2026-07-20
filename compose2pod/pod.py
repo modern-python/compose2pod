@@ -131,14 +131,19 @@ def _sysctl_flags(services: dict[str, Any], order: list[str]) -> list[Token]:
     return tokens
 
 
-def _add_host_flags(services: dict[str, Any], order: list[str], hosts: list[str]) -> list[Token]:
-    """Merge alias/hostname hosts (fixed 127.0.0.1) with extra_hosts (order-scoped) into one add-host set.
+_LOCALHOST_LINES: tuple[str, str] = ("127.0.0.1 localhost", "::1 localhost")
 
-    A host name landing on two different addresses -- across services' extra_hosts,
-    or against an alias's fixed 127.0.0.1 -- is refused rather than guessed at, matching
-    the sysctls conflict rule below. Alias entries render as plain tokens (unquoted, as
-    before this move); extra_hosts entries render via `Expand` (as before, quoted/interpolated)
-    -- relocating the flags changes nothing else observable about either source.
+
+def hosts_file_tokens(services: dict[str, Any], order: list[str], hosts: list[str]) -> list[Token]:
+    """Render the pod's /etc/hosts as `IP NAME` line tokens (localhost lines first).
+
+    compose2pod owns /etc/hosts: the generated script bind-mounts these lines
+    into every container under `--no-hosts`, replacing the former pod-level
+    `--add-host` set (which conflicts with `--no-hosts`). Merge/conflict rules
+    are unchanged from the add-host era: alias/hostname names are fixed at
+    127.0.0.1, `extra_hosts` is order-scoped, and a name landing on two
+    addresses is refused. Alias lines are literal tokens; `extra_hosts` lines
+    render via `Expand` so a `${VAR}` address stays live at run time.
     """
     merged: dict[str, str] = {}
     from_extra_hosts: set[str] = set()
@@ -154,18 +159,19 @@ def _add_host_flags(services: dict[str, Any], order: list[str], hosts: list[str]
                 raise UnsupportedComposeError(msg)
             merged[host] = addr
             from_extra_hosts.add(host)
-    tokens: list[Token] = []
+    tokens: list[Token] = [*_LOCALHOST_LINES]
     for host, addr in merged.items():
-        value = Expand(value=f"{host}:{addr}") if host in from_extra_hosts else f"{host}:{addr}"
-        tokens += ["--add-host", value]
+        line = f"{addr} {host}"
+        tokens.append(Expand(value=line) if host in from_extra_hosts else line)
     return tokens
 
 
-def pod_create_flags(services: dict[str, Any], order: list[str], hosts: list[str]) -> list[Token]:
-    """Pod-create flag tokens aggregated across the closure `order`, plus `hosts` for add-host.
+def pod_create_flags(services: dict[str, Any], order: list[str]) -> list[Token]:
+    """Pod-create flag tokens aggregated across the closure `order`.
 
-    Add-host is merged from alias/hostname resolution (`hosts`, fixed 127.0.0.1) and each
-    closure service's `extra_hosts`, conflict-checked (see `_add_host_flags`). dns/dns_search/
-    dns_opt are unioned (dedup, first-seen order); sysctls are unioned by key.
+    dns/dns_search/dns_opt are unioned (dedup, first-seen order); sysctls are
+    unioned by key. Name resolution no longer rides on `--add-host` (it conflicts
+    with the `--no-hosts` the script now passes); it lives in the bind-mounted
+    hosts file -- see `hosts_file_tokens`.
     """
-    return _add_host_flags(services, order, hosts) + _dns_flags(services, order) + _sysctl_flags(services, order)
+    return _dns_flags(services, order) + _sysctl_flags(services, order)
