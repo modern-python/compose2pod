@@ -47,8 +47,8 @@ def _check_extra_host_separators(name: str, value: Any) -> None:  # noqa: ANN401
     """Check each list-form entry actually divides into a host and an address.
 
     An entry with neither separator has no address to emit, and would render as
-    a malformed `--add-host "no-separator:"`. The mapping form cannot have this
-    problem: its key and value are already separate.
+    a malformed hosts-file line (a name with no address). The mapping form cannot
+    have this problem: its key and value are already separate.
     """
     if not isinstance(value, list):
         return
@@ -65,7 +65,7 @@ def _check_extra_host_value_types(name: str, value: Any) -> None:  # noqa: ANN40
     number, boolean, or null -- correct for `labels`/`annotations`' bare-key-
     means-null semantics, but too loose for `extra_hosts`: an int/bool/null
     address would otherwise reach `keys.extra_host_entries` and get coerced
-    into a bogus `--add-host` value. Measured against `docker compose config`
+    into a bogus hosts-file line. Measured against `docker compose config`
     v5.1.2: `extra_hosts: {h: 3}` and `extra_hosts: {h: true}` are both
     refused ("services.<svc>.extra_hosts.h must be a string"). The list form
     cannot have this problem: `validate_map` already requires every list
