@@ -19,5 +19,5 @@ def test_network_alias_lands_on_the_pod(run_pod: Callable[..., PodRun]) -> None:
     run = run_pod(compose, target="app")
     # Exit 0 proves the long-form networks.aliases entry (a distinct code path
     # from hostname/container_name in graph.py's _host_names) reaches the
-    # pod-level --add-host set, resolving to 127.0.0.1 like every other alias.
+    # script-owned /etc/hosts file, resolving to 127.0.0.1 like every other alias.
     assert run.returncode == 0, run.stderr

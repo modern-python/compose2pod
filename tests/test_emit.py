@@ -667,7 +667,7 @@ class TestEmitScript:
         assert "requires podman" not in script
         assert "podman_major" not in script
 
-    def test_hostname_becomes_add_host_entry(self) -> None:
+    def test_hostname_becomes_hosts_file_entry(self) -> None:
         compose = {
             "services": {
                 "application": {"image": "app", "depends_on": ["keydb"]},
@@ -687,7 +687,7 @@ class TestEmitScript:
         script = emit_script(compose=compose, options=options)
         assert "127.0.0.1 keydb-test-server-0" in script
 
-    def test_container_name_becomes_add_host_entry(self) -> None:
+    def test_container_name_becomes_hosts_file_entry(self) -> None:
         compose = {
             "services": {
                 "application": {"image": "app", "container_name": "calutron-ronline"},
@@ -1115,8 +1115,8 @@ class TestPublicEntryPointsValidateWithoutBeingToldTo:
             referenced_variables({}, self._options())
 
 
-class TestAddHostClosureScope:
-    """--add-host covers the target's closure, like every other emit-path aggregate."""
+class TestHostsFileClosureScope:
+    """The owned /etc/hosts file covers the target's closure, like every other emit-path aggregate."""
 
     def _options(self, target: str) -> EmitOptions:
         return EmitOptions(
@@ -1159,7 +1159,7 @@ class TestAddHostClosureScope:
             emit_script(compose=compose, options=self._options("app"))
 
     def test_dependency_hostnames_and_aliases_still_resolve(self) -> None:
-        # Everything inside the closure keeps its add-host entry.
+        # Everything inside the closure keeps its hosts-file entry.
         compose = {
             "services": {
                 "app": {"image": "x", "depends_on": ["db"]},
