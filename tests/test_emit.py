@@ -651,6 +651,16 @@ class TestEmitScript:
         for line in [ln for ln in script.splitlines() if ln.startswith("podman run")]:
             assert '--no-hosts -v "$hostsfile":/etc/hosts:ro,z' in line
 
+    def test_hosts_file_written_before_first_run(self, chats_compose: dict) -> None:
+        # Every container bind-mounts $hostsfile, so the file must be written
+        # before any `podman run` mounts it -- otherwise the first container
+        # sees the empty mktemp file. Guaranteed by _plan's linear order; pinned
+        # here so a reordering refactor fails the unit gate, not just integration.
+        lines = self.make_script(chats_compose).splitlines()
+        write_index = next(i for i, line in enumerate(lines) if line.startswith("printf '%s\\n'"))
+        first_run_index = next(i for i, line in enumerate(lines) if line.startswith("podman run"))
+        assert write_index < first_run_index
+
     def test_hostsfile_removed_on_teardown(self, chats_compose: dict) -> None:
         script = self.make_script(chats_compose)
         trap = next(line for line in script.splitlines() if line.startswith("trap "))
