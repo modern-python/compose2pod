@@ -22,19 +22,18 @@ Convert a Docker Compose file into a POSIX `sh` script that runs its services as
 
 Built for CI and test environments where you can't use `docker compose` or `podman kube play`:
 
-- **No bridge networking / netavark.** Unprivileged CI containers often have a read-only `/proc/sys`, so netavark fails to create bridge networks. A single pod shares one network namespace with no bridge: services talk over `127.0.0.1`, and names resolve via `--add-host`.
+- **No bridge networking / netavark.** Unprivileged CI containers often have a read-only `/proc/sys`, so netavark fails to create bridge networks. A single pod shares one network namespace with no bridge: services talk over `127.0.0.1`, and names resolve via a generated `/etc/hosts` the script owns.
 - **No systemd.** Podman healthchecks are normally scheduled by systemd timers. compose2pod gates startup by polling `podman healthcheck run` directly, so `depends_on: service_healthy` works without systemd.
 - **No heavy runtime.** The core is stdlib-only — no dependencies, no compiled wheels — so it installs and runs in minimal Python images.
 
 ## Requirements
 
-**Podman >= 6.0.0.** Earlier releases have a bug where a container stopping
-inside a multi-container pod wipes `/etc/hosts` for every container in that
-pod, not just the one that stopped — fixed in 6.0.0. compose2pod's generated
-scripts rely on one shared `--add-host`-populated `/etc/hosts` for the whole
-pod (see `architecture/supported-subset.md`), so a `service_completed_successfully`
-dependency (a container that runs and exits, e.g. a migration step) can wipe
-name resolution for everything started after it on a pre-6.0.0 Podman.
+compose2pod's generated scripts own `/etc/hosts`: they write it to a temp
+file and bind-mount it read-only into every container under `--no-hosts`
+(see `architecture/supported-subset.md`), so pod-internal name resolution
+works on any Podman version. `host.containers.internal` /
+`host.docker.internal` are not provided — add an explicit `extra_hosts`
+entry if you need them.
 
 ## Install
 

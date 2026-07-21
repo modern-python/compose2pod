@@ -398,8 +398,9 @@ slot (`architecture/glossary.md`).
   own flag. No format validation beyond shape; a malformed option string
   surfaces as a podman error at run time.
 - **`hostname` and `container_name`:** each made resolvable to `127.0.0.1`
-  like a network alias (added to the shared `--add-host` set, see Pod-level
-  options), so other services can reach the service by either name. The pod
+  like a network alias (added to the shared, script-owned `/etc/hosts`, see
+  Pod-level options), so other services can reach the service by either
+  name. The pod
   shares the UTS namespace, so a service's own hostname is the pod's; the
   actual podman container is always named `{pod}-{service}` regardless of
   `container_name` (used internally for `podman cp`, healthcheck polling,
@@ -536,7 +537,8 @@ flags. compose2pod hoists them onto `podman pod create` instead
 
 - **Supported:** `dns`, `dns_search`, `dns_opt`, `sysctls`, `extra_hosts` —
   mapped to `--dns`, `--dns-search`, `--dns-option`, `--sysctl`, and (merged
-  with the alias/hostname set) `--add-host` respectively.
+  with the alias/hostname set) lines in the pod's owned `/etc/hosts`
+  respectively.
 - **Value shapes:** `dns`/`dns_search` accept a string or list of strings;
   `dns_opt` accepts a list of strings only — Docker refuses a bare string
   there (`dns_opt: "ndots:2"`) even though it accepts one for `dns` and
@@ -556,7 +558,7 @@ flags. compose2pod hoists them onto `podman pod create` instead
   emitter, and the `extends` merge — goes through the one shared
   `keys.split_extra_host`, so they cannot disagree about where an entry
   divides. An entry with neither separator has no address and raises, rather
-  than emitting a malformed `--add-host`. A `${VAR}` inside a
+  than emitting a malformed hosts-file line. A `${VAR}` inside a
   value stays live at run time (see Variable interpolation, below) and
   counts toward `referenced_variables`.
 - **Aggregation is closure-scoped:** computed over the target's dependency
@@ -564,12 +566,12 @@ flags. compose2pod hoists them onto `podman pod create` instead
   `dns_opt` are unioned (deduplicated, first-seen order); `sysctls` are
   unioned by key, and two closure services setting the same key to
   different values is refused (`conflicting sysctl ...`) rather than
-  resolved last-writer-wins. `--add-host` is seeded from the alias/hostname
-  set of the closure's services, then layered with each closure service's
-  `extra_hosts`; a host name landing on two different addresses is refused
-  the same way (`conflicting host ...`). An alias/hostname `--add-host`
-  entry stays a plain unquoted token; an `extra_hosts` entry is
-  `${VAR}`-live.
+  resolved last-writer-wins. The hosts file is seeded from the alias/hostname
+  set of the closure's services (each mapped to `127.0.0.1`), then layered
+  with each closure service's `extra_hosts` (each mapped to its address); a
+  host name landing on two different addresses is refused the same way
+  (`conflicting host ...`). An alias/hostname line stays a plain unquoted
+  token; an `extra_hosts` line is `${VAR}`-live.
 
   Only the closure joins the pod, so only the closure is resolvable: a
   service outside it contributes no name and cannot conflict with an
@@ -587,16 +589,26 @@ flags. compose2pod hoists them onto `podman pod create` instead
   that service is in the target's closure; at emit time a declaration on a
   service outside the closure is silently ignored — no flag for it, since
   that service never runs.
-- **Requires Podman >= 6.0.0.** Before 6.0.0, a container stopping inside a
-  multi-container pod wiped `/etc/hosts` for every container in the pod.
-  Because `--add-host` here is the pod's *only* source of `/etc/hosts`
-  entries, a `service_completed_successfully` dependency (a container that
-  runs to completion and exits, e.g. a migration step) triggers the bug and
-  erases name resolution for every service started after it. Confirmed
-  present on 5.8.1, fixed on 6.0.0/6.0.1. The generated script checks
-  `podman version` at startup and warns on stderr (without blocking) below
-  major version 6, so the requirement is visible at the point of failure,
-  not only in the docs. See `README.md`'s Requirements section.
+- **The script owns `/etc/hosts`, not Podman.** `pod_create_flags` no longer
+  emits `--add-host`; instead `hosts_file_tokens` (`compose2pod/pod.py`)
+  renders the merged alias/hostname/`extra_hosts` set as `IP NAME` lines,
+  prefixed with `127.0.0.1 localhost` and `::1 localhost`. The script writes
+  those lines to a `mktemp` path (`hostsfile=$(mktemp)`) once, before the
+  first container starts, and removes it in the `trap ... EXIT` teardown
+  (`rm -f "$hostsfile"`). `podman pod create` and every `podman run` —
+  target, `--rm` completion dependency, and `-d` long-running alike — pass
+  `--no-hosts` and bind-mount the file read-only:
+  `-v "$hostsfile":/etc/hosts:ro,z`. `--no-hosts` and `--add-host` conflict,
+  so the two moves are one change. `z` relabels the mount for SELinux (a
+  no-op where SELinux is not enforcing) — without it, a bind-mounted
+  `/etc/hosts` is unreadable on an SELinux-enforcing host. Because
+  `--no-hosts` stops Podman from managing `/etc/hosts` at all, the pre-6.0.0
+  bug where a container stopping inside a pod wiped the shared `/etc/hosts`
+  for every other container cannot fire — compose2pod works identically on
+  every Podman version, with no version floor. `host.containers.internal` /
+  `host.docker.internal` are not provided: `--no-hosts` means Podman's
+  computed gateway IP is unavailable, so a service needing it must add an
+  explicit `extra_hosts` entry (see `README.md`'s Requirements section).
 - **Non-goals:** per-service DNS/sysctls — impossible inside a
   shared-namespace pod, not a compose2pod limitation; last-writer-wins on a
   sysctl or host conflict — refused instead.
@@ -971,7 +983,7 @@ truth if this enumeration ever appears to drift:
 
 Everything else is never interpolated: `build`'s own contents (never
 read), `depends_on`, `networks`, `hostname`, and `container_name` (the
-last two are emitted as literal `--add-host host:127.0.0.1` entries, not
+last two are emitted as literal `127.0.0.1 host` hosts-file lines, not
 expanded), and the healthcheck `timeout`/`start_period`/`retries` numbers.
 
 Supported forms: `$VAR`, `${VAR}`, `${VAR:-default}`, `${VAR-default}`,
