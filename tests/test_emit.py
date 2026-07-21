@@ -1,12 +1,6 @@
-import os
-import shutil
-import subprocess
-from pathlib import Path
-
 import pytest
 
 from compose2pod.emit import (
-    _SCRIPT_HEADER,
     EmitOptions,
     Expand,
     GuardedEnvFile,
@@ -20,9 +14,6 @@ from compose2pod.emit import (
 )
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.parsing import validate
-
-
-_SH = shutil.which("sh")
 
 
 class TestRunFlags:
