@@ -335,7 +335,13 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     # Only the closure joins the pod, so only the closure is resolvable. A name
     # pointing at 127.0.0.1 for a service that never runs would turn an honest
     # resolution failure into a connection-refused.
-    hosts = hostnames({name: services[name] for name in order})
+    # The pod name is added as a resolvable name so every container's own
+    # hostname (set to the pod name below) resolves. A pod shares one UTS
+    # namespace, so without this the hostname is the random container ID,
+    # absent from the owned /etc/hosts -- `hostname -f` then fails and images
+    # that resolve their own hostname at startup crash. Podman used to add this
+    # line itself; `--no-hosts` stops it, so the script owns it too.
+    hosts = [*hostnames({name: services[name] for name in order}), options.pod]
     host_tokens = hosts_file_tokens(services, order, hosts)
     completion_gated = {
         dep
@@ -355,7 +361,11 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     lines.append(f"trap '{teardown}' EXIT")
     pod_flags = pod_create_flags(services, order)
     _collect_vars(pod_flags, names)
-    pod_create = f"podman pod create --name {shlex.quote(options.pod)} --no-hosts"
+    # `--uts private` gives the pod its own UTS namespace so `--hostname` is
+    # settable (in the host UTS namespace Podman refuses it); the pod name is
+    # the shared hostname, resolvable via the line added to the hosts file above.
+    pod_name = shlex.quote(options.pod)
+    pod_create = f"podman pod create --name {pod_name} --no-hosts --uts private --hostname {pod_name}"
     if pod_flags:
         pod_create += " " + _render(pod_flags)
     lines.append(pod_create)
