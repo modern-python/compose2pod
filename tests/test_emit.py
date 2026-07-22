@@ -674,6 +674,20 @@ class TestEmitScript:
         first_run_index = next(i for i, line in enumerate(lines) if line.startswith("podman run"))
         assert write_index < chmod_index < first_run_index
 
+    def test_pod_gets_private_uts_and_hostname(self, chats_compose: dict) -> None:
+        # A pod shares one UTS namespace; with no pod hostname, every container's
+        # own hostname is the random container ID -- absent from the owned
+        # /etc/hosts -- so `hostname -f` fails ("Temporary failure in name
+        # resolution") and an image that resolves its own hostname at startup
+        # crashes. Give the pod a private UTS namespace and the pod name as its
+        # hostname, and put that name in the hosts file so it resolves.
+        script = self.make_script(chats_compose)
+        pod_create = next(line for line in script.splitlines() if line.startswith("podman pod create"))
+        assert "--uts private" in pod_create
+        assert "--hostname test-pod" in pod_create
+        printf_line = next(line for line in script.splitlines() if line.startswith("printf '%s\\n'"))
+        assert "127.0.0.1 test-pod" in printf_line
+
     def test_hostsfile_removed_on_teardown(self, chats_compose: dict) -> None:
         script = self.make_script(chats_compose)
         trap = next(line for line in script.splitlines() if line.startswith("trap "))
@@ -846,8 +860,10 @@ class TestEmitScript:
     def test_pod_create_carries_dns_and_sysctl_flags(self) -> None:
         svc = {"image": "x", "dns": ["1.1.1.1", "8.8.8.8"], "sysctls": {"net.core.somaxconn": 1024}}
         script = self._single(svc)
-        # `--no-hosts` always precedes dns/sysctls now that /etc/hosts is script-owned.
-        assert 'podman pod create --name p --no-hosts --dns "1.1.1.1" --dns "8.8.8.8"' in script
+        # `--no-hosts` and the pod hostname always precede dns/sysctls now that /etc/hosts is script-owned.
+        assert (
+            'podman pod create --name p --no-hosts --uts private --hostname p --dns "1.1.1.1" --dns "8.8.8.8"' in script
+        )
         assert '--sysctl "net.core.somaxconn=1024"' in script
 
     def test_pod_create_carries_only_self_alias_without_pod_options(self) -> None:
@@ -855,7 +871,7 @@ class TestEmitScript:
         # with no dns/sysctls/extra_hosts declared, the alias still lands -- now in the
         # hosts file rather than on pod create.
         script = self._single({"image": "x"})
-        assert "podman pod create --name p --no-hosts\n" in script
+        assert "podman pod create --name p --no-hosts --uts private --hostname p\n" in script
         assert "127.0.0.1 app" in script
 
     def test_env_file_required_false_is_guarded(self) -> None:

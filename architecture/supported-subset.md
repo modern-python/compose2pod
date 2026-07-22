@@ -609,7 +609,15 @@ flags. compose2pod hoists them onto `podman pod create` instead
   `--no-hosts` stops Podman from managing `/etc/hosts` at all, the pre-6.0.0
   bug where a container stopping inside a pod wiped the shared `/etc/hosts`
   for every other container cannot fire — compose2pod works identically on
-  every Podman version, with no version floor. `host.containers.internal` /
+  every Podman version, with no version floor. `--no-hosts` also stops Podman
+  from adding each container's own hostname line, so `podman pod create` gets
+  `--uts private --hostname <pod-name>` and the pod name is added to the hosts
+  file (`127.0.0.1 <pod-name>`): a container resolving its own hostname
+  (`hostname -f`) — which Podman handled before `--no-hosts` and which images
+  with a self-referential startup do — resolves again. A pod shares one UTS
+  namespace, so this hostname is pod-wide; per-service `hostname:` values stay
+  resolvable by peers via the hosts file but do not set a container's own name.
+  `host.containers.internal` /
   `host.docker.internal` are not provided: `--no-hosts` means Podman's
   computed gateway IP is unavailable, so a service needing it must add an
   explicit `extra_hosts` entry (see `README.md`'s Requirements section).
