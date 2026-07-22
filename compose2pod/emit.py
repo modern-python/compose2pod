@@ -361,6 +361,10 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     lines.append(pod_create)
     _collect_vars(host_tokens, names)
     lines.append(f"printf '%s\\n' {_render(host_tokens)} > \"$hostsfile\"")
+    # mktemp creates the file 0600; make it world-readable so a service image
+    # running as a non-root user can read the bind-mounted /etc/hosts. Without
+    # this, glibc falls through to DNS and name resolution fails.
+    lines.append('chmod 644 "$hostsfile"')
     lines.extend(stores.create_lines(compose, order, options.pod, options.project_dir))
     names |= stores.referenced_variables(compose, order, options.project_dir)
     waited: set[str] = set()

@@ -661,6 +661,19 @@ class TestEmitScript:
         first_run_index = next(i for i, line in enumerate(lines) if line.startswith("podman run"))
         assert write_index < first_run_index
 
+    def test_hosts_file_made_world_readable(self, chats_compose: dict) -> None:
+        # `mktemp` creates the file 0600, owned by the invoking user. A service
+        # image running as a non-root user then cannot read the bind-mounted
+        # /etc/hosts, so name resolution falls through to DNS and fails with
+        # "Temporary failure in name resolution". `chmod` makes it readable to
+        # every container uid. Ordered after the write, before the first mount.
+        lines = self.make_script(chats_compose).splitlines()
+        assert 'chmod 644 "$hostsfile"' in lines
+        write_index = next(i for i, line in enumerate(lines) if line.startswith("printf '%s\\n'"))
+        chmod_index = next(i for i, line in enumerate(lines) if line == 'chmod 644 "$hostsfile"')
+        first_run_index = next(i for i, line in enumerate(lines) if line.startswith("podman run"))
+        assert write_index < chmod_index < first_run_index
+
     def test_hostsfile_removed_on_teardown(self, chats_compose: dict) -> None:
         script = self.make_script(chats_compose)
         trap = next(line for line in script.splitlines() if line.startswith("trap "))

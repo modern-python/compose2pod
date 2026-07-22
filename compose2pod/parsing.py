@@ -216,12 +216,12 @@ def _validate_volume_long_form(name: str, entry: dict[str, Any]) -> None:
     here) because the check itself needs `vtype` to know which sub-map key --
     `bind`/`volume`/`tmpfs` -- the entry is allowed to carry alongside it.
     """
-    require_string_keys(f"service {name!r}: volume", entry)
+    keys = require_string_keys(f"service {name!r}: volume", entry)
     vtype = entry.get("type")
     if vtype not in _VOLUME_LONG_TYPES:
         msg = f"service {name!r}: volume 'type' must be one of {list(_VOLUME_LONG_TYPES)}"
         raise UnsupportedComposeError(msg)
-    unknown = set(entry) - _VOLUME_LONG_KEYS - {vtype}
+    unknown = keys - _VOLUME_LONG_KEYS - {vtype}
     if unknown:
         msg = f"service {name!r}: volume: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
@@ -333,8 +333,8 @@ def _validate_volume_options(name: str, vtype: str, options: Any) -> None:  # no
     if not isinstance(options, dict):
         msg = f"service {name!r}: {vtype} options must be a mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"service {name!r}: {vtype} options", options)
-    unknown = set(options) - _VOLUME_OPTION_KEYS[vtype]
+    keys = require_string_keys(f"service {name!r}: {vtype} options", options)
+    unknown = keys - _VOLUME_OPTION_KEYS[vtype]
     if unknown:
         msg = f"service {name!r}: {vtype} options: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
@@ -529,8 +529,8 @@ def _validate_build_secret_entry(name: str, entry: Any) -> None:  # noqa: ANN401
     if not isinstance(entry, dict):
         msg = f"service {name!r}: build 'secrets' entries must be a string or mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"service {name!r}: build 'secrets' entry", entry)
-    unknown = set(entry) - _BUILD_SECRET_REF_KEYS
+    keys = require_string_keys(f"service {name!r}: build 'secrets' entry", entry)
+    unknown = keys - _BUILD_SECRET_REF_KEYS
     if unknown:
         msg = f"service {name!r}: build 'secrets' entry: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
@@ -683,8 +683,8 @@ def _validate_env_file(name: str, svc: dict[str, Any]) -> None:
 
 def _validate_env_file_mapping(name: str, entry: dict[str, Any]) -> None:
     """Check one long-form env_file mapping against Docker's strict schema (measured, v5.1.2)."""
-    require_string_keys(f"service {name!r}: 'env_file'", entry)
-    unknown = set(entry) - _ENV_FILE_ENTRY_KEYS
+    keys = require_string_keys(f"service {name!r}: 'env_file'", entry)
+    unknown = keys - _ENV_FILE_ENTRY_KEYS
     if unknown:
         msg = f"service {name!r}: 'env_file' entry: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
@@ -1240,8 +1240,8 @@ def _validate_definition_external(label: str) -> Callable[[str, str, Any], None]
         if values.is_bool_like(value):
             return
         if isinstance(value, dict):
-            require_string_keys(f"{label} {ident!r}: {key!r}", value)
-            unknown = set(value) - _EXTERNAL_MAP_KEYS
+            keys = require_string_keys(f"{label} {ident!r}: {key!r}", value)
+            unknown = keys - _EXTERNAL_MAP_KEYS
             if unknown:
                 msg = f"{label} {ident!r}: {key!r}: unsupported keys {sorted(unknown)}"
                 raise UnsupportedComposeError(msg)
@@ -1278,8 +1278,8 @@ def _validate_ipam_config_entry(label: str, ident: str, entry: Any) -> None:  # 
     if not isinstance(entry, dict):
         msg = f"{label} {ident!r}: ipam 'config' entries must be a mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"{label} {ident!r}: ipam config entry", entry)
-    unknown = set(entry) - _IPAM_CONFIG_ENTRY_KEYS
+    keys = require_string_keys(f"{label} {ident!r}: ipam config entry", entry)
+    unknown = keys - _IPAM_CONFIG_ENTRY_KEYS
     if unknown:
         msg = f"{label} {ident!r}: ipam config entry: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
@@ -1309,8 +1309,8 @@ def _validate_definition_ipam(label: str) -> Callable[[str, str, Any], None]:
         if not isinstance(value, dict):
             msg = f"{label} {ident!r}: {key!r} must be a mapping"
             raise UnsupportedComposeError(msg)
-        require_string_keys(f"{label} {ident!r}: {key!r}", value)
-        unknown = set(value) - _IPAM_KEYS
+        keys = require_string_keys(f"{label} {ident!r}: {key!r}", value)
+        unknown = keys - _IPAM_KEYS
         if unknown:
             msg = f"{label} {ident!r}: {key!r}: unsupported keys {sorted(unknown)}"
             raise UnsupportedComposeError(msg)
