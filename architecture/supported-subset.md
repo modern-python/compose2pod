@@ -595,7 +595,11 @@ flags. compose2pod hoists them onto `podman pod create` instead
   prefixed with `127.0.0.1 localhost` and `::1 localhost`. The script writes
   those lines to a `mktemp` path (`hostsfile=$(mktemp)`) once, before the
   first container starts, and removes it in the `trap ... EXIT` teardown
-  (`rm -f "$hostsfile"`). `podman pod create` and every `podman run` —
+  (`rm -f "$hostsfile"`). `mktemp` creates the file `0600`; the script then
+  `chmod 644`s it so a service image running as a non-root user can read the
+  bind-mounted `/etc/hosts` — without it, glibc cannot read the file, falls
+  through to DNS, and resolution fails with "Temporary failure in name
+  resolution". `podman pod create` and every `podman run` —
   target, `--rm` completion dependency, and `-d` long-running alike — pass
   `--no-hosts` and bind-mount the file read-only:
   `-v "$hostsfile":/etc/hosts:ro,z`. `--no-hosts` and `--add-host` conflict,
