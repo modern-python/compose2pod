@@ -73,8 +73,8 @@ def _validate_def(name: str, definition: Any, kind: StoreKind) -> None:  # noqa:
     if not isinstance(definition, dict):
         msg = f"{kind.label} {name!r} must be a mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"{kind.label} {name!r}", definition)
-    unknown = set(definition) - kind.sources
+    keys = require_string_keys(f"{kind.label} {name!r}", definition)
+    unknown = keys - kind.sources
     if unknown:
         if "external" in unknown:
             msg = (
@@ -131,8 +131,8 @@ def _ref_source(name: str, ref: Any, kind: StoreKind) -> str:  # noqa: ANN401 - 
     if not isinstance(ref, dict):
         msg = f"service {name!r}: {kind.label} entry must be a string or mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"service {name!r}: {kind.label} entry", ref)
-    unknown = set(ref) - _LONG_FORM_KEYS
+    keys = require_string_keys(f"service {name!r}: {kind.label} entry", ref)
+    unknown = keys - _LONG_FORM_KEYS
     if unknown:
         msg = f"service {name!r}: unsupported {kind.label} keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)

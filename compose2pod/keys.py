@@ -111,8 +111,8 @@ def is_number(value: Any) -> bool:  # noqa: ANN401 - Compose values are untyped 
     return not isinstance(value, bool) and isinstance(value, int | float | str)
 
 
-def require_string_keys(where: str, mapping: dict[Any, Any]) -> None:
-    """Check every key of a raw YAML/JSON mapping is a string.
+def require_string_keys(where: str, mapping: dict[Any, Any]) -> set[str]:
+    """Check every key of a raw YAML/JSON mapping is a string; return them.
 
     PyYAML routinely produces non-string keys (a bare `3:` is an int; under
     YAML 1.1, a bare `on:`/`off:` is a bool). Every mapping-key consumer
@@ -120,11 +120,18 @@ def require_string_keys(where: str, mapping: dict[Any, Any]) -> None:
     `str` and crashes raw otherwise. This is the one shared check the gate
     runs before it reads any of `mapping`'s keys, so a non-string key fails
     clean regardless of which mapping it turned up in.
+
+    Returns the validated keys as a `set[str]` so an unsupported-key check can
+    build on it directly (`require_string_keys(...) - KNOWN`) with a statically
+    sortable type, instead of re-deriving `set(mapping)` as `set[object]`.
     """
+    keys: set[str] = set()
     for key in mapping:
         if not isinstance(key, str):
             msg = f"{where}: key {key!r} must be a string"
             raise UnsupportedComposeError(msg)
+        keys.add(key)
+    return keys
 
 
 def _validate_list_elements(name: str, key: str, value: list[Any]) -> None:

@@ -36,8 +36,8 @@ def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # no
     if not isinstance(limits, dict):
         msg = f"service {name!r}: deploy.resources.limits must be a mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"service {name!r}: deploy.resources.limits", limits)
-    unknown = set(limits) - set(_LIMITS)
+    keys = require_string_keys(f"service {name!r}: deploy.resources.limits", limits)
+    unknown = keys - set(_LIMITS)
     if unknown:
         msg = f"service {name!r}: deploy.resources.limits: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
@@ -54,8 +54,8 @@ def _validate_reservations(name: str, svc: dict[str, Any], reservations: Any) ->
     if not isinstance(reservations, dict):
         msg = f"service {name!r}: deploy.resources.reservations must be a mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"service {name!r}: deploy.resources.reservations", reservations)
-    unknown = set(reservations) - {"cpus", "memory", "devices"}
+    keys = require_string_keys(f"service {name!r}: deploy.resources.reservations", reservations)
+    unknown = keys - {"cpus", "memory", "devices"}
     if unknown:
         msg = f"service {name!r}: deploy.resources.reservations: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
@@ -91,8 +91,8 @@ def validate_deploy(name: str, svc: dict[str, Any]) -> None:
     if not isinstance(deploy, dict):
         msg = f"service {name!r}: 'deploy' must be a mapping"
         raise UnsupportedComposeError(msg)
-    require_string_keys(f"service {name!r}: deploy", deploy)
-    unknown = set(deploy) - {"resources"}
+    keys = require_string_keys(f"service {name!r}: deploy", deploy)
+    unknown = keys - {"resources"}
     if unknown:
         msg = f"service {name!r}: deploy: only 'resources' is supported (got {sorted(unknown)})"
         raise UnsupportedComposeError(msg)
@@ -105,8 +105,8 @@ def validate_deploy(name: str, svc: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
     _reject_null_block(name, "deploy.resources.limits", resources, "limits")
     _reject_null_block(name, "deploy.resources.reservations", resources, "reservations")
-    require_string_keys(f"service {name!r}: deploy.resources", resources)
-    unknown = set(resources) - {"limits", "reservations"}
+    keys = require_string_keys(f"service {name!r}: deploy.resources", resources)
+    unknown = keys - {"limits", "reservations"}
     if unknown:
         msg = f"service {name!r}: deploy.resources: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
