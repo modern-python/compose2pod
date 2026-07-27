@@ -16,10 +16,12 @@ def test_pod_level_options_land_on_the_pod(run_pod: Callable[..., PodRun]) -> No
                 "command": [
                     "sh",
                     "-c",
-                    "grep 9.9.9.9 /etc/resolv.conf "
-                    "&& grep 1024 /proc/sys/net/core/somaxconn "
-                    "&& grep 10.0.0.9 /etc/hosts "
-                    "&& grep external-svc /etc/hosts",
+                    (
+                        "grep 9.9.9.9 /etc/resolv.conf "
+                        "&& grep 1024 /proc/sys/net/core/somaxconn "
+                        "&& grep 10.0.0.9 /etc/hosts "
+                        "&& grep external-svc /etc/hosts"
+                    ),
                 ],
             },
         },
