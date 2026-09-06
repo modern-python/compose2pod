@@ -34,9 +34,8 @@ def _validate_string_list(name: str, key: str, value: Any) -> None:  # noqa: ANN
         raise UnsupportedComposeError(msg)
 
 
-# Accepted but never emitted -- meaningless inside a single shared-namespace pod
-# (see architecture/supported-subset.md). Ignored at *emit* is not unchecked at
-# the *gate*: a key compose2pod does not use is still one Docker validates, and a
+# Accepted but never emitted -- meaningless inside a single shared-namespace pod.
+# Ignored at *emit* is not unchecked at the *gate*: a key compose2pod does not use is still one Docker validates, and a
 # document carrying a malformed one is a document Docker will not run. Each value
 # is the shape validator; the content rules are Docker's own, measured -- it
 # accepts `restart: banana` and any `stop_signal` string, so neither is enumerated
@@ -866,8 +865,7 @@ def _sweep_service(name: str, svc: dict[str, Any]) -> None:
 
     Two of the service's own top-level keys are skipped rather than swept,
     because compose2pod never reads their contents: `build` (accepted, but
-    `image_for` never reads its contents -- see
-    architecture/supported-subset.md) and any `x-`-prefixed key (an
+    `image_for` never reads its contents) and any `x-`-prefixed key (an
     extension field whose value is arbitrary user payload, by design, same
     as everywhere else `x-` is skipped). `depends_on`/`networks`/`ulimits`
     are identifier-keyed and go through `_sweep_identifier_map` instead of
@@ -1053,7 +1051,7 @@ def _validate_network_driver_opts(name: str, key: str, value: Any) -> None:  # n
     Measured against `docker compose config` v5.1.2: a bool/null/list entry
     value is refused ('must be a number or string') even though the key
     itself may be any string. compose2pod never reads a network entry's
-    `driver_opts` contents (see architecture/supported-subset.md), but a
+    `driver_opts` contents, but a
     malformed value here is still a document Docker refuses.
     """
     if not isinstance(value, dict):

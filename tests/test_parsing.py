@@ -517,7 +517,7 @@ class TestValidate:
 
     def test_read_only_quoted_boolean_accepted(self) -> None:
         # Measured (docker compose config v5.1.2): a YAML-1.1 boolean spelling as
-        # a string runs on a boolean field. See planning/deferred.md (now closed).
+        # a string runs on a boolean field.
         assert validate({"services": {"app": {"image": "x", "read_only": "yes"}}}) == []
 
     def test_read_only_non_bool_raises(self) -> None:
@@ -614,7 +614,7 @@ class TestValidate:
         with pytest.raises(UnsupportedComposeError, match=r"'start_period' must be a duration with a unit"):
             validate(compose)
 
-    # Measured against `docker compose config` v5.1.2 (planning/changes/2026-07-15.05):
+    # Measured against `docker compose config` v5.1.2:
     # timeout/start_period are a Go duration string -- a native number and a unitless
     # string are both refused ("missing unit in duration"), except the bare '0' special
     # case. interval shares the same grammar (through interval_seconds), with the

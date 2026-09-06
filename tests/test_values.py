@@ -1,5 +1,8 @@
+import re
+
 import pytest
 
+from compose2pod import values
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.values import (
     as_bool,
@@ -142,6 +145,27 @@ def test_grammar_rejects_trailing_newline(validate, key, good, bad) -> None:  # 
     validate("app", key, good)  # newline-free form still validates
     with pytest.raises(UnsupportedComposeError):
         validate("app", key, bad)
+
+
+def test_every_value_grammar_in_values_py_ends_at_the_true_end_of_string() -> None:
+    r"""INVARIANT: every compiled grammar in `values.py` is anchored with `\Z`, never `$`.
+
+    What breaks it is writing the next grammar the habitual way. Python's `$`
+    also matches immediately before a trailing newline, so a `$`-anchored
+    grammar silently accepts a value carrying one -- reachable from any YAML
+    block scalar (`mem_limit: |` resolves to `"512m\n"`) -- and
+    `docker compose config` refuses that value. Accepting it is a false green
+    against the hard rule in `docs/adr/0009-docker-rejection-parity.md`, and it
+    is invisible from the call site: every hand-written probe passes a
+    newline-free value, which is exactly how the gap survived until it was
+    measured. Asserting the anchor over the whole module, rather than per
+    grammar, is what makes a grammar added later inherit the guarantee instead
+    of quietly reopening it.
+    """
+    grammars = {name: value for name, value in vars(values).items() if isinstance(value, re.Pattern)}
+    unanchored = sorted(name for name, pattern in grammars.items() if not pattern.pattern.endswith(r"\Z"))
+    assert grammars, "no compiled grammars found in values.py -- the introspection broke, not the invariant"
+    assert unanchored == []
 
 
 # string_only: deploy.resources.limits.memory / reservations.memory are typed
