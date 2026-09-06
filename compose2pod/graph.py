@@ -58,7 +58,7 @@ def _depends_on_entry_condition(dep: str, spec: dict[str, Any]) -> str:
         # defaults to service_started -- that default is Docker's own and
         # stays. This one was compose2pod's own invention (`spec.get(...,
         # "service_started")`) and was a false green against the hard rule
-        # in `planning/decisions/2026-07-14-docker-rejection-parity.md`.
+        # in `docs/adr/0009-docker-rejection-parity.md`.
         msg = f"depends_on entry {dep!r}: missing required key 'condition'"
         raise UnsupportedComposeError(msg)
     condition = spec["condition"]

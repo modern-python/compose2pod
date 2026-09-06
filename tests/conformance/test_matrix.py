@@ -42,7 +42,7 @@ SHAPES: dict[str, Any] = {
     "quoted-bool": "true",
     # Every prior shape is structural (null/empty/bool/int/list/map/bare-string) -- none
     # carry padded or internal whitespace, which is exactly how the size/number/integer
-    # false green (planning/changes/2026-07-15.16) survived the matrix undetected: Docker's
+    # false green survived the matrix undetected: Docker's
     # Go parsers refuse a leading/trailing/doubled space Python's float()/int() silently
     # strip. "512m" is a plain value on a size/number/integer key -- padded with a leading
     # and trailing space, it reaches every key's own grammar, not just the three this shape

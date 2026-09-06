@@ -29,9 +29,8 @@ Built for CI and test environments where you can't use `docker compose` or `podm
 ## Requirements
 
 compose2pod's generated scripts own `/etc/hosts`: they write it to a temp
-file and bind-mount it read-only into every container under `--no-hosts`
-(see `architecture/supported-subset.md`), so pod-internal name resolution
-works on any Podman version. `host.containers.internal` /
+file and bind-mount it read-only into every container under `--no-hosts`, so
+pod-internal name resolution works on any Podman version. `host.containers.internal` /
 `host.docker.internal` are not provided — add an explicit `extra_hosts`
 entry if you need them.
 
@@ -83,8 +82,8 @@ Compose extension fields (any `x-`-prefixed key) and YAML anchors are accepted
 as-is, so a top-level `x-*` anchor block for shared config just works.
 `${VAR}`-style variable interpolation is left live in the generated script,
 resolved by its shell against the environment present when the script runs (no
-`.env` file support). See `architecture/supported-subset.md` for the full
-accept/ignore/reject matrix and `planning/decisions/` for the boundary rulings.
+`.env` file support). The boundary rulings — which forms are refused, and why —
+are recorded in [`docs/adr/`](docs/adr/).
 
 ## Status
 

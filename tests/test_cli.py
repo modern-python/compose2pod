@@ -358,7 +358,7 @@ class TestYaml12Floats:
     not cosmetic: `cpuset: 1e3` is a *string* to compose2pod today, so it
     slides past the "cpuset must be a string" rule Docker enforces on the
     float 1000.0 -- a false green, the one thing the rejection-parity gate
-    exists to prevent (`planning/decisions/2026-07-14-docker-rejection-parity.md`).
+    exists to prevent (`docs/adr/0009-docker-rejection-parity.md`).
     """
 
     def test_bare_exponent_loads_as_float(self) -> None:

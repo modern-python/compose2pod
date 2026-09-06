@@ -1,6 +1,6 @@
 """Conformance harness: compose2pod must refuse every document `docker compose config` refuses.
 
-The rule is one-way (planning/decisions/2026-07-14-docker-rejection-parity.md):
+The rule is one-way (docs/adr/0009-docker-rejection-parity.md):
 Docker rejecting a document binds; Docker accepting one does not oblige us to,
 because compose2pod converts an honest subset.
 
@@ -29,7 +29,7 @@ _CONFORMANCE_DIR = Path(__file__).parent
 
 # Every `over-reject` verdict this run, as `<test-id>` labels -- the test id already
 # carries the probed key and shape (matrix) or the corpus filename (corpus), so no
-# extra bookkeeping is needed to make an entry diffable against planning/deferred.md.
+# extra bookkeeping is needed to make an entry diffable against the tracked-limitation issues.
 # Stashed on `Config` (pytest's documented cross-hook slot) rather than a plain module
 # global so it is unambiguously one collector per pytest run, not one per import.
 _OVER_REJECTIONS: pytest.StashKey[list[str]] = pytest.StashKey()
@@ -52,9 +52,8 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
     """Print every over-reject verdict collected this run.
 
     Over-rejections never fail the build (see `assert_rule`); this is the harness's
-    only way of keeping them visible, per the promise in `planning/deferred.md` --
-    "The conformance harness reports these as `over-reject`, so they stay visible
-    rather than forgotten." Silent when nothing was collected, which is the normal
+    only way of keeping them visible, which is what the tracked-limitation issues
+    promise. Silent when nothing was collected, which is the normal
     case for `just test-ci` (the conformance suite is deselected there and this hook
     never runs a probe, so the list stays empty).
     """
@@ -66,7 +65,7 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
         terminalreporter.write_line(label)
     terminalreporter.write_line(
         f"{len(over_rejections)} over-rejection(s) -- catalogued limitations, not failures; "
-        "cross-check against planning/deferred.md"
+        "cross-check against the open limitation issues"
     )
 
 
@@ -124,8 +123,8 @@ def assert_rule(tmp_path: Path, request: pytest.FixtureRequest) -> Callable[[dic
     """Assert the one-way rule for one document; return its verdict as a label.
 
     Returns 'both-accept', 'both-reject', or 'over-reject' (Docker accepts, we
-    refuse -- allowed, but only when catalogued as a known limitation in
-    planning/deferred.md; every 'over-reject' verdict is also recorded under the
+    refuse -- allowed, but only when catalogued as a known limitation in a
+    tracked issue; every 'over-reject' verdict is also recorded under the
     calling test's id for `pytest_terminal_summary` to print at the end of the run).
     Raises AssertionError on the one forbidden combination: Docker refuses and we
     accept.
