@@ -83,7 +83,7 @@ as-is, so a top-level `x-*` anchor block for shared config just works.
 `${VAR}`-style variable interpolation is left live in the generated script,
 resolved by its shell against the environment present when the script runs (no
 `.env` file support). The boundary rulings — which forms are refused, and why —
-are recorded in [`docs/adr/`](docs/adr/).
+are recorded in [`docs/adr/`](https://github.com/modern-python/compose2pod/tree/main/docs/adr/).
 
 ## Status
 
