@@ -91,3 +91,4 @@ report.exclude_also = ["if typing.TYPE_CHECKING:"]
 # can't measure; omit it rather than enable subprocess/branch coverage machinery.
 # tests/integration/* only runs in the dedicated podman CI job, never in the gated run.
 run.omit = ["compose2pod/__main__.py", "tests/integration/*", "tests/conformance/*"]
+report.fail_under = 100
