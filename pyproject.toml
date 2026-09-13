@@ -28,6 +28,7 @@ yaml = ["PyYAML>=6"]
 compose2pod = "compose2pod.cli:main"
 
 [project.urls]
+Homepage = "https://modern-python.org"
 Repository = "https://github.com/modern-python/compose2pod"
 Issues = "https://github.com/modern-python/compose2pod/issues"
 Changelog = "https://github.com/modern-python/compose2pod/releases"
