@@ -12,7 +12,7 @@ concept in code, a test name, or an issue title.
 ## Commands
 
 `just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth —
-`just --list`, or read it; every recipe carries its intent as a comment. The one thing it does not
+`just --list`, or read it. Every recipe carries its intent as a comment. The one thing it does not
 say: **never run bare `ruff check`** — `[tool.ruff]` sets `fix = true` and `unsafe-fixes = true`, so
 an unqualified invocation rewrites the tree.
 
@@ -35,18 +35,12 @@ for what it does; read them. What reading a single module will **not** tell you:
 
 ## Workflow
 
-Real work **not scheduled** becomes a GitHub issue.
-
 Every link in `README.md` must be absolute: `https://github.com/modern-python/<repo>/blob/main/<path>`,
 or `.../tree/main/<path>` for a directory. Never a relative path: `README.md` is also the PyPI long
 description, and PyPI does not rewrite relative links, so a relative one 404s on the package page.
-
-An invariant is a test whose name is the claim, with a docstring opening `INVARIANT:` and a second
-paragraph naming **what breaks it** — design rationale, not a report of what this one test catches.
 
 ## Code Style
 
 - The core package stays **zero-dependency**; PyYAML is the optional `[yaml]` extra and nothing else
   is added.
-- Suppress type errors with `ty: ignore`, never `type: ignore`.
 - Commit messages: conventional-commit subjects, no `Co-authored-by` trailer.
