@@ -26,8 +26,8 @@ A supported service key handled *outside* the service-key registry, listed in
 `project_dir` (`env_file`, `volumes`), spans keys, or occupies the image/command slot
 (`entrypoint`). Structural keys keep their own validate/emit machinery, in the module
 that owns the concern. Which side of this line a key falls on is a design ruling, not
-a convenience: see [ADR-0008](docs/adr/0008-reject-structural-key-registry.md) and
-[ADR-0013](docs/adr/0013-volumes-stays-hand-rolled.md).
+a convenience: see
+[ADR-0005](docs/adr/0005-structural-keys-and-schema-validators-stay-in-their-owning-modules.md).
 
 **Token**:
 The result of rendering one Compose value into a `podman run`/`pod create` argument:
@@ -53,7 +53,7 @@ document-wide.
 
 **Rule one / rule two**:
 The two directions of the Docker-rejection parity rule
-([ADR-0009](docs/adr/0009-docker-rejection-parity.md)). "Rule two" is named bare
+([ADR-0006](docs/adr/0006-docker-rejection-parity.md)). "Rule two" is named bare
 in `parsing.py` comments and in tests, with no restatement at the call site.
 **Rule one**: a document `docker compose config` rejects, compose2pod
 rejects too — hard, no exceptions. **Rule two**: a document Docker accepts,

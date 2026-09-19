@@ -155,7 +155,7 @@ def test_every_value_grammar_in_values_py_ends_at_the_true_end_of_string() -> No
     grammar silently accepts a value carrying one -- reachable from any YAML
     block scalar (`mem_limit: |` resolves to `"512m\n"`) -- and
     `docker compose config` refuses that value. Accepting it is a false green
-    against the hard rule in `docs/adr/0009-docker-rejection-parity.md`, and it
+    against the hard rule in `docs/adr/0006-docker-rejection-parity.md`, and it
     is invisible from the call site: every hand-written probe passes a
     newline-free value, which is exactly how the gap survived until it was
     measured. Asserting the anchor over the whole module, rather than per
