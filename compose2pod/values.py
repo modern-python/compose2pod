@@ -1,7 +1,7 @@
 """Value grammars: the shapes `docker compose config` accepts for a scalar key.
 
 compose2pod refuses every document Docker refuses
-(`docs/adr/0009-docker-rejection-parity.md`), which means
+(`docs/adr/0006-docker-rejection-parity.md`), which means
 matching Docker's *value* grammars, not just its types: `mem_limit: ""` and
 `cpus: somevalue` are documents Docker will not run.
 

@@ -1,6 +1,6 @@
 """Conformance harness: compose2pod must refuse every document `docker compose config` refuses.
 
-The rule is one-way (docs/adr/0009-docker-rejection-parity.md):
+The rule is one-way (docs/adr/0006-docker-rejection-parity.md):
 Docker rejecting a document binds; Docker accepting one does not oblige us to,
 because compose2pod converts an honest subset.
 
