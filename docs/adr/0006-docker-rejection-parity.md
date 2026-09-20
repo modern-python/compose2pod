@@ -38,9 +38,14 @@ its clause from there, and `tests/test_podman_claim_coverage.py` pairs each site
 with the row that measures it, in both directions. The handle is the attribute name, not the
 wording, because prose is not a registry -- a message is assembled from an f-string, a shared
 preamble or a lookup table depending on the site. A refusal that makes no claim is out of scope by
-construction, which is how `network_mode` needs no row; a refusal whose reason is podman's but whose
-message keeps that to itself is invisible to the gate, and that list is
-[#121](https://github.com/modern-python/compose2pod/issues/121).
+construction, which is how `network_mode` needs no row. A refusal whose reason is podman's but
+whose message keeps that to itself would be invisible to that gate, so the table closes it from
+the other side: every `REFUSALS` row names a claim, because the table's premise is that podman
+will not make the mount. That is what emptied
+[#121](https://github.com/modern-python/compose2pod/issues/121)'s list, which is also why a
+long-form `type: cluster` no longer refuses with the same message as a misspelled one -- docker
+takes cluster and npipe, so refusing them is rule two and says so, while `bnid` is rule one and
+podman has nothing to do with it.
 Verdicts are per version, and the supported range is stated rather than implied: the rulings here
 are measured against `docker compose config` v5.1.2 and podman 4.9.3, and compose2pod supports
 podman 4.9 and up. Rule two reads across that whole range. A form is accepted only where podman

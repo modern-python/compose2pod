@@ -64,13 +64,30 @@ def test_every_claim_compose2pod_makes_about_podman_is_measured_by_a_row() -> No
     Out of scope by construction: a refusal that makes no claim here. `network_mode` is
     refused under docs/adr/0003-the-shared-namespace-decides-key-classification.md and podman
     honours it, so it has no claim and needs no row. A refusal whose reason *is* podman's but
-    whose message keeps that to itself is invisible to this gate, which is issue #121.
+    whose message keeps that to itself would be invisible to this gate, which is what the
+    invariant below covers from the other side.
     """
     unmeasured = sorted(claim_sites(_PACKAGE) - _measured_pairs())
 
     assert unmeasured == [], "\n".join(
         f"{site} claims podman.{claim} and no row measures it" for site, claim in unmeasured
     )
+
+
+def test_every_refusal_podman_agrees_with_tells_the_user_podmans_reason() -> None:
+    """INVARIANT: a rule-two refusal states the reason that makes it legitimate, not just the rule.
+
+    A `REFUSALS` row exists because podman will not make the mount, so the refusal's reason is
+    podman's. A row with no claim therefore marks a message that states a rule while keeping
+    its reason in the source, which is what issue #121 found in four of them, and which the
+    gate above cannot see because there is no claim for it to scan.
+
+    `LIMITATIONS` is where a refusal with no podman reason belongs: the drive-qualified bind
+    is the short form's own limit, and its message says so.
+    """
+    silent = sorted(row.id for row in REFUSALS if not row.claim)
+
+    assert silent == [], "\n".join(f"{row} refuses for podman's reason without telling the user" for row in silent)
 
 
 def test_every_row_naming_a_claim_names_one_the_source_still_makes() -> None:

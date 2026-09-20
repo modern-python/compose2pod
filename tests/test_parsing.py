@@ -121,7 +121,7 @@ class TestValidate:
         # Each case drives one distinct reject branch (all six needed for 100% coverage).
         cases = [
             ([5], r"volume entry must be a string or mapping"),
-            ([{"type": "cluster", "source": "x", "target": "/d"}], r"volume 'type' must be one of"),
+            ([{"type": "bnid", "source": "x", "target": "/d"}], r"volume 'type' must be one of"),
             ([{"type": "volume", "target": 5}], r"volume 'target' must be a string"),
             ([{"type": "bind", "target": "/d"}], r"bind volume 'source' must be a string"),
             ([{"type": "tmpfs", "source": "x", "target": "/t"}], r"tmpfs volume takes no 'source'"),
@@ -150,6 +150,27 @@ class TestValidate:
         ):
             with pytest.raises(UnsupportedComposeError, match=r"volume 'target' must be an absolute path"):
                 validate({"services": {"app": {"image": "x", "volumes": [entry]}}})
+
+    def test_a_volume_type_docker_takes_and_podman_cannot_is_refused_with_podmans_reason(self) -> None:
+        # docker compose config v5.1.2 accepts cluster and npipe, so refusing them is rule two.
+        for vtype in ("cluster", "npipe"):
+            entry = {"type": vtype, "source": "x", "target": "/d"}
+            with pytest.raises(
+                UnsupportedComposeError,
+                match=rf"volume 'type: {vtype}' is not supported \(podman cannot express it\)",
+            ):
+                validate({"services": {"app": {"image": "x", "volumes": [entry]}}})
+
+    def test_a_volume_type_docker_rejects_too_is_refused_without_a_podman_reason(self) -> None:
+        # docker compose config v5.1.2 rejects a typo as well, so podman has nothing to do with it.
+        with pytest.raises(UnsupportedComposeError, match=r"volume 'type' must be one of") as refusal:
+            validate({"services": {"app": {"image": "x", "volumes": [{"type": "bnid", "target": "/d"}]}}})
+
+        assert "podman" not in str(refusal.value)
+
+    def test_a_relative_long_form_target_is_refused_with_podmans_reason(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"podman refuses a container path that is not absolute"):
+            validate({"services": {"app": {"image": "x", "volumes": [{"type": "volume", "target": "rel"}]}}})
 
     def test_long_volume_variable_target_accepted(self) -> None:
         # A ${VAR}-carrying target is host-dependent -- accepted, matching
@@ -266,6 +287,10 @@ class TestValidate:
 
     def test_relative_anonymous_volume_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="absolute"):
+            validate({"services": {"app": {"image": "x", "volumes": ["./cache"]}}})
+
+    def test_a_relative_anonymous_volume_is_refused_with_podmans_reason(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"podman refuses a container path that is not absolute"):
             validate({"services": {"app": {"image": "x", "volumes": ["./cache"]}}})
 
     def test_string_volumes_rejected_at_gate(self) -> None:

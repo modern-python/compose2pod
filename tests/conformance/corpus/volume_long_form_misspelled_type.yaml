@@ -1,0 +1,7 @@
+services:
+  app:
+    image: nginx
+    volumes:
+      - type: bnid
+        source: x
+        target: /d

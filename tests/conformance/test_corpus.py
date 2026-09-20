@@ -145,6 +145,33 @@ def test_volume_windows_drive_letter_bind_is_a_catalogued_over_rejection(
     assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
 
 
+def test_volume_long_form_cluster_type_is_a_catalogued_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """Docker accepts `type: cluster`; podman has no such mount, so we refuse it -- rule two.
+
+    Asserted rather than left to the generic corpus run for the usual reason: `over-reject`
+    is an allowed verdict, so the run stays green whichever way this file falls. What it
+    pins is the half of issue #121's split that only docker can answer -- the refusal cites
+    podman, and citing podman is only legitimate while docker itself takes the document.
+    """
+    path = Path(__file__).parent / "corpus" / "volume_long_form_cluster_type.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
+
+
+def test_volume_long_form_misspelled_type_is_rejected_by_both(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """The other half of the split: docker rejects a typo too, so podman is not the reason.
+
+    `volume 'type' must be one of [...]` fires for both this and `cluster`, and the two are
+    refused for opposite reasons. Pinning the verdict keeps the message that claims nothing
+    about podman attached to the case where podman has nothing to do with it.
+    """
+    path = Path(__file__).parent / "corpus" / "volume_long_form_misspelled_type.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-reject"
+
+
 def test_volume_single_letter_source_is_a_catalogued_over_rejection(
     assert_rule: Callable[[dict[str, Any]], str],
 ) -> None:

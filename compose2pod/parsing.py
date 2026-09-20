@@ -207,6 +207,7 @@ def _reject_drive_shaped_volume(name: str, volume: str) -> None:
 
 
 _VOLUME_LONG_TYPES = ("bind", "volume", "tmpfs", "image")
+_DOCKER_ONLY_VOLUME_TYPES = ("cluster", "npipe")
 _VOLUME_LONG_KEYS = {"type", "source", "target", "read_only", "consistency"}
 # Docker's own per-type nested option map keys (measured, docker compose config
 # v5.1.2). `create_host_path`/`nocopy` are real docker keys, so they land here
@@ -246,7 +247,10 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
             _reject_drive_shaped_volume(name, volume)
         kind, _ = _classify_volume(volume)
         if kind == "anonymous" and not volume.startswith("/"):
-            msg = f"service {name!r}: anonymous volume '{volume}' must be an absolute path"
+            msg = (
+                f"service {name!r}: anonymous volume '{volume}' must be an absolute path "
+                f"({podman.REFUSES_RELATIVE_CONTAINER_PATH})"
+            )
             raise UnsupportedComposeError(msg)
         # A named or bind entry needs no further shape check here -- both are
         # accepted; podman creates a named volume implicitly on first
@@ -260,8 +264,9 @@ def _validate_volume_long_form(name: str, entry: dict[str, Any]) -> None:
     type (bind/volume/tmpfs/image), source, target, read_only, consistency,
     plus the one nested option map matching `type` (a mismatched sub-map is
     refused -- a deliberate stricter-than-docker check; docker
-    accepts-and-ignores it). cluster/npipe types are refused (podman cannot
-    express them).
+    accepts-and-ignores it). cluster and npipe are split off first because
+    docker takes them and podman cannot express them, which is a different
+    refusal from a misspelling docker rejects too.
 
     `type` is validated before the unknown-key check (unlike every other field
     here) because the check itself needs `vtype` to know which sub-map key --
@@ -269,6 +274,9 @@ def _validate_volume_long_form(name: str, entry: dict[str, Any]) -> None:
     """
     keys = require_string_keys(f"service {name!r}: volume", entry)
     vtype = entry.get("type")
+    if vtype in _DOCKER_ONLY_VOLUME_TYPES:
+        msg = f"service {name!r}: volume 'type: {vtype}' is not supported ({podman.CANNOT_EXPRESS})"
+        raise UnsupportedComposeError(msg)
     if vtype not in _VOLUME_LONG_TYPES:
         msg = f"service {name!r}: volume 'type' must be one of {list(_VOLUME_LONG_TYPES)}"
         raise UnsupportedComposeError(msg)
@@ -281,11 +289,9 @@ def _validate_volume_long_form(name: str, entry: dict[str, Any]) -> None:
         msg = f"service {name!r}: volume 'target' must be a string"
         raise UnsupportedComposeError(msg)
     if not target.startswith("/") and not values.has_variable(target):
-        # podman rejects a relative --mount target for every type ("must be
-        # an absolute path"); docker accepts it. A ${VAR} target is
-        # host-dependent, so it is carved out like every other
-        # values.has_variable case in this file.
-        msg = f"service {name!r}: volume 'target' must be an absolute path"
+        # A ${VAR} target is host-dependent, so it is carved out like every
+        # other values.has_variable case in this file.
+        msg = f"service {name!r}: volume 'target' must be an absolute path ({podman.REFUSES_RELATIVE_CONTAINER_PATH})"
         raise UnsupportedComposeError(msg)
     _validate_volume_long_form_source(name, vtype, entry.get("source"))
     if "read_only" in entry and not values.is_bool_like(entry["read_only"]):
