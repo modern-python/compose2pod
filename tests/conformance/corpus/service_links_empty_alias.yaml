@@ -1,0 +1,10 @@
+# Measured ACCEPT by `docker compose config` v5.1.2: `links: ['db:']` keeps the entry
+# verbatim, blank alias and all. The edge stands; a name with no characters cannot be
+# written into the pod's hosts file, so it contributes none (issue 132).
+services:
+  db:
+    image: nginx
+  app:
+    image: nginx
+    links:
+      - "db:"

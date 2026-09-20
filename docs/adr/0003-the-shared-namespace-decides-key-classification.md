@@ -10,11 +10,15 @@ supported way to name one. This clause once also swept up `links` and `expose`, 
 the same sentence and belong in neither category
 ([#120](https://github.com/modern-python/compose2pod/issues/120), measured against
 `docker compose config` v5.1.2). `links` normalises to a `depends_on` edge plus a hostname alias
--- docker refuses `links: [ghost]` exactly as it refuses a ghost `depends_on` -- so it neither
-escapes the namespace nor is satisfied by it, and ignoring it would drop a dependency the
-`--target` closure is built from. It is refused as a tracked limitation under
-[ADR-0006](0006-docker-rejection-parity.md), and both halves are mechanisms compose2pod already
-has, so this one is expected to shrink. `expose` carries no edge, is never published, and is
+-- docker refuses `links: [ghost]` exactly as it refuses a ghost `depends_on`, and a self-link as
+a cycle -- so it neither escapes the namespace nor is satisfied by it, and ignoring it would drop
+a dependency the `--target` closure is built from. Both halves were mechanisms compose2pod already
+had, which is why the tracked limitation was expected to shrink and did
+([#132](https://github.com/modern-python/compose2pod/issues/132)): the edge joins the mapping
+`graph.depends_on` returns, so one graph is closed over and validated whichever key declared it,
+and the alias joins `graph.hostnames`, landing in the pod's hosts file at `127.0.0.1` like every
+other name in it. An alias needs no address of its own for exactly the reason `external_links`
+cannot have one. `expose` carries no edge, is never published, and is
 validated by docker no further than its list shape (it keeps `expose: [banana]`), which makes it
 inert exactly as `ports` is: it sits in `IGNORED_SERVICE_KEYS` with a warning, not refused.
 Per-container namespace overrides (`ipc`, `uts`, `domainname`, `cgroup`, `userns_mode`) are

@@ -1,0 +1,9 @@
+# Docker rejects this as `undefined service "db:a:b"`: an entry splits into service and
+# alias on a single colon and not otherwise, so the whole string is the service name.
+services:
+  db:
+    image: nginx
+  app:
+    image: nginx
+    links:
+      - db:a:b

@@ -80,8 +80,8 @@ def _depends_on_entry_condition(dep: str, spec: dict[str, Any]) -> str:
     return condition
 
 
-def depends_on(svc: dict[str, Any]) -> dict[str, str]:
-    """Normalize dependencies of a service to a name -> condition mapping."""
+def _declared_depends_on(svc: dict[str, Any]) -> dict[str, str]:
+    """Normalize the `depends_on` key alone to a name -> condition mapping."""
     deps = svc.get("depends_on")
     if deps is None:
         # Explicitly absent, not merely falsy. `or {}` treated `depends_on: ""`
@@ -99,6 +99,54 @@ def depends_on(svc: dict[str, Any]) -> dict[str, str]:
         msg = "'depends_on' must be a list or mapping"
         raise UnsupportedComposeError(msg)
     return {dep: _depends_on_entry_condition(dep, spec) for dep, spec in deps.items()}
+
+
+def _link_entries(name: str, svc: dict[str, Any]) -> list[tuple[str, str]]:
+    """Split each `links` entry into the service it names and the alias it adds.
+
+    Measured against `docker compose config` v5.1.2. An entry splits into
+    `service:alias` on a single colon and not otherwise: `db:a:b` is refused as
+    `undefined service "db:a:b"`, so the whole entry is the name, and `:db` is
+    refused as `undefined service ""`, so the empty half is the name too. Both
+    verdicts fall out of returning the string unsplit or split as measured and
+    letting `validate_graph` refuse a name no service answers to.
+
+    The alias half is empty for the plain form (`links: [db]`, which carries the
+    dependency and no new name, `db` already resolving) and for the measured
+    `links: ['db:']`, which docker ACCEPTS with a blank alias -- a name with no
+    characters cannot be written into a hosts file, so it contributes none.
+    """
+    links = svc.get("links")
+    if links is None:
+        return []
+    if not isinstance(links, list):
+        msg = f"service {name!r}: 'links' must be a list"
+        raise UnsupportedComposeError(msg)
+    entries: list[tuple[str, str]] = []
+    for entry in links:
+        # A bool is an int and an int is not a string, so `isinstance(entry, str)`
+        # is the whole check -- docker refuses `links: [1]` and `links: [true]` alike.
+        if not isinstance(entry, str):
+            msg = f"service {name!r}: 'links' entry {entry!r} must be a string"
+            raise UnsupportedComposeError(msg)
+        service, _sep, alias = entry.partition(":") if entry.count(":") == 1 else (entry, "", "")
+        entries.append((service, alias))
+    return entries
+
+
+def depends_on(name: str, svc: dict[str, Any]) -> dict[str, str]:
+    """Dependencies of a service as a name -> condition mapping, from `depends_on` and `links`.
+
+    `docker compose config` v5.1.2 normalises `links: [db]` into a `depends_on`
+    entry on `db` with `condition: service_started`, so the two keys feed one
+    graph -- which is why a self-link and a `links` cycle are both refused as
+    cycles, exactly as docker refuses them. Where both keys name the same
+    service the declared entry keeps its own condition, which is what docker's
+    normalised output carries: `links: [db]` beside a `service_healthy`
+    `depends_on` leaves the condition `service_healthy`.
+    """
+    declared = _declared_depends_on(svc)
+    return {service: "service_started" for service, _alias in _link_entries(name, svc)} | declared
 
 
 # Docker validates container_name against this exact pattern (measured:
@@ -125,6 +173,19 @@ def _validated_name(name: str, key: str, svc: dict[str, Any]) -> str | None:
     return value
 
 
+def _link_aliases(name: str, svc: dict[str, Any]) -> list[str]:
+    """Names this service's `links` add, each belonging to the service it links to.
+
+    Kept out of `_host_names`, which answers a different question: the names one
+    service is reachable by, declared on that service. A `links` alias is declared
+    on the service doing the linking and names another one. It needs no address of
+    its own -- every name compose2pod writes into the pod's hosts file resolves to
+    127.0.0.1 -- only for the service it names to be running, which is what the
+    edge `depends_on` takes from the same entry guarantees.
+    """
+    return [alias for _service, alias in _link_entries(name, svc) if alias]
+
+
 def _host_names(name: str, svc: dict[str, Any]) -> list[str]:
     """Names one service is reachable by: hostname, container_name, and network aliases."""
     result: list[str] = [value for key in ("hostname", "container_name") if (value := _validated_name(name, key, svc))]
@@ -147,10 +208,18 @@ def _host_names(name: str, svc: dict[str, Any]) -> list[str]:
 
 
 def hostnames(services: dict[str, Any]) -> list[str]:
-    """All names other services may use to reach a service: names, hostnames/container names, then aliases."""
+    """All names other services may use to reach a service: names, hostnames/container names, then aliases.
+
+    `links` aliases are collected here too, and so are scoped to whichever
+    services are passed in: at emit time that is the closure, so an alias
+    declared by a service that never runs never reaches the pod's hosts file.
+    A closure service's own alias always names a closure service, because the
+    same entry put it there.
+    """
     names = list(services)
     for name, svc in services.items():
         names.extend(_host_names(name, svc))
+        names.extend(_link_aliases(name, svc))
     return names
 
 
@@ -181,7 +250,7 @@ def _walk(services: dict[str, Any], roots: list[str]) -> list[str]:
             msg = f"service {declared_by!r}: unknown dependency {name!r}"
             raise UnsupportedComposeError(msg)
         state[name] = "visiting"
-        for dep in depends_on(services[name]):
+        for dep in depends_on(name, services[name]):
             visit(dep, name)
         state[name] = "done"
         order.append(name)

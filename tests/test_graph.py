@@ -7,10 +7,10 @@ from compose2pod.parsing import validate
 
 class TestDependsOn:
     def test_list_form_normalizes_to_service_started(self) -> None:
-        assert depends_on({"depends_on": ["db"]}) == {"db": "service_started"}
+        assert depends_on("app", {"depends_on": ["db"]}) == {"db": "service_started"}
 
     def test_map_form_keeps_conditions(self) -> None:
-        assert depends_on({"depends_on": {"db": {"condition": "service_healthy"}}}) == {"db": "service_healthy"}
+        assert depends_on("app", {"depends_on": {"db": {"condition": "service_healthy"}}}) == {"db": "service_healthy"}
 
     def test_long_form_missing_condition_raises(self) -> None:
         # Measured against `docker compose config` v5.1.2: a long-form entry
@@ -19,24 +19,24 @@ class TestDependsOn:
         # service_started -- Docker's own default, kept as-is. This default
         # was ours, not Docker's, and is the false green Task 13 closes.
         with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': missing required key 'condition'"):
-            depends_on({"depends_on": {"db": {}}})
+            depends_on("app", {"depends_on": {"db": {}}})
 
     def test_long_form_with_other_sub_keys_but_no_condition_still_raises(self) -> None:
         # A populated but condition-less entry is refused the same way --
         # `restart`/`required` are no substitute for the required key.
         with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': missing required key 'condition'"):
-            depends_on({"depends_on": {"db": {"restart": True}}})
+            depends_on("app", {"depends_on": {"db": {"restart": True}}})
 
     def test_missing_depends_on_is_empty(self) -> None:
-        assert depends_on({"image": "x"}) == {}
+        assert depends_on("app", {"image": "x"}) == {}
 
     def test_non_list_or_mapping_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="'depends_on' must be a list or mapping"):
-            depends_on({"depends_on": "db"})
+            depends_on("app", {"depends_on": "db"})
 
     def test_mapping_entry_not_a_mapping_raises(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="depends_on entry 'db' must be a mapping"):
-            depends_on({"depends_on": {"db": "service_healthy"}})
+            depends_on("app", {"depends_on": {"db": "service_healthy"}})
 
     def test_list_entry_not_a_string_raises(self) -> None:
         # Same YAML slip as `environment`/`command`: `- db: {condition: ...}`
@@ -44,10 +44,10 @@ class TestDependsOn:
         # (TypeError: unhashable type: 'dict') from dict.fromkeys inside
         # validate() itself, instead of a clean UnsupportedComposeError.
         with pytest.raises(UnsupportedComposeError, match=r"depends_on entry .* must be a string"):
-            depends_on({"depends_on": [{"db": {"condition": "service_healthy"}}]})
+            depends_on("app", {"depends_on": [{"db": {"condition": "service_healthy"}}]})
 
     def test_list_form_string_entries_still_accepted(self) -> None:
-        assert depends_on({"depends_on": ["db", "keydb"]}) == {
+        assert depends_on("app", {"depends_on": ["db", "keydb"]}) == {
             "db": "service_started",
             "keydb": "service_started",
         }
@@ -57,17 +57,17 @@ class TestDependsOn:
         # hashes `x` -- an unhashable condition (dict/list) used to crash
         # raw (TypeError: unhashable type) instead of failing clean.
         with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
-            depends_on({"depends_on": {"db": {"condition": {"a": 1}}}})
+            depends_on("app", {"depends_on": {"db": {"condition": {"a": 1}}}})
 
     def test_list_condition_also_raises_cleanly(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
-            depends_on({"depends_on": {"db": {"condition": ["x"]}}})
+            depends_on("app", {"depends_on": {"db": {"condition": ["x"]}}})
 
     def test_int_condition_raises_cleanly(self) -> None:
         # Hashable but still not a valid condition shape -- must not slip
         # past this check only to fail confusingly deeper in.
         with pytest.raises(UnsupportedComposeError, match=r"depends_on entry 'db': condition must be a string"):
-            depends_on({"depends_on": {"db": {"condition": 1}}})
+            depends_on("app", {"depends_on": {"db": {"condition": 1}}})
 
     def test_depends_on_rejects_a_bare_string(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="depends_on"):
@@ -77,10 +77,10 @@ class TestDependsOn:
         # Strict schema, measured against `docker compose config` v5.1.2:
         # "additional properties 'bogus' not allowed".
         with pytest.raises(UnsupportedComposeError, match="unsupported keys"):
-            depends_on({"depends_on": {"db": {"condition": "service_started", "bogus": 1}}})
+            depends_on("app", {"depends_on": {"db": {"condition": "service_started", "bogus": 1}}})
 
     def test_x_prefixed_extension_key_accepted(self) -> None:
-        assert depends_on({"depends_on": {"db": {"condition": "service_started", "x-custom": 1}}}) == {
+        assert depends_on("app", {"depends_on": {"db": {"condition": "service_started", "x-custom": 1}}}) == {
             "db": "service_started"
         }
 
@@ -90,20 +90,20 @@ class TestDependsOn:
         # refused). `condition` is present so this exercises the `restart`
         # check specifically, not the missing-condition one.
         with pytest.raises(UnsupportedComposeError, match=r"'restart' must be a boolean"):
-            depends_on({"depends_on": {"db": {"condition": "service_started", "restart": 5}}})
+            depends_on("app", {"depends_on": {"db": {"condition": "service_started", "restart": 5}}})
 
     def test_required_must_be_a_boolean(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'required' must be a boolean"):
-            depends_on({"depends_on": {"db": {"condition": "service_started", "required": "notabool"}}})
+            depends_on("app", {"depends_on": {"db": {"condition": "service_started", "required": "notabool"}}})
 
     def test_restart_and_required_true_and_false_accepted(self) -> None:
         assert depends_on(
-            {"depends_on": {"db": {"condition": "service_started", "restart": True, "required": False}}}
+            "app", {"depends_on": {"db": {"condition": "service_started", "restart": True, "required": False}}}
         ) == {"db": "service_started"}
 
     def test_restart_quoted_boolean_accepted(self) -> None:
         # Measured (docker compose config v5.1.2): a YAML-1.1 boolean string runs.
-        assert depends_on({"depends_on": {"db": {"condition": "service_started", "restart": "yes"}}}) == {
+        assert depends_on("app", {"depends_on": {"db": {"condition": "service_started", "restart": "yes"}}}) == {
             "db": "service_started"
         }
 
@@ -113,12 +113,12 @@ class TestDependsOn:
         # failed to cast to expected type"), so its verdict is a fact about
         # the reading shell's environment, not the document -- the same
         # carve-out as `_validate_build_bool`.
-        assert depends_on({"depends_on": {"db": {"condition": "service_started", "restart": "${MYVAR}"}}}) == {
+        assert depends_on("app", {"depends_on": {"db": {"condition": "service_started", "restart": "${MYVAR}"}}}) == {
             "db": "service_started"
         }
 
     def test_required_variable_reference_passes_through(self) -> None:
-        assert depends_on({"depends_on": {"db": {"condition": "service_started", "required": "${MYVAR}"}}}) == {
+        assert depends_on("app", {"depends_on": {"db": {"condition": "service_started", "required": "${MYVAR}"}}}) == {
             "db": "service_started"
         }
 
@@ -258,3 +258,90 @@ class TestValidateGraph:
             "b": {"image": "x", "depends_on": ["shared"]},
         }
         assert validate_graph(services) is None
+
+
+class TestLinks:
+    """A `depends_on` edge on the linked service, plus a hostname alias.
+
+    Which is what `docker compose config` v5.1.2 normalises the key into (issue 132).
+    """
+
+    def test_plain_form_creates_the_edge_and_no_alias(self) -> None:
+        assert depends_on("app", {"links": ["db"]}) == {"db": "service_started"}
+        assert hostnames({"db": {"image": "x"}, "app": {"image": "x", "links": ["db"]}}) == ["db", "app"]
+
+    def test_alias_form_creates_the_edge_and_the_alias(self) -> None:
+        assert depends_on("app", {"links": ["db:database"]}) == {"db": "service_started"}
+        services = {"db": {"image": "x"}, "app": {"image": "x", "links": ["db:database"]}}
+        assert hostnames(services) == ["db", "app", "database"]
+
+    def test_an_explicit_depends_on_entry_keeps_its_condition(self) -> None:
+        # Measured: with both keys present docker's normalised output carries
+        # `condition: service_healthy`, not the `service_started` links implies.
+        svc = {"links": ["db"], "depends_on": {"db": {"condition": "service_healthy"}}}
+        assert depends_on("app", svc) == {"db": "service_healthy"}
+
+    def test_a_second_link_to_the_same_service_adds_one_edge_and_both_aliases(self) -> None:
+        assert depends_on("app", {"links": ["db:a", "db:b"]}) == {"db": "service_started"}
+        services = {"db": {"image": "x"}, "app": {"image": "x", "links": ["db:a", "db:b"]}}
+        assert hostnames(services) == ["db", "app", "a", "b"]
+
+    def test_an_empty_alias_carries_the_edge_and_contributes_no_name(self) -> None:
+        # Measured: `links: ['db:']` is ACCEPTED by docker, alias and all. A blank
+        # name would render as a hosts-file line with an address and nothing else.
+        assert depends_on("app", {"links": ["db:"]}) == {"db": "service_started"}
+        assert hostnames({"db": {"image": "x"}, "app": {"image": "x", "links": ["db:"]}}) == ["db", "app"]
+
+    def test_more_than_one_colon_is_not_split(self) -> None:
+        # Measured: docker refuses `links: ['db:a:b']` as `undefined service "db:a:b"`,
+        # so the whole entry is the service name and the existence check refuses it.
+        assert depends_on("app", {"links": ["db:a:b"]}) == {"db:a:b": "service_started"}
+
+    def test_a_leading_colon_names_the_empty_service(self) -> None:
+        # Measured: docker refuses `links: [':db']` as `undefined service ""`.
+        assert depends_on("app", {"links": [":db"]}) == {"": "service_started"}
+
+    def test_duplicate_entries_collapse(self) -> None:
+        assert depends_on("app", {"links": ["db", "db"]}) == {"db": "service_started"}
+
+    def test_links_must_be_a_list(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app': 'links' must be a list"):
+            depends_on("app", {"links": "db"})
+
+    def test_links_entry_must_be_a_string(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app': 'links' entry 1 must be a string"):
+            depends_on("app", {"links": [1]})
+
+    def test_links_entry_must_not_be_a_bool(self) -> None:
+        # Measured: docker refuses `links: [true]` ("unexpected type bool"). A bool is
+        # an int in Python, so a numeric check alone would let this through.
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app': 'links' entry True must be a string"):
+            depends_on("app", {"links": [True]})
+
+    def test_an_alias_declared_by_a_service_outside_the_closure_is_not_collected(self) -> None:
+        # `hostnames` is called on the closure at emit time, so the alias of a
+        # service that never runs never reaches the pod's hosts file.
+        services = {"db": {"image": "x"}, "other": {"image": "x", "links": ["db:ghostalias"]}}
+        assert hostnames({"db": services["db"]}) == ["db"]
+
+
+class TestLinksInTheGraph:
+    def test_a_link_to_an_undefined_service_is_refused(self) -> None:
+        services = {"app": {"image": "x", "links": ["ghost"]}}
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app': unknown dependency 'ghost'"):
+            validate_graph(services)
+
+    def test_a_self_link_is_refused_as_a_cycle(self) -> None:
+        # Measured: docker refuses `links: [app]` on `app` with "dependency cycle
+        # detected: app -> app", the same verdict a self-referencing depends_on gets.
+        with pytest.raises(UnsupportedComposeError, match=r"dependency cycle involving 'app'"):
+            validate_graph({"app": {"image": "x", "links": ["app"]}})
+
+    def test_a_links_cycle_is_refused(self) -> None:
+        services = {"a": {"image": "x", "links": ["b"]}, "b": {"image": "x", "links": ["a"]}}
+        with pytest.raises(UnsupportedComposeError, match=r"dependency cycle involving 'a'"):
+            validate_graph(services)
+
+    def test_a_linked_service_joins_the_startup_closure(self) -> None:
+        services = {"db": {"image": "x"}, "app": {"image": "x", "links": ["db:database"]}}
+        assert startup_order(services, "app") == ["db", "app"]

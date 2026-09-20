@@ -1,0 +1,7 @@
+# Docker rejects this as "dependency cycle detected: app -> app". `links` feeds the same
+# dependency graph `depends_on` does, so a self-link is a self-edge.
+services:
+  app:
+    image: nginx
+    links:
+      - app

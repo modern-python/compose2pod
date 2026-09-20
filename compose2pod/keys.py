@@ -448,6 +448,7 @@ STRUCTURAL_KEYS: set[str] = {
     # "tmpfs" removed — now a SERVICE_KEYS registry key (_scalar_or_list("--tmpfs")).
     "healthcheck",
     "depends_on",
+    "links",
     "networks",
     "hostname",
     "container_name",

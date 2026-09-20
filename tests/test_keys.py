@@ -69,6 +69,7 @@ def test_supported_service_keys_snapshot() -> None:
         "tmpfs",
         "healthcheck",
         "depends_on",
+        "links",
         "networks",
         "hostname",
         "container_name",
