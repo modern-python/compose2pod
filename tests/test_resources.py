@@ -63,11 +63,11 @@ class TestValidateDeploy:
             validate_deploy("app", _svc({"resources": {"limits": {"gpus": 1}}}))
 
     def test_reservations_cpus_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match=r"reservations.cpus is not supported"):
+        with pytest.raises(UnsupportedComposeError, match=r"podman run has no reservation flag for it"):
             validate_deploy("app", _svc({"resources": {"reservations": {"cpus": "0.5"}}}))
 
     def test_reservations_devices_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match=r"reservations.devices is not supported"):
+        with pytest.raises(UnsupportedComposeError, match=r"--gpus accepts any value and reserves nothing"):
             validate_deploy("app", _svc({"resources": {"reservations": {"devices": []}}}))
 
     def test_limit_value_bool_rejected(self) -> None:

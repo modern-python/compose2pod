@@ -24,9 +24,13 @@ deferred to it. `tests/conformance/` runs both oracles for real over a probe mat
 from `SERVICE_KEYS | STRUCTURAL_KEYS | IGNORED_SERVICE_KEYS`, so a new key is probed the moment
 it is added, and `tests/integration/refusals.py` measures the other side, pairing each volume-family
 refusal above with the `--mount` that expresses what Docker says the document means, so a claim that
-podman cannot express something cannot go stale unnoticed either. It carries both verdicts:
-`REFUSALS` for the mounts podman will not make, `LIMITATIONS` for the ones it would, which is what
-keeps a limitation from quietly reading as rule two. A gate that every rule-two site has a row is
+podman cannot express something cannot go stale unnoticed either. It carries four verdicts, because
+four kinds of claim need four experiments: `REFUSALS` for the mounts podman will not make,
+`LIMITATIONS` for the ones it would (which is what keeps a limitation from quietly reading as rule
+two), and, where the claim is about podman's flag surface rather than a mount, `ABSENT_FLAGS` for a
+flag podman does not have and `STUB_FLAGS` for one it has that validates nothing -- a flag accepting
+`nonsense` is a worse reason to emit it than a flag that fails, since the script would report
+success for something it never did. A gate that every rule-two site has a row is
 [#109](https://github.com/modern-python/compose2pod/issues/109) phase 3, and it has to carry the
 exemptions first: not every refusal this document names turns out to be one podman makes.
 Verdicts are per version, and the supported range is stated rather than implied: the rulings here

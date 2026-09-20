@@ -18,10 +18,18 @@ produce: a short `-v` spec re-splits on colons and so can fail for its own gramm
 rather than for podman's inability to mount, which would make a row pass for the
 wrong reason and hide an emit bug behind a parity claim.
 
-Not every refusal site can have a row. `network_mode` is refused under ADR-0003, not
-rule two, and podman honours it (#115); `nocopy` and `deploy.resources.reservations.*`
-do not fit this shape at all (#116). The gate that every *rule-two* site has a row is
-issue #109 phase 3, and it has to know about those exemptions before it can be written.
+Two more tables hold the refusals whose claim is about podman's *flag surface* rather
+than about a mount, which `Refusal` cannot express: its argv asserts that a flag fails,
+and here the claim is that no flag exists to try, or that one exists and checks nothing.
+
+- `ABSENT_FLAGS` -- no such flag on `podman run`, checked by running it rather than by
+  reading `--help`, because `--gpus` proves a flag can exist while staying out of it.
+- `STUB_FLAGS` -- the flag exists and accepts deliberate nonsense, so emitting it would
+  exit 0 having done nothing, which is worse than refusing.
+
+Four claims, four experiments. `network_mode` alone has no row: it is refused under
+ADR-0003, not rule two, and podman honours it (#115). The gate that every rule-two site
+has a row is issue #109 phase 3, and that is the exemption it has to know about.
 
 A `subpath` row measures the floor, not podman as such: podman gained the option above
 the supported minimum (ADR-0006), so the row goes red on a runner newer than the floor,
@@ -53,14 +61,43 @@ class Limitation:
 
     `host_dir` is created under the test's `tmp_path` first, because a bind whose
     source does not exist fails for that reason instead of the one being measured.
-    `{host}` in `podman_argv` is substituted with its absolute path.
+    `{host}` in `podman_argv` is substituted with its absolute path. A row whose
+    counterfactual needs no host path leaves it empty.
     """
 
     id: str
     compose: dict[str, Any]
     refusal_match: str
-    host_dir: str
     podman_argv: list[str]
+    host_dir: str = ""
+
+
+@dataclass(frozen=True)
+class AbsentFlag:
+    """A refusal whose claim is that podman has no flag to emit for the key.
+
+    Each `unknown_argv` must be rejected by `podman run`. The row goes red the day
+    podman grows one, which is the only thing keeping "no equivalent" from going stale.
+    """
+
+    id: str
+    compose: dict[str, Any]
+    refusal_match: str
+    unknown_argv: list[list[str]]
+
+
+@dataclass(frozen=True)
+class StubFlag:
+    """A refusal whose claim is that podman's flag exists and validates nothing.
+
+    `nonsense_argv` is deliberate rubbish podman accepts anyway; the row goes red when
+    a podman starts rejecting it, which is when the refusal deserves re-examining.
+    """
+
+    id: str
+    compose: dict[str, Any]
+    refusal_match: str
+    nonsense_argv: list[str]
 
 
 def _one_volume(entry: "str | dict[str, Any]") -> dict[str, Any]:
@@ -156,7 +193,27 @@ REFUSALS: list[Refusal] = [
 ]
 
 
+def _reservation(field: str, value: object) -> dict[str, Any]:
+    return {"services": {"app": {"image": "busybox:1.36", "deploy": {"resources": {"reservations": {field: value}}}}}}
+
+
 LIMITATIONS: list[Limitation] = [
+    Limitation(
+        # Measured: `-v vol:/etc:nocopy` leaves only podman's own hosts/hostname/resolv.conf
+        # in the volume, so the image copy-up really is suppressed.
+        id="volume-nocopy",
+        compose={
+            "services": {
+                "app": {
+                    "image": "busybox:1.36",
+                    "volumes": [{"type": "volume", "source": "ncvol", "target": "/data", "volume": {"nocopy": True}}],
+                }
+            },
+            "volumes": {"ncvol": {}},
+        },
+        refusal_match="use the short syntax, which emits -v",
+        podman_argv=["-v", "c2p-nocopy-probe:/data:nocopy"],
+    ),
     Limitation(
         id="drive-qualified-bind",
         compose=_one_volume("C:\\data:/var"),
@@ -170,5 +227,25 @@ LIMITATIONS: list[Limitation] = [
         refusal_match=_SHORT_FORM_CANNOT_EMIT,
         host_dir="C:data",
         podman_argv=["--mount", "type=bind,src={host},dst=/var"],
+    ),
+]
+
+
+ABSENT_FLAGS: list[AbsentFlag] = [
+    AbsentFlag(
+        id="reservations-cpus",
+        compose=_reservation("cpus", "0.5"),
+        refusal_match="podman run has no reservation flag for it",
+        unknown_argv=[["--cpu-reservation", "1"], ["--cpus-reservation", "1"]],
+    ),
+]
+
+
+STUB_FLAGS: list[StubFlag] = [
+    StubFlag(
+        id="reservations-devices",
+        compose=_reservation("devices", [{"capabilities": ["gpu"]}]),
+        refusal_match="--gpus accepts any value and reserves nothing",
+        nonsense_argv=["--gpus", "nonsense"],
     ),
 ]

@@ -220,7 +220,7 @@ class TestValidate:
             ),
             (
                 {"type": "volume", "source": "v", "target": "/d", "volume": {"nocopy": True}},
-                r"'nocopy' is not supported",
+                r"use the short syntax, which emits -v",
                 {"v": {}},
             ),
             # per-option schema

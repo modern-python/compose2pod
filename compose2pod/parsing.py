@@ -332,13 +332,20 @@ def _reject_subpath(name: str, vtype: str, added_in: str) -> None:
 def _validate_volume_type_options(name: str, options: dict[str, Any]) -> None:
     """Check a long-form volume entry's `volume:` sub-map (measured, v5.1.2).
 
-    Both keys are real Docker keys that the runtime will not honour: podman's
-    `--mount` cannot express `nocopy` at any version, and `subpath` on a named
-    volume arrives in podman 5.4. Each is refused with a "not supported" message
-    rather than folded into the generic unknown-key check the caller already ran.
+    Both keys are real Docker keys this entry cannot carry: `--mount`, which a
+    long-form volume renders as, has no `nocopy` in its grammar, and `subpath` on
+    a named volume arrives in podman 5.4. Each is refused with a "not supported"
+    message rather than folded into the generic unknown-key check the caller ran.
+
+    `nocopy` is a limitation of the spelling, not of podman: `-v vol:/data:nocopy`
+    is honoured (measured, 4.9.3 -- it suppresses the copy-up), and compose2pod
+    emits exactly that for a short-syntax entry, so the message names the escape.
     """
     if "nocopy" in options:
-        msg = f"service {name!r}: volume 'nocopy' is not supported (podman cannot express it)"
+        msg = (
+            f"service {name!r}: volume 'nocopy' is not supported here: the long form mounts with "
+            "--mount, whose grammar has no nocopy (use the short syntax, which emits -v and podman honours)"
+        )
         raise UnsupportedComposeError(msg)
     if "subpath" in options:
         _reject_subpath(name, "volume", "5.4")
