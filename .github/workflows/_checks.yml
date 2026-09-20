@@ -68,8 +68,6 @@ jobs:
       - run: uv python pin 3.12
       - run: just install
       - run: podman --version
-      # THROWAWAY (#109 phase-2 measurement, not for merge).
-      - run: ./probe_bind_expressibility.sh
       - run: just test-integration
 
   conformance:
