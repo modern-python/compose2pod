@@ -28,6 +28,12 @@ and here the claim is that no flag exists to try, or that one exists and checks 
 - `STUB_FLAGS` -- the flag exists and accepts deliberate nonsense, so emitting it would
   exit 0 having done nothing, which is worse than refusing.
 
+A row measuring a refusal whose message draws a clause from `compose2pod/podman.py` names
+the `site` that makes the claim and the `claim` it makes, which is what
+`tests/test_podman_claim_coverage.py` gates on. A row whose refusal makes no such claim --
+a relative target, an unsupported long-form `type` -- leaves both empty: the reason is
+podman's, but the message keeps it to itself, which is issue #121's subject.
+
 Four claims, four experiments. `network_mode` alone has no row: it is refused under
 ADR-0003, not rule two, and podman honours it (#115). The gate that every rule-two site
 has a row is issue #109 phase 3, and that is the exemption it has to know about.
@@ -54,6 +60,8 @@ class Refusal:
     refusal_match: str
     podman_argv: list[str]
     control_argv: list[str]
+    site: str = ""
+    claim: str = ""
 
 
 @dataclass(frozen=True)
@@ -71,6 +79,8 @@ class Limitation:
     refusal_match: str
     podman_argv: list[str]
     host_dir: str = ""
+    site: str = ""
+    claim: str = ""
 
 
 @dataclass(frozen=True)
@@ -85,6 +95,8 @@ class AbsentFlag:
     compose: dict[str, Any]
     refusal_match: str
     unknown_argv: list[list[str]]
+    site: str = ""
+    claim: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,6 +111,8 @@ class StubFlag:
     compose: dict[str, Any]
     refusal_match: str
     nonsense_argv: list[str]
+    site: str = ""
+    claim: str = ""
 
 
 def _one_volume(entry: "str | dict[str, Any]") -> dict[str, Any]:
@@ -126,6 +140,8 @@ REFUSALS: list[Refusal] = [
     ),
     Refusal(
         id="drive-shaped-source-no-target",
+        site="parsing._reject_drive_shaped_volume",
+        claim="REFUSES_RELATIVE_CONTAINER_PATH",
         compose=_one_volume("C:\\data"),
         refusal_match=_NOT_ABSOLUTE,
         podman_argv=["--mount", "type=volume,dst=C:\\data"],
@@ -133,6 +149,8 @@ REFUSALS: list[Refusal] = [
     ),
     Refusal(
         id="single-letter-source-with-path",
+        site="parsing._reject_drive_shaped_volume",
+        claim="REFUSES_RELATIVE_CONTAINER_PATH",
         compose=_one_volume("v:/data"),
         refusal_match=_NOT_ABSOLUTE,
         podman_argv=["--mount", "type=volume,dst=v:/data"],
@@ -140,6 +158,8 @@ REFUSALS: list[Refusal] = [
     ),
     Refusal(
         id="single-letter-source-empty-target",
+        site="parsing._reject_drive_shaped_volume",
+        claim="REFUSES_RELATIVE_CONTAINER_PATH",
         compose=_one_volume("v:"),
         refusal_match=_NOT_ABSOLUTE,
         podman_argv=["--mount", "type=volume,dst=v:"],
@@ -169,6 +189,8 @@ REFUSALS: list[Refusal] = [
     Refusal(
         # Measured: podman creates a missing bind source in no spelling, `-v` or `--mount`.
         id="bind-create-host-path",
+        site="parsing._validate_bind_options",
+        claim="CANNOT_EXPRESS",
         compose=_one_volume({"type": "bind", "source": "./src", "target": "/var", "bind": {"create_host_path": True}}),
         refusal_match="bind 'create_host_path' is not supported",
         podman_argv=["--mount", "type=bind,src={host}/absent,dst=/var"],
@@ -177,6 +199,8 @@ REFUSALS: list[Refusal] = [
     Refusal(
         # `source=`/`target=` rather than the `src=`/`dst=` above: the spelling #114 measured.
         id="image-subpath",
+        site="parsing._reject_subpath",
+        claim="adds_the_mount_option_in",
         compose=_one_volume(
             {"type": "image", "source": "busybox:1.36", "target": "/mnt", "image": {"subpath": "/bin"}}
         ),
@@ -186,6 +210,8 @@ REFUSALS: list[Refusal] = [
     ),
     Refusal(
         id="volume-subpath",
+        site="parsing._reject_subpath",
+        claim="adds_the_mount_option_in",
         compose=_one_volume({"type": "volume", "target": "/mnt", "volume": {"subpath": "/sub"}}),
         refusal_match="volume 'subpath' is not supported",
         podman_argv=["--mount", "type=volume,target=/mnt,subpath=/sub"],
@@ -203,6 +229,8 @@ LIMITATIONS: list[Limitation] = [
         # Measured: `-v vol:/etc:nocopy` leaves only podman's own hosts/hostname/resolv.conf
         # in the volume, so the image copy-up really is suppressed.
         id="volume-nocopy",
+        site="parsing._validate_volume_type_options",
+        claim="NOCOPY_NEEDS_THE_SHORT_FORM",
         compose={
             "services": {
                 "app": {
@@ -235,6 +263,8 @@ LIMITATIONS: list[Limitation] = [
 ABSENT_FLAGS: list[AbsentFlag] = [
     AbsentFlag(
         id="reservations-cpus",
+        site="resources._RESERVATION_REFUSALS",
+        claim="NO_RESERVATION_FLAG",
         compose=_reservation("cpus", "0.5"),
         refusal_match="podman run has no reservation flag for it",
         unknown_argv=[["--cpu-reservation", "1"], ["--cpus-reservation", "1"]],
@@ -245,6 +275,8 @@ ABSENT_FLAGS: list[AbsentFlag] = [
 STUB_FLAGS: list[StubFlag] = [
     StubFlag(
         id="reservations-devices",
+        site="resources._RESERVATION_REFUSALS",
+        claim="GPUS_RESERVES_NOTHING",
         compose=_reservation("devices", [{"capabilities": ["gpu"]}]),
         refusal_match="--gpus accepts any value and reserves nothing",
         nonsense_argv=["--gpus", "nonsense"],

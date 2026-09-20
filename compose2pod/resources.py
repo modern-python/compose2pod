@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
-from compose2pod import values
+from compose2pod import podman, values
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.keys import Expand, Token, require_string_keys
 
@@ -53,8 +53,8 @@ def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # no
 # podman run has, and `--gpus` exists but is hidden and accepts `nonsense` as
 # readily as `all`, so emitting it would reserve nothing and say it had.
 _RESERVATION_REFUSALS = {
-    "cpus": "podman run has no reservation flag for it",
-    "devices": "podman run's --gpus accepts any value and reserves nothing",
+    "cpus": podman.NO_RESERVATION_FLAG,
+    "devices": podman.GPUS_RESERVES_NOTHING,
 }
 
 

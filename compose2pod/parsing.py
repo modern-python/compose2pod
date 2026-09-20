@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from compose2pod import stores, values
+from compose2pod import podman, stores, values
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames
 from compose2pod.healthcheck import has_healthcheck, health_cmd, interval_seconds
@@ -200,7 +200,7 @@ def _reject_drive_shaped_volume(name: str, volume: str) -> None:
         raise UnsupportedComposeError(msg)
     msg = (
         f"{preamble}an anonymous volume whose target is the whole string, and "
-        "podman refuses a container path that is not absolute "
+        f"{podman.REFUSES_RELATIVE_CONTAINER_PATH} "
         "(name a one-character volume through the long form instead)"
     )
     raise UnsupportedComposeError(msg)
@@ -219,10 +219,6 @@ _VOLUME_OPTION_KEYS = {
     "tmpfs": {"size", "mode"},
     "image": {"subpath"},
 }
-# compose2pod supports podman 4.9 and up (README, docs/adr/0006-docker-rejection-parity.md):
-# a form is accepted only when podman expresses it across that whole range, so a key
-# that arrives in a later podman is refused until the floor reaches it.
-_PODMAN_FLOOR = "4.9"
 _PROPAGATION_VALUES = {"private", "rprivate", "shared", "rshared", "slave", "rslave"}
 _SELINUX_VALUES = {"z", "Z"}
 
@@ -310,7 +306,7 @@ def _validate_bind_options(name: str, options: dict[str, Any]) -> None:
     folded into the generic unknown-key check the caller already ran.
     """
     if "create_host_path" in options:
-        msg = f"service {name!r}: bind 'create_host_path' is not supported (podman cannot express it)"
+        msg = f"service {name!r}: bind 'create_host_path' is not supported ({podman.CANNOT_EXPRESS})"
         raise UnsupportedComposeError(msg)
     if "propagation" in options and options["propagation"] not in _PROPAGATION_VALUES:
         msg = f"service {name!r}: bind 'propagation' must be one of {sorted(_PROPAGATION_VALUES)}"
@@ -322,10 +318,7 @@ def _validate_bind_options(name: str, options: dict[str, Any]) -> None:
 
 def _reject_subpath(name: str, vtype: str, added_in: str) -> None:
     """Refuse a nested `subpath`: podman gained the mount option after the supported floor."""
-    msg = (
-        f"service {name!r}: {vtype} 'subpath' is not supported "
-        f"(podman {added_in} adds the mount option, and compose2pod supports podman {_PODMAN_FLOOR} and up)"
-    )
+    msg = f"service {name!r}: {vtype} 'subpath' is not supported ({podman.adds_the_mount_option_in(added_in)})"
     raise UnsupportedComposeError(msg)
 
 
@@ -344,7 +337,7 @@ def _validate_volume_type_options(name: str, options: dict[str, Any]) -> None:
     if "nocopy" in options:
         msg = (
             f"service {name!r}: volume 'nocopy' is not supported here: the long form mounts with "
-            "--mount, whose grammar has no nocopy (use the short syntax, which emits -v and podman honours)"
+            f"--mount, whose grammar has no nocopy ({podman.NOCOPY_NEEDS_THE_SHORT_FORM})"
         )
         raise UnsupportedComposeError(msg)
     if "subpath" in options:

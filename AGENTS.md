@@ -28,6 +28,10 @@ for what it does; read them. What reading a single module will **not** tell you:
 - The `SERVICE_KEYS` / `STRUCTURAL_KEYS` split in `keys.py` is a design ruling about which keys can
   share one `emit(value)` interface, not a leftover. A new key belongs in the registry only if
   it fits that signature without widening it.
+- `compose2pod/podman.py` is not a pipeline stage: it holds every claim the tool makes about
+  podman's behaviour, so a refusal citing podman can be enumerated rather than grepped for.
+  `tests/test_podman_claim_coverage.py` requires each claim to be measured against real podman.
+  A new refusal whose reason is podman's belongs there, or the gate goes red.
 - `tests/conformance/` generates its probe matrix from
   `SERVICE_KEYS | STRUCTURAL_KEYS | IGNORED_SERVICE_KEYS`, so adding a key probes it against
   `docker compose config` automatically. It is CI-only (`just test-conformance`,
