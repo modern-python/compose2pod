@@ -130,6 +130,34 @@ def test_volumes_long_form_image_type_is_no_longer_an_over_rejection(
     assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
 
 
+def test_service_links_is_a_catalogued_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """Docker accepts `links: [db:database]`; compose2pod does not read the key yet.
+
+    Asserted rather than left to the generic corpus run because `over-reject` is an allowed
+    verdict either way. What it pins is the measurement that reclassified this key in issue
+    120: docker normalises it to a `depends_on` edge plus an alias, so ignoring it with a
+    warning would drop a dependency the closure is built from. The day compose2pod reads
+    both halves, this flips to `both-accept` and the assertion says so.
+    """
+    path = Path(__file__).parent / "corpus" / "service_links_alias.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
+
+
+def test_service_external_links_is_a_catalogued_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """Docker accepts `external_links`; the pod's hosts file has no address to give it.
+
+    Same reason for asserting it as the row above. Unlike `links` this one is not expected
+    to flip: a container the script never creates is outside the pod model, and `extra_hosts`
+    is the supported way to name one.
+    """
+    path = Path(__file__).parent / "corpus" / "service_external_links.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
+
+
 def test_volume_windows_drive_letter_bind_is_a_catalogued_over_rejection(
     assert_rule: Callable[[dict[str, Any]], str],
 ) -> None:
