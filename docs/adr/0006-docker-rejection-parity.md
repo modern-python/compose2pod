@@ -15,8 +15,9 @@ a *bind* is refused for the short form's own limit, not for podman's, and says s
 rule does not reach is one this rule must not claim: `network_mode` is refused because honouring it
 pulls a container out of the pod's shared namespace
 ([ADR-0003](0003-the-shared-namespace-decides-key-classification.md)), which podman expresses
-perfectly well even inside a pod (measured, 4.9.3)
-([#115](https://github.com/modern-python/compose2pod/issues/115)).
+perfectly well even inside a pod (measured, 4.9.3). It carries a refusal site of its own that says
+so, rather than the generic unsupported-key message, so the distinction reaches the user who hits
+it and not only the reader of this file.
 Docker's verdict binds only on the document, not the host: `env_file` existence, `${VAR:?}`, and a
 negative on a top-level numeric key are facts about the machine that runs the script and are
 deferred to it. `tests/conformance/` runs both oracles for real over a probe matrix generated

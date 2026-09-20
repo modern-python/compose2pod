@@ -62,8 +62,15 @@ class TestValidate:
             validate({"services": {"app": {"image": "x", "cpus": [1]}}})
 
     def test_unsupported_service_key_raises(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="network_mode"):
-            validate({"services": {"app": {"image": "x", "network_mode": "host"}}})
+        with pytest.raises(UnsupportedComposeError, match="cgroup_parent"):
+            validate({"services": {"app": {"image": "x", "cgroup_parent": "/x"}}})
+
+    def test_network_mode_is_refused_for_leaving_the_pod_rather_than_as_an_unknown_key(self) -> None:
+        # podman honours --network inside a pod (measured, 4.9.3), so this is ADR-0003's
+        # refusal, not rule two's: the generic "unsupported key" message named neither.
+        for mode in ("host", "none", "container:other", "bridge"):
+            with pytest.raises(UnsupportedComposeError, match=r"out of the pod's shared network namespace"):
+                validate({"services": {"app": {"image": "x", "network_mode": mode}}})
 
     def test_unsupported_healthcheck_key_raises(self) -> None:
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "start_interval": "1s"}}}}
