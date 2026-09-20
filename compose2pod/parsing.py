@@ -161,13 +161,40 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
 # even when that letter is declared top-level, a declaration Docker ignores.
 # Two letters (`CC:\data:/var`) is an ordinary named-volume reference instead.
 #
-# podman refuses every mount either reading makes (measured, podman 4.9.3): a
-# colon inside a source has nowhere to go in a `-v` spec, which splits into at
-# most source:target:options (`invalid option type "/var"`), and a container
-# path that is not absolute is refused outright (`invalid container path`).
-# So the whole family is a rule-two refusal, and a one-character volume name
-# is reachable only through the long form, where Docker honours `source: v`.
+# A second colon flips Docker's reading (measured, v5.1.2): `C:\data:/var` and
+# `v:/data:ro` are binds whose source keeps the drive colon, while `C:\data`,
+# `v:/data` and `v:` are anonymous volumes whose target is the whole string.
+# Two letters (`CC:\data:/var`) is an ordinary named-volume reference instead.
+#
+# The two readings fail for different reasons, so they carry different messages
+# (docs/adr/0006-docker-rejection-parity.md). podman 4.9.3 refuses the
+# anonymous reading outright -- a container path that is not absolute is an
+# `invalid container path`, and no spelling names one. The bind reading it does
+# mount, via `--mount type=bind`; only the short `-v` spec cannot spell it,
+# since that splits into at most source:target:options. Both escape through the
+# long form, which emits `--mount` and where Docker honours `source: v`.
 _DRIVE_SHAPED_SOURCE = re.compile(r"^[a-zA-Z]:")
+_DRIVE_SHAPED_BIND_COLONS = 2
+
+
+def _reject_drive_shaped_volume(name: str, volume: str) -> None:
+    """Refuse a short-syntax entry whose leading single letter Docker reads as a drive marker."""
+    preamble = (
+        f"service {name!r}: volume {volume!r}: a leading single letter is a Windows drive marker "
+        "to Docker, not a volume name, so this entry is "
+    )
+    if volume.count(":") >= _DRIVE_SHAPED_BIND_COLONS:
+        msg = (
+            f"{preamble}a bind whose source keeps the colon, which the short form cannot emit "
+            "(use the long form, which mounts it with --mount)"
+        )
+        raise UnsupportedComposeError(msg)
+    msg = (
+        f"{preamble}an anonymous volume whose target is the whole string, and "
+        "podman refuses a container path that is not absolute "
+        "(name a one-character volume through the long form instead)"
+    )
+    raise UnsupportedComposeError(msg)
 
 
 _VOLUME_LONG_TYPES = ("bind", "volume", "tmpfs", "image")
@@ -207,12 +234,7 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
             # Refused before classification, so a single leading letter is
             # never read as a one-character volume name the way Docker never
             # reads it either.
-            msg = (
-                f"service {name!r}: volume {volume!r}: a leading single letter is a Windows drive path "
-                "to Docker, not a volume name, and podman cannot express the mount it makes "
-                "(name a one-character volume through the long form instead)"
-            )
-            raise UnsupportedComposeError(msg)
+            _reject_drive_shaped_volume(name, volume)
         kind, _ = _classify_volume(volume)
         if kind == "anonymous" and not volume.startswith("/"):
             msg = f"service {name!r}: anonymous volume '{volume}' must be an absolute path"

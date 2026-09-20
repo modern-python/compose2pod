@@ -1739,32 +1739,36 @@ def test_tilde_bind_mount_needs_no_declaration() -> None:
     validate(_doc(volumes=["~/data:/var"]))
 
 
-@pytest.mark.parametrize(
-    "entry",
-    [
-        "C:\\data:/var",
-        "C:/data:/var",
-        "c:\\data:/var",
-        "C:\\data:/var:ro",
-        "C:\\data",
-        "C:data:/var",
-        "v:/data",
-        "a:/var",
-        "v:",
-    ],
-)
-def test_single_letter_volume_source_is_refused_with_the_podman_reason(entry: str) -> None:
+@pytest.mark.parametrize("entry", ["C:\\data", "v:/data", "a:/var", "v:"])
+def test_a_drive_shaped_entry_docker_reads_as_an_anonymous_volume_is_refused_for_its_target(entry: str) -> None:
     # Measured against `docker compose config` v5.1.2: a leading single letter
     # is a Windows drive marker whatever the letter is, so none of these names
-    # a volume. Docker reads a source keeping the drive colon
-    # (`C:\data:/var`, `v:/data:ro`), or an anonymous volume whose target is
-    # the whole string (`C:\data`, `v:/data`, `a:/var`, `v:`) -- even when the
-    # letter is declared top-level, which Docker ignores. podman 4.9.3 refuses
-    # every mount either reading makes: a colon inside a source has nowhere to
-    # go in a `-v` spec (`invalid option type "/var"`), and a container path
-    # that is not absolute is refused outright (`invalid container path`).
-    with pytest.raises(UnsupportedComposeError, match="Windows drive path"):
+    # a volume -- even when the letter is declared top-level, a declaration
+    # Docker ignores. With one colon it is an anonymous volume whose target is
+    # the whole string, which podman refuses outright (`invalid container
+    # path`, measured 4.9.3).
+    with pytest.raises(UnsupportedComposeError, match="podman refuses a container path that is not absolute"):
         validate(_doc(volumes=[entry]))
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["C:\\data:/var", "C:/data:/var", "c:\\data:/var", "C:\\data:/var:ro", "C:data:/var", "v:/data:ro"],
+)
+def test_a_drive_shaped_entry_docker_reads_as_a_bind_is_refused_for_the_short_form_spelling(entry: str) -> None:
+    # A second colon flips Docker's reading to a bind whose source keeps the
+    # drive colon (measured, v5.1.2). podman does mount that source -- 4.9.3
+    # takes `--mount type=bind,src=C:\data,dst=/var` -- so the refusal is the
+    # short form's own limit, not rule two, and the message must say so.
+    with pytest.raises(UnsupportedComposeError, match="which the short form cannot emit"):
+        validate(_doc(volumes=[entry]))
+
+
+def test_a_bind_source_keeping_a_colon_can_still_be_mounted_through_the_long_form() -> None:
+    # The escape hatch the short-form refusal points at: the long form emits
+    # `--mount`, whose source is a single field, so the colon has somewhere to
+    # go. podman 4.9.3 mounts it (exit 0, measured in the integration job).
+    validate(_doc(volumes=[{"type": "bind", "source": "C:\\data", "target": "/var"}]))
 
 
 def test_a_one_character_volume_can_still_be_named_in_the_long_form() -> None:

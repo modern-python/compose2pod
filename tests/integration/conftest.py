@@ -23,6 +23,26 @@ _PODMAN = shutil.which("podman")
 _SH = shutil.which("sh")
 _INTEGRATION_DIR = Path(__file__).parent
 
+# Every rule-two refusal probed this run, as `<row id>: exit=<code> <podman's message>`.
+# Stashed on `Config` (pytest's documented cross-hook slot) rather than a module global
+# so it is unambiguously one collector per pytest run, not one per import -- the same
+# reason tests/conformance/conftest.py stashes its over-rejection list.
+_PODMAN_VERDICTS: pytest.StashKey[list[str]] = pytest.StashKey()
+
+# A container that starts and exits immediately, so a probe's verdict is its mount's,
+# not its workload's.
+_PROBE_IMAGE = "busybox:1.36"
+
+
+def _podman_version() -> str:
+    if _PODMAN is None:
+        return "podman not installed"
+
+    proc = subprocess.run(  # noqa: S603 - _PODMAN is an absolute path from shutil.which
+        [_PODMAN, "--version"], capture_output=True, text=True, check=False
+    )
+    return proc.stdout.strip() or "podman version unknown"
+
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: "list[pytest.Item]") -> None:
@@ -30,6 +50,28 @@ def pytest_collection_modifyitems(items: "list[pytest.Item]") -> None:
     for item in items:
         if _INTEGRATION_DIR in item.path.parents:
             item.add_marker(pytest.mark.integration)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Create this run's podman-verdict collector before any probe executes."""
+    config.stash[_PODMAN_VERDICTS] = []
+
+
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    """Print what podman actually said about every rule-two refusal probed this run.
+
+    The probes assert the exit code only: pinning podman's wording would make the
+    suite churn on a rewording of someone else's error string. Printing it is how
+    a drift in *why* podman refuses stays visible without CI going red on
+    cosmetics. Silent when nothing was collected, which is the normal case for
+    `just test-ci` (integration is deselected there, so no probe ever runs).
+    """
+    verdicts = terminalreporter.config.stash.get(_PODMAN_VERDICTS, [])
+    if not verdicts:
+        return
+    terminalreporter.section(f"rule two: podman's verdicts ({_podman_version()})")
+    for label in verdicts:
+        terminalreporter.write_line(label)
 
 
 @dataclass(frozen=True)
@@ -94,3 +136,26 @@ def run_pod(tmp_path: Path) -> Iterator[Callable[..., PodRun]]:
     for pod in created:
         assert _PODMAN is not None  # narrows for the type checker; _require_podman already skipped otherwise
         subprocess.run([_PODMAN, "pod", "rm", "-f", pod], capture_output=True, check=False)  # noqa: S603
+
+
+@pytest.fixture
+def probe_podman(request: pytest.FixtureRequest) -> Callable[[str, list[str]], int]:
+    """Run `podman run --rm <argv> busybox true`; return its exit code, record its message.
+
+    The message goes to `pytest_terminal_summary`, never to an assertion.
+    """
+
+    def _probe(label: str, argv: list[str]) -> int:
+        assert _PODMAN is not None  # narrows for the type checker; _require_podman already skipped otherwise
+        proc = subprocess.run(  # noqa: S603 - _PODMAN is an absolute path from shutil.which
+            [_PODMAN, "run", "--rm", *argv, _PROBE_IMAGE, "true"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+        )
+        message = " ".join((proc.stderr or proc.stdout).split())
+        request.config.stash[_PODMAN_VERDICTS].append(f"{label}: exit={proc.returncode} {message}"[:300])
+        return proc.returncode
+
+    return _probe
