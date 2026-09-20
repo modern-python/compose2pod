@@ -52,10 +52,15 @@ named volume) ([#114](https://github.com/modern-python/compose2pod/issues/114)),
 `mode` is refused at the other end of the range, where podman 6.0.1's `crun` will not mount it.
 The `integration` job pins `ubuntu-24.04` for the same reason: it is the runner that ships the
 floor, and on a newer one the job would measure a podman no user of the floor has.
-Two residuals are open by design: `depends_on` errors among services outside the
-target's closure are accepted here and rejected by Docker
-([#87](https://github.com/modern-python/compose2pod/issues/87)), and the drive-qualified *bind*
-(`C:\data:/var`) is a limitation rather than rule two, since podman mounts that source through
-`--mount` and only the short `-v` spec cannot spell it -- the long form already emits `--mount`, so
-the capability is reachable today and only the short spelling is missing
+Two residuals are open by design. `depends_on` errors among services outside the target's closure
+are accepted here and rejected by Docker
+([#87](https://github.com/modern-python/compose2pod/issues/87)): the one place the hard rule is
+knowingly broken, so it is executed rather than described. `tests/conformance/corpus_residual/`
+holds both documents, the summary prints them, and the test fails when a residual *closes*, since a
+catalogue nobody re-runs goes stale in the direction that looks green. `assert_rule` still raises
+for every document outside that directory, so the rule stays hard everywhere it is not deliberately
+suspended. The other residual is the drive-qualified *bind* (`C:\data:/var`), a limitation rather
+than rule two, since podman mounts that source through `--mount` and only the short `-v` spec
+cannot spell it -- the long form already emits `--mount`, so the capability is reachable today and
+only the short spelling is missing
 ([#111](https://github.com/modern-python/compose2pod/issues/111)).

@@ -34,6 +34,12 @@ _CONFORMANCE_DIR = Path(__file__).parent
 # global so it is unambiguously one collector per pytest run, not one per import.
 _OVER_REJECTIONS: pytest.StashKey[list[str]] = pytest.StashKey()
 
+# Every catalogued rule-one residual confirmed this run, as `<corpus-stem>` labels.
+# Kept apart from the over-rejections: an over-rejection is allowed by the rule, while
+# a residual is the rule being broken on purpose (issue 87), and reading them in one
+# list would blur the two directions the whole harness exists to keep apart.
+_RESIDUALS: pytest.StashKey[list[str]] = pytest.StashKey()
+
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: "list[pytest.Item]") -> None:
@@ -46,10 +52,11 @@ def pytest_collection_modifyitems(items: "list[pytest.Item]") -> None:
 def pytest_configure(config: pytest.Config) -> None:
     """Create this run's over-rejection collector before any conformance test executes."""
     config.stash[_OVER_REJECTIONS] = []
+    config.stash[_RESIDUALS] = []
 
 
 def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
-    """Print every over-reject verdict collected this run.
+    """Print every over-reject verdict and every confirmed residual collected this run.
 
     Over-rejections never fail the build (see `assert_rule`); this is the harness's
     only way of keeping them visible, which is what the tracked-limitation issues
@@ -57,6 +64,15 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
     case for `just test-ci` (the conformance suite is deselected there and this hook
     never runs a probe, so the list stays empty).
     """
+    residuals = terminalreporter.config.stash.get(_RESIDUALS, [])
+    if residuals:
+        terminalreporter.section("conformance: rule-one residuals (docker rejects, compose2pod accepts)")
+        for label in residuals:
+            terminalreporter.write_line(label)
+        terminalreporter.write_line(
+            f"{len(residuals)} residual(s) -- the hard rule, knowingly broken; "
+            "https://github.com/modern-python/compose2pod/issues/87"
+        )
     over_rejections = terminalreporter.config.stash.get(_OVER_REJECTIONS, [])
     if not over_rejections:
         return
@@ -143,5 +159,26 @@ def assert_rule(tmp_path: Path, request: pytest.FixtureRequest) -> Callable[[dic
             return "both-reject"
         request.config.stash[_OVER_REJECTIONS].append(request.node.nodeid)
         return "over-reject"
+
+    return _assert
+
+
+@pytest.fixture
+def assert_residual(tmp_path: Path, request: pytest.FixtureRequest) -> Callable[[dict[str, Any]], None]:
+    """Assert one document still breaks rule one, and record it for the run's summary.
+
+    The inverse of `assert_rule`, which raises on this combination: here it is the
+    expected result, and either half changing is what fails. A residual that closed
+    leaves a file claiming a breach that no longer exists, which is worse than no
+    catalogue at all.
+    """
+
+    def _assert(compose: dict[str, Any]) -> None:
+        text = yaml.safe_dump(compose, sort_keys=False)
+        assert not _docker_accepts(text, tmp_path), "docker now accepts this document, so it documents no residual"
+        assert _compose2pod_accepts(text, tmp_path), (
+            "compose2pod now rejects this document -- the residual is closed, delete the file"
+        )
+        request.config.stash[_RESIDUALS].append(request.node.nodeid)
 
     return _assert
