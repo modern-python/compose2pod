@@ -34,6 +34,30 @@ jobs:
             'https://github\.com/${{ github.repository }}/(?:blob|tree)/main/(.*) file://${{ github.workspace }}/$1'
             '**/*.md'
 
+  floors:
+    # The declared dependency floors, installed. Every other job resolves highest, so the
+    # bottom of the range is otherwise never exercised and can rot unnoticed -- a PyYAML
+    # floor that could not build on 3.14 shipped for exactly that reason (issue 126).
+    # Binary-only, because the pitch is minimal images: a floor reachable only by
+    # compiling an sdist is not a floor a user of one can install.
+    # 3.14t is out: no PyYAML release ships a cp314t wheel, so that job would measure
+    # upstream's gap rather than this repo's floor.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+      - run: uv python install ${{ matrix.python-version }}
+      - run: uv venv --python ${{ matrix.python-version }}
+      - run: uv pip install --resolution lowest-direct --only-binary PyYAML ".[yaml]"
+      - run: uv run --no-project python -c "import compose2pod, yaml; print(yaml.__version__)"
+
   pytest:
     runs-on: ubuntu-latest
     strategy:
