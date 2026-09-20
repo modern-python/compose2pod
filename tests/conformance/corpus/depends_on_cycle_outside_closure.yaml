@@ -1,0 +1,14 @@
+# Docker rejects the document ("dependency cycle detected") and so does compose2pod,
+# though `app` is the target and its closure never reaches `a` or `b`: the graph is
+# validated document-wide, independently of --target (issue 87).
+services:
+  app:
+    image: nginx
+  a:
+    image: nginx
+    depends_on:
+      - b
+  b:
+    image: nginx
+    depends_on:
+      - a

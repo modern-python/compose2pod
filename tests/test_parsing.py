@@ -433,11 +433,30 @@ class TestValidate:
         }
         assert validate(compose) == []
 
-    def test_service_healthy_dependency_on_unknown_service_is_out_of_scope(self) -> None:
-        assert (
+    def test_service_healthy_dependency_on_unknown_service_raises(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app': unknown dependency 'ghost'"):
             validate({"services": {"app": {"image": "x", "depends_on": {"ghost": {"condition": "service_healthy"}}}}})
-            == []
-        )
+
+    def test_unknown_dependency_outside_the_target_closure_raises_at_gate(self) -> None:
+        compose = {
+            "services": {
+                "app": {"image": "x"},
+                "other": {"image": "x", "depends_on": ["ghost"]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"service 'other': unknown dependency 'ghost'"):
+            validate(compose)
+
+    def test_dependency_cycle_outside_the_target_closure_raises_at_gate(self) -> None:
+        compose = {
+            "services": {
+                "app": {"image": "x"},
+                "a": {"image": "x", "depends_on": ["b"]},
+                "b": {"image": "x", "depends_on": ["a"]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"dependency cycle involving 'a'"):
+            validate(compose)
 
     def test_unknown_depends_on_condition_raises(self) -> None:
         compose = {

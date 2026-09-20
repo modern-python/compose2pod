@@ -1,0 +1,10 @@
+# Docker rejects the document ("depends on undefined service") and so does compose2pod,
+# though `app` is the target and its closure never reaches `other`: the graph is
+# validated document-wide, independently of --target (issue 87).
+services:
+  app:
+    image: nginx
+  other:
+    image: nginx
+    depends_on:
+      - ghost

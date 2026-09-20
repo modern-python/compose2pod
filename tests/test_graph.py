@@ -1,7 +1,7 @@
 import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.graph import depends_on, hostnames, startup_order
+from compose2pod.graph import depends_on, hostnames, startup_order, validate_graph
 from compose2pod.parsing import validate
 
 
@@ -228,3 +228,33 @@ class TestStartupOrder:
         assert order.index("c") < order.index("a")
         assert order.index("c") < order.index("b")
         assert order[-1] == "target"
+
+
+class TestValidateGraph:
+    def test_well_formed_document_passes(self, chats_compose: dict) -> None:
+        assert validate_graph(chats_compose["services"]) is None
+
+    def test_unknown_dependency_outside_any_closure_raises(self) -> None:
+        services = {
+            "app": {"image": "x"},
+            "other": {"image": "x", "depends_on": ["ghost"]},
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"service 'other': unknown dependency 'ghost'"):
+            validate_graph(services)
+
+    def test_cycle_outside_any_closure_raises(self) -> None:
+        services = {
+            "app": {"image": "x"},
+            "a": {"image": "x", "depends_on": ["b"]},
+            "b": {"image": "x", "depends_on": ["a"]},
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"dependency cycle involving 'a'"):
+            validate_graph(services)
+
+    def test_a_service_reached_from_two_roots_is_walked_once(self) -> None:
+        services = {
+            "shared": {"image": "x"},
+            "a": {"image": "x", "depends_on": ["shared"]},
+            "b": {"image": "x", "depends_on": ["shared"]},
+        }
+        assert validate_graph(services) is None

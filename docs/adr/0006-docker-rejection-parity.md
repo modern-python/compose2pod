@@ -57,15 +57,19 @@ named volume) ([#114](https://github.com/modern-python/compose2pod/issues/114)),
 `mode` is refused at the other end of the range, where podman 6.0.1's `crun` will not mount it.
 The `integration` job pins `ubuntu-24.04` for the same reason: it is the runner that ships the
 floor, and on a newer one the job would measure a podman no user of the floor has.
-Two residuals are open by design. `depends_on` errors among services outside the target's closure
-are accepted here and rejected by Docker
-([#87](https://github.com/modern-python/compose2pod/issues/87)): the one place the hard rule is
-knowingly broken, so it is executed rather than described. `tests/conformance/corpus_residual/`
-holds both documents, the summary prints them, and the test fails when a residual *closes*, since a
-catalogue nobody re-runs goes stale in the direction that looks green. `assert_rule` still raises
-for every document outside that directory, so the rule stays hard everywhere it is not deliberately
-suspended. The other residual is the drive-qualified *bind* (`C:\data:/var`), a limitation rather
-than rule two, since podman mounts that source through `--mount` and only the short `-v` spec
+The hard rule has no exceptions left. It had two, and both were the same one: a `depends_on`
+naming an undefined service, and a dependency cycle, among services outside the target's closure
+were rejected by Docker and accepted here
+([#87](https://github.com/modern-python/compose2pod/issues/87)), because both checks lived in the
+closure walk `--target` drives and a service nothing targets is never walked. `graph.validate_graph`
+walks from every service instead, so the verdict on the *document* no longer depends on which
+service the caller asked to run -- which is Docker's own behaviour, and the only reading the hard
+rule allows. The price is the reason the issue stayed open rather than something the fix hides: one
+service's typo now refuses the file for every target in it. Both documents moved out of a residual
+catalogue and into `tests/conformance/corpus/`, where `assert_rule` -- which raises on exactly that
+combination -- is what holds them closed, so the rule is hard everywhere with nothing suspended.
+What remains open is a limitation rather than a residual: the drive-qualified *bind*
+(`C:\data:/var`), since podman mounts that source through `--mount` and only the short `-v` spec
 cannot spell it -- the long form already emits `--mount`, so the capability is reachable today and
 only the short spelling is missing
 ([#111](https://github.com/modern-python/compose2pod/issues/111)).
