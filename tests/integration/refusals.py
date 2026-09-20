@@ -18,8 +18,12 @@ produce: a short `-v` spec re-splits on colons and so can fail for its own gramm
 rather than for podman's inability to mount, which would make a row pass for the
 wrong reason and hide an emit bug behind a parity claim.
 
-Only the volume family is covered so far; the rest of the refusals ADR-0006 names
-are issue #109 phase 2, and the gate that every refusal site has a row is phase 3.
+Not every refusal site can have a row. `network_mode` is refused under ADR-0003, not
+rule two, and podman honours it (#115); an image `subpath` cannot be probed until a
+minimum podman version is named, because the control fails too (#114); and `nocopy`
+and `deploy.resources.reservations.*` do not fit this shape at all (#116). The gate
+that every *rule-two* site has a row is issue #109 phase 3, and it has to know about
+those three exemptions before it can be written.
 """
 
 from dataclasses import dataclass
@@ -28,7 +32,11 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Refusal:
-    """A refusal podman agrees with: it will not make the mount the document asks for."""
+    """A refusal podman agrees with: it will not make the mount the document asks for.
+
+    `{host}` in either argv is substituted with the test's `tmp_path`, for a row whose
+    counterfactual turns on a host path rather than on the spec's grammar.
+    """
 
     id: str
     compose: dict[str, Any]
@@ -53,7 +61,7 @@ class Limitation:
     podman_argv: list[str]
 
 
-def _one_volume(entry: str) -> dict[str, Any]:
+def _one_volume(entry: "str | dict[str, Any]") -> dict[str, Any]:
     return {"services": {"app": {"image": "busybox:1.36", "volumes": [entry]}}}
 
 
@@ -65,6 +73,7 @@ _ANONYMOUS_CONTROL = ["--mount", "type=volume,dst=/data"]
 
 _NOT_ABSOLUTE = "podman refuses a container path that is not absolute"
 _SHORT_FORM_CANNOT_EMIT = "which the short form cannot emit"
+_UNSUPPORTED_LONG_TYPE = "volume 'type' must be one of"
 
 
 REFUSALS: list[Refusal] = [
@@ -95,6 +104,35 @@ REFUSALS: list[Refusal] = [
         refusal_match=_NOT_ABSOLUTE,
         podman_argv=["--mount", "type=volume,dst=v:"],
         control_argv=_ANONYMOUS_CONTROL,
+    ),
+    Refusal(
+        id="long-form-relative-target",
+        compose=_one_volume({"type": "volume", "target": "rel"}),
+        refusal_match="volume 'target' must be an absolute path",
+        podman_argv=["--mount", "type=volume,dst=rel"],
+        control_argv=_ANONYMOUS_CONTROL,
+    ),
+    Refusal(
+        id="long-form-type-cluster",
+        compose=_one_volume({"type": "cluster", "target": "/data"}),
+        refusal_match=_UNSUPPORTED_LONG_TYPE,
+        podman_argv=["--mount", "type=cluster,dst=/data"],
+        control_argv=_ANONYMOUS_CONTROL,
+    ),
+    Refusal(
+        id="long-form-type-npipe",
+        compose=_one_volume({"type": "npipe", "target": "/data"}),
+        refusal_match=_UNSUPPORTED_LONG_TYPE,
+        podman_argv=["--mount", "type=npipe,dst=/data"],
+        control_argv=_ANONYMOUS_CONTROL,
+    ),
+    Refusal(
+        # Measured: podman creates a missing bind source in no spelling, `-v` or `--mount`.
+        id="bind-create-host-path",
+        compose=_one_volume({"type": "bind", "source": "./src", "target": "/var", "bind": {"create_host_path": True}}),
+        refusal_match="bind 'create_host_path' is not supported",
+        podman_argv=["--mount", "type=bind,src={host}/absent,dst=/var"],
+        control_argv=["--mount", "type=bind,src={host},dst=/var"],
     ),
 ]
 
