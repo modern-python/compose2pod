@@ -30,14 +30,17 @@ _INTEGRATION_DIR = Path(__file__).parent
 _PODMAN_VERDICTS: pytest.StashKey[list[str]] = pytest.StashKey()
 
 # A container that starts and exits immediately, so a probe's verdict is its mount's,
-# not its workload's. Shared with the scenario tests, which pull the same tag.
+# not its workload's.
 _PROBE_IMAGE = "busybox:1.36"
 
 
 def _podman_version() -> str:
     if _PODMAN is None:
         return "podman not installed"
-    proc = subprocess.run([_PODMAN, "--version"], capture_output=True, text=True, check=False)  # noqa: S603
+
+    proc = subprocess.run(  # noqa: S603 - _PODMAN is an absolute path from shutil.which
+        [_PODMAN, "--version"], capture_output=True, text=True, check=False
+    )
     return proc.stdout.strip() or "podman version unknown"
 
 

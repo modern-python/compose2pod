@@ -161,12 +161,14 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
 # even when that letter is declared top-level, a declaration Docker ignores.
 # Two letters (`CC:\data:/var`) is an ordinary named-volume reference instead.
 #
-# podman refuses every mount either reading makes (measured, podman 4.9.3): a
-# colon inside a source has nowhere to go in a `-v` spec, which splits into at
-# most source:target:options (`invalid option type "/var"`), and a container
-# path that is not absolute is refused outright (`invalid container path`).
-# So the whole family is a rule-two refusal, and a one-character volume name
-# is reachable only through the long form, where Docker honours `source: v`.
+# podman refuses the anonymous readings outright (measured, podman 4.9.3): a
+# container path that is not absolute is an `invalid container path`, and no
+# spelling names one. The bind readings it does mount, through `--mount
+# type=bind`; only the short `-v` spec emitted here cannot, since that splits
+# into at most source:target:options (`invalid option type "/var"`). So the
+# bind half is a limitation rather than rule two, tracked in
+# docs/adr/0006-docker-rejection-parity.md. Either way, a one-character volume
+# name is reachable through the long form, where Docker honours `source: v`.
 _DRIVE_SHAPED_SOURCE = re.compile(r"^[a-zA-Z]:")
 
 

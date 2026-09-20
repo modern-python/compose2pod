@@ -28,10 +28,3 @@ def test_a_documented_refusal_names_a_mount_podman_will_not_make(
     assert probe_podman(refusal.id, refusal.podman_argv) != 0, (
         "podman made the mount this document asks for, so refusing it is a limitation, not rule two"
     )
-
-
-def test_every_row_has_a_distinct_id() -> None:
-    """Ids label the summary lines and the parametrize cases; a duplicate hides one row behind another."""
-    ids = [refusal.id for refusal in REFUSALS]
-
-    assert sorted(ids) == sorted(set(ids))

@@ -14,9 +14,11 @@ Docker's verdict binds only on the document, not the host: `env_file` existence,
 negative on a top-level numeric key are facts about the machine that runs the script and are
 deferred to it. `tests/conformance/` runs both oracles for real over a probe matrix generated
 from `SERVICE_KEYS | STRUCTURAL_KEYS | IGNORED_SERVICE_KEYS`, so a new key is probed the moment
-it is added, and `tests/integration/refusals.py` measures the other side, pairing each refusal above
-with the `--mount` that expresses what Docker says the document means -- so a claim that podman
-cannot express something cannot go stale unnoticed either. Verdicts are per version: the rulings
+it is added, and `tests/integration/refusals.py` measures the other side, pairing the volume-family
+refusals above with the `--mount` that expresses what Docker says the document means, so a claim
+that podman cannot express something cannot go stale unnoticed either. The rest of the refusals get
+rows, and a gate that every site has one, under
+[#109](https://github.com/modern-python/compose2pod/issues/109). Verdicts are per version: the rulings
 here are measured against `docker compose config` v5.1.2 and podman 4.9.3. Two residuals are open by
 design: `depends_on` errors among services outside the target's closure are accepted here and
 rejected by Docker ([#87](https://github.com/modern-python/compose2pod/issues/87)), and the

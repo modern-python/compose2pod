@@ -12,6 +12,11 @@ that maps onto it one-to-one. It is deliberately not whatever `emit._volume_flag
 would produce: a short `-v` spec re-splits on colons and so can fail for its own
 grammar rather than for podman's inability to mount, which would make a row pass
 for the wrong reason and hide an emit bug behind a parity claim.
+
+Not every refusal has a row yet. The drive-qualified *bind* readings
+(`C:\data:/var`, `C:data:/var`) are refused by the same site as the rows below
+but belong to no row, because podman does mount them through `--mount`
+(issue #111); the refusals outside the volume family are issue #109 phase 2.
 """
 
 from dataclasses import dataclass
