@@ -30,9 +30,11 @@ and here the claim is that no flag exists to try, or that one exists and checks 
 
 A row measuring a refusal whose message draws a clause from `compose2pod/podman.py` names
 the `site` that makes the claim and the `claim` it makes, which is what
-`tests/test_podman_claim_coverage.py` gates on. A row whose refusal makes no such claim --
-a relative target, an unsupported long-form `type` -- leaves both empty: the reason is
-podman's, but the message keeps it to itself, which is issue #121's subject.
+`tests/test_podman_claim_coverage.py` gates on. Every `REFUSALS` row names one, because the
+table's own premise is that podman will not make the mount: a row that named none would mark
+a message stating a rule while keeping podman's reason to itself, which is what #121 found
+in four of them. Only a `LIMITATIONS` row leaves both empty, and only where the limit really
+is the short form's rather than podman's.
 
 Four claims, four experiments. `network_mode` alone has no row: it is refused under
 ADR-0003, not rule two, and podman honours it (#115). The gate that every rule-two site
@@ -127,12 +129,13 @@ _ANONYMOUS_CONTROL = ["--mount", "type=volume,dst=/data"]
 
 _NOT_ABSOLUTE = "podman refuses a container path that is not absolute"
 _SHORT_FORM_CANNOT_EMIT = "which the short form cannot emit"
-_UNSUPPORTED_LONG_TYPE = "volume 'type' must be one of"
 
 
 REFUSALS: list[Refusal] = [
     Refusal(
         id="anonymous-volume-relative-target",
+        site="parsing._validate_service_volumes",
+        claim="REFUSES_RELATIVE_CONTAINER_PATH",
         compose=_one_volume("a"),
         refusal_match="anonymous volume 'a' must be an absolute path",
         podman_argv=["--mount", "type=volume,dst=a"],
@@ -167,6 +170,8 @@ REFUSALS: list[Refusal] = [
     ),
     Refusal(
         id="long-form-relative-target",
+        site="parsing._validate_volume_long_form",
+        claim="REFUSES_RELATIVE_CONTAINER_PATH",
         compose=_one_volume({"type": "volume", "target": "rel"}),
         refusal_match="volume 'target' must be an absolute path",
         podman_argv=["--mount", "type=volume,dst=rel"],
@@ -174,15 +179,19 @@ REFUSALS: list[Refusal] = [
     ),
     Refusal(
         id="long-form-type-cluster",
+        site="parsing._validate_volume_long_form",
+        claim="CANNOT_EXPRESS",
         compose=_one_volume({"type": "cluster", "target": "/data"}),
-        refusal_match=_UNSUPPORTED_LONG_TYPE,
+        refusal_match="volume 'type: cluster' is not supported",
         podman_argv=["--mount", "type=cluster,dst=/data"],
         control_argv=_ANONYMOUS_CONTROL,
     ),
     Refusal(
         id="long-form-type-npipe",
+        site="parsing._validate_volume_long_form",
+        claim="CANNOT_EXPRESS",
         compose=_one_volume({"type": "npipe", "target": "/data"}),
-        refusal_match=_UNSUPPORTED_LONG_TYPE,
+        refusal_match="volume 'type: npipe' is not supported",
         podman_argv=["--mount", "type=npipe,dst=/data"],
         control_argv=_ANONYMOUS_CONTROL,
     ),
