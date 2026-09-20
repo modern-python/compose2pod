@@ -48,8 +48,10 @@ The target service and everything reachable from it through `depends_on`
 closure joins the pod, so only the closure is emitted, only its hostnames are
 resolvable, and pod-level options (`dns`, `sysctls`, `extra_hosts`) are unioned and
 conflict-checked across it and nothing else. A service outside the closure never runs,
-which is why `profiles` is inert and why validation is closure-scoped rather than
-document-wide.
+which is why `profiles` is inert. Validation is not scoped to it, though: the dependency
+graph is checked document-wide (`graph.validate_graph`), because whether Docker rejects a
+document cannot depend on which service the caller happened to target
+([#87](https://github.com/modern-python/compose2pod/issues/87)).
 
 **Rule one / rule two**:
 The two directions of the Docker-rejection parity rule
