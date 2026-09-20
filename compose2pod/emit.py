@@ -11,7 +11,7 @@ from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.graph import depends_on, hostnames, startup_order
 from compose2pod.healthcheck import health_cmd, interval_seconds
 from compose2pod.keys import SERVICE_KEYS, Expand, GuardedEnvFile, Token
-from compose2pod.parsing import validate
+from compose2pod.parsing import split_volume, validate
 from compose2pod.pod import hosts_file_tokens, pod_create_flags
 from compose2pod.resources import deploy_resource_flags
 from compose2pod.shell import to_shell, variable_names
@@ -137,7 +137,7 @@ def _volume_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
             # Anonymous volume: a bare container path, no host source to translate.
             flags += ["-v", Expand(value=volume)]
             continue
-        source, destination = volume.split(":", 1)
+        source, destination = split_volume(volume)
         if source.startswith("."):
             # Relative bind mount: resolve against project_dir.
             source = str(Path(project_dir, source))

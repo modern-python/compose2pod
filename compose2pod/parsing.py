@@ -1,5 +1,6 @@
 """Validate a compose document against the supported subset."""
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -138,25 +139,46 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
     (tilde in particular) into "named" -- an over-rejection once paired with
     the reference check below, since neither needs a top-level declaration.
 
-    A genuine Windows drive-letter source (`C:\\data:/var`) is NOT fixed by
-    this pattern swap: `source, _, _ = volume.partition(":")` splits on the
-    FIRST colon regardless, so for that entry `source` is just `"C"` -- a
-    single letter, which is itself a syntactically valid NAME_PATTERN match --
-    not the full `"C:\\data"` a naive reading of "doesn't match the pattern"
-    might suggest. Docker's own parser special-cases a leading `<letter>:\\`
-    to keep the drive letter attached to the source before ever comparing it
-    to a name grammar; this module (and `emit.py`'s `_volume_flags`, which
-    shares the same first-colon split for the same reason) does not. Measured,
-    still REJECTs post-fix -- a pre-existing, uncatalogued residual from when
-    this check was introduced (`_named_volume_source`'s Task 14 predecessor),
-    not something this change introduces or was scoped to close.
+    A Windows drive-letter source (`C:\data:/var`) reaches that name grammar
+    as the full `"C:\data"`, never the bare `"C"` a first-colon split yields,
+    because `split_volume` keeps the drive marker attached -- the one reason
+    the split is a shared function rather than a `partition(":")` at each site.
     """
     if ":" not in volume:
         return "anonymous", None
-    source, _, _ = volume.partition(":")
+    source, _ = split_volume(volume)
     if stores.NAME_PATTERN.fullmatch(source):
         return "named", source
     return "bind", None
+
+
+# Docker reads a leading `<letter>:` as a Windows drive marker and keeps it
+# attached to the source. Measured against `docker compose config` v5.1.2:
+# `C:\data:/var` and `C:/data:/var` both resolve to `{source: C:\data, target:
+# /var}`, either case; `CC:\data:/var` does not -- the marker is one letter
+# wide, and a second letter makes it a named-volume reference Docker rejects
+# as undeclared.
+_WINDOWS_DRIVE = re.compile(r"^[a-zA-Z]:[\\/]")
+
+
+def split_volume(volume: str) -> tuple[str, str]:
+    r"""Split a short-syntax volume entry into its source and everything after it.
+
+    The one definition of the colon-form split, shared by `_classify_volume`
+    here and `emit._volume_flags` so the drive-marker rule cannot hold at one
+    site and not the other.
+
+    The marker only survives when a target follows it: `C:\data` on its own is
+    a single colon-form part, which Docker reads as an anonymous volume whose
+    target is the whole string, so that entry keeps the split -- and the
+    verdict -- it has always had.
+    """
+    if _WINDOWS_DRIVE.match(volume):
+        source, separator, rest = volume[2:].partition(":")
+        if separator:
+            return volume[:2] + source, rest
+    source, _, rest = volume.partition(":")
+    return source, rest
 
 
 _VOLUME_LONG_TYPES = ("bind", "volume", "tmpfs", "image")
