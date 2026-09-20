@@ -1739,25 +1739,27 @@ def test_tilde_bind_mount_needs_no_declaration() -> None:
     validate(_doc(volumes=["~/data:/var"]))
 
 
-def test_windows_drive_letter_bind_needs_no_declaration() -> None:
-    # Measured against `docker compose config` v5.1.2, no top-level 'volumes:'
-    # block: every spelling below resolves to `{type: bind, source: C:\data,
-    # target: /var}`. A leading `<letter>:` is a drive marker, so the source
-    # keeps it instead of being read as the one-character volume name a
-    # first-colon split yields, and either separator spells the drive.
-    validate(_doc(volumes=["C:\\data:/var"]))
-    validate(_doc(volumes=["C:/data:/var"]))
-    validate(_doc(volumes=["c:\\data:/var"]))
-    validate(_doc(volumes=["C:\\data:/var:ro"]))
+@pytest.mark.parametrize("entry", ["C:\\data:/var", "C:/data:/var", "c:\\data:/var", "C:\\data:/var:ro", "v:/data:ro"])
+def test_drive_qualified_volume_source_is_refused_with_the_podman_reason(entry: str) -> None:
+    # Measured on both sides. `docker compose config` v5.1.2 ACCEPTS each of
+    # these as a bind whose source keeps the drive colon -- including
+    # `v:/data:ro`, read as `{source: v:/data, target: ro}` rather than the
+    # named volume its spelling suggests. podman 4.9.3 REJECTS the `-v` spec
+    # they render to (`invalid option type "/var"`): a spec splits into at
+    # most source:target:options, so a colon inside the source pushes the
+    # target into the option slot. Rule two -- a refusal that cites podman,
+    # where the old one named a phantom volume 'C' the document never wrote.
+    with pytest.raises(UnsupportedComposeError, match="Windows drive-letter path"):
+        validate(_doc(volumes=[entry]))
 
 
-def test_drive_marker_without_a_target_keeps_its_old_split() -> None:
-    # `C:\data` carries no second colon, so it is one colon-form part and the
-    # drive marker does not apply: the split stays where it was, the source is
-    # still `C`, and the entry is still refused as an undeclared named volume.
-    # Docker reads it as an anonymous volume whose target is the whole string
-    # (measured, v5.1.2) -- an over-rejection this change neither introduces
-    # nor closes, kept visible here rather than silently widened into.
+def test_drive_shaped_entry_without_a_target_keeps_its_old_verdict() -> None:
+    # `C:\data` carries one colon, so Docker reads an anonymous volume whose
+    # target is the whole string, and podman refuses it as a non-absolute
+    # container path. Neither the source-with-a-colon shape the refusal above
+    # is about, nor a form this change rules on: it keeps the verdict it has
+    # always had, tracked in issue 105 with the other drive-adjacent
+    # spellings.
     with pytest.raises(UnsupportedComposeError, match="undefined volume 'C'"):
         validate(_doc(volumes=["C:\\data"]))
 

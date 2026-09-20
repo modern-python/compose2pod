@@ -139,46 +139,35 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
     (tilde in particular) into "named" -- an over-rejection once paired with
     the reference check below, since neither needs a top-level declaration.
 
-    A Windows drive-letter source (`C:\data:/var`) reaches that name grammar
-    as the full `"C:\data"`, never the bare `"C"` a first-colon split yields,
-    because `split_volume` keeps the drive marker attached -- the one reason
-    the split is a shared function rather than a `partition(":")` at each site.
+    A drive-qualified source with a target (`C:\data:/var`) never reaches this
+    split: `_validate_service_volumes` refuses it first, so the leading `C`
+    this would otherwise read as a one-character volume name is not a verdict
+    anyone sees. A drive-shaped entry with no target (`C:\data`) does reach it,
+    and is still classified by the name grammar -- see issue 105.
     """
     if ":" not in volume:
         return "anonymous", None
-    source, _ = split_volume(volume)
+    source, _, _ = volume.partition(":")
     if stores.NAME_PATTERN.fullmatch(source):
         return "named", source
     return "bind", None
 
 
-# Docker reads a leading `<letter>:` as a Windows drive marker and keeps it
-# attached to the source. Measured against `docker compose config` v5.1.2:
-# `C:\data:/var` and `C:/data:/var` both resolve to `{source: C:\data, target:
-# /var}`, either case; `CC:\data:/var` does not -- the marker is one letter
-# wide, and a second letter makes it a named-volume reference Docker rejects
-# as undeclared.
-_WINDOWS_DRIVE = re.compile(r"^[a-zA-Z]:[\\/]")
-
-
-def split_volume(volume: str) -> tuple[str, str]:
-    r"""Split a short-syntax volume entry into its source and everything after it.
-
-    The one definition of the colon-form split, shared by `_classify_volume`
-    here and `emit._volume_flags` so the drive-marker rule cannot hold at one
-    site and not the other.
-
-    The marker only survives when a target follows it: `C:\data` on its own is
-    a single colon-form part, which Docker reads as an anonymous volume whose
-    target is the whole string, so that entry keeps the split -- and the
-    verdict -- it has always had.
-    """
-    if _WINDOWS_DRIVE.match(volume):
-        source, separator, rest = volume[2:].partition(":")
-        if separator:
-            return volume[:2] + source, rest
-    source, _, rest = volume.partition(":")
-    return source, rest
+# A source Docker reads as a Windows drive path, with a target after it: any
+# single letter, either separator, then a further colon. Measured against
+# `docker compose config` v5.1.2, the drive marker is what the letter means --
+# `C:\data:/var` and `C:/data:/var` are binds on `{source: C:\data, target:
+# /var}`, and so is `v:/data:ro`, read as `{source: v:/data, target: ro}`
+# rather than the named volume `v` its spelling suggests. Two letters
+# (`CC:\data:/var`) is an ordinary named-volume reference instead.
+#
+# The trailing colon is load-bearing: it is what makes the source carry a
+# colon, which is the thing podman's `-v` cannot take (it splits a spec into
+# at most source:target:options, measured against podman 4.9.3). Without it --
+# `C:\data`, `v:/data` -- Docker reads an anonymous volume whose target is the
+# whole string, a different divergence with its own verdict, tracked in issue
+# 105 rather than refused here.
+_WINDOWS_DRIVE_SOURCE = re.compile(r"^[a-zA-Z]:[\\/][^:]*:")
 
 
 _VOLUME_LONG_TYPES = ("bind", "volume", "tmpfs", "image")
@@ -213,6 +202,15 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
             continue
         if not isinstance(volume, str):
             msg = f"service {name!r}: volume entry must be a string or mapping"
+            raise UnsupportedComposeError(msg)
+        if _WINDOWS_DRIVE_SOURCE.match(volume):
+            # Refused before classification, so the drive colon is never read
+            # as the end of a one-character volume name (measured, podman
+            # 4.9.3: `invalid option type "/var"`).
+            msg = (
+                f"service {name!r}: volume {volume!r}: a Windows drive-letter path "
+                "is not supported (podman cannot express it)"
+            )
             raise UnsupportedComposeError(msg)
         kind, _ = _classify_volume(volume)
         if kind == "anonymous" and not volume.startswith("/"):

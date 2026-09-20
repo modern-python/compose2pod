@@ -130,16 +130,16 @@ def test_volumes_long_form_image_type_is_no_longer_an_over_rejection(
     assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
 
 
-def test_volume_windows_drive_letter_bind_is_no_longer_an_over_rejection(
+def test_volume_windows_drive_letter_bind_is_a_catalogued_over_rejection(
     assert_rule: Callable[[dict[str, Any]], str],
 ) -> None:
-    r"""`split_volume` keeps the drive marker attached instead of splitting on the first colon.
+    r"""Docker accepts `volumes: ['C:\data:/var']`; podman cannot express it, so we refuse it.
 
-    Same reasoning as the over-rejection tests above: the generic corpus run alone
-    would stay green even pre-fix, filing `volume_windows_drive_letter_bind` under
-    the allowed 'over-reject' verdict instead of catching a regression. The
-    stronger claim -- both oracles ACCEPT `volumes: ['C:\data:/var']` with no
-    top-level declaration -- needs this dedicated assertion on the verdict itself.
+    The inverse of the tests above, and the reason it is asserted rather than
+    left to the generic corpus run: `over-reject` is an allowed verdict, so the
+    run stays green whichever way this file falls. Pinning it here makes the
+    catalogued limitation (issue 105, measured against podman 4.9.3) fail loudly
+    if it ever turns into an accept without the ruling being revisited.
     """
     path = Path(__file__).parent / "corpus" / "volume_windows_drive_letter_bind.yaml"
-    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
