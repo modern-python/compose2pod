@@ -14,7 +14,16 @@ import pytest
 
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.parsing import validate
-from tests.integration.refusals import LIMITATIONS, REFUSALS, Limitation, Refusal
+from tests.integration.refusals import (
+    ABSENT_FLAGS,
+    LIMITATIONS,
+    REFUSALS,
+    STUB_FLAGS,
+    AbsentFlag,
+    Limitation,
+    Refusal,
+    StubFlag,
+)
 
 
 def _resolve(argv: list[str], host: Path) -> list[str]:
@@ -46,9 +55,37 @@ def test_a_tracked_limitation_names_a_mount_podman_would_have_made(
         validate(limitation.compose)
 
     source = tmp_path / limitation.host_dir
-    source.mkdir(parents=True)
+    source.mkdir(parents=True, exist_ok=True)
     argv = _resolve(limitation.podman_argv, source)
 
     assert probe_podman(f"{limitation.id} [limitation]", argv) == 0, (
         "podman refuses this mount too, so it is rule two and belongs in REFUSALS"
+    )
+
+
+@pytest.mark.parametrize("absent", ABSENT_FLAGS, ids=lambda absent: absent.id)
+def test_a_refusal_citing_no_flag_names_flags_podman_does_not_have(
+    absent: AbsentFlag, probe_podman: Callable[[str, list[str]], int]
+) -> None:
+    with pytest.raises(UnsupportedComposeError, match=absent.refusal_match):
+        validate(absent.compose)
+
+    assert probe_podman(f"{absent.id} [control]", []) == 0, (
+        "the bare control run failed, so every argv below would look absent whatever podman has"
+    )
+    for argv in absent.unknown_argv:
+        assert probe_podman(f"{absent.id} {argv[0]}", argv) != 0, (
+            "podman took this flag, so it has an equivalent and the refusal needs re-examining"
+        )
+
+
+@pytest.mark.parametrize("stub", STUB_FLAGS, ids=lambda stub: stub.id)
+def test_a_refusal_citing_a_stub_flag_names_one_podman_does_not_validate(
+    stub: StubFlag, probe_podman: Callable[[str, list[str]], int]
+) -> None:
+    with pytest.raises(UnsupportedComposeError, match=stub.refusal_match):
+        validate(stub.compose)
+
+    assert probe_podman(stub.id, stub.nonsense_argv) == 0, (
+        "podman rejected deliberate nonsense, so the flag validates something after all"
     )

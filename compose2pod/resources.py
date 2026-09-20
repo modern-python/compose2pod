@@ -49,6 +49,15 @@ def _validate_limits(name: str, svc: dict[str, Any], limits: Any) -> None:  # no
                 raise UnsupportedComposeError(msg)
 
 
+# Measured on podman 4.9.3: `--memory-reservation` is the only reservation flag
+# podman run has, and `--gpus` exists but is hidden and accepts `nonsense` as
+# readily as `all`, so emitting it would reserve nothing and say it had.
+_RESERVATION_REFUSALS = {
+    "cpus": "podman run has no reservation flag for it",
+    "devices": "podman run's --gpus accepts any value and reserves nothing",
+}
+
+
 def _validate_reservations(name: str, svc: dict[str, Any], reservations: Any) -> None:  # noqa: ANN401 - Compose values are untyped
     # No `reservations is None` escape -- see `_validate_limits`.
     if not isinstance(reservations, dict):
@@ -59,9 +68,9 @@ def _validate_reservations(name: str, svc: dict[str, Any], reservations: Any) ->
     if unknown:
         msg = f"service {name!r}: deploy.resources.reservations: unsupported keys {sorted(unknown)}"
         raise UnsupportedComposeError(msg)
-    for field in ("cpus", "devices"):
+    for field, reason in _RESERVATION_REFUSALS.items():
         if field in reservations:
-            msg = f"service {name!r}: deploy.resources.reservations.{field} is not supported (no podman equivalent)"
+            msg = f"service {name!r}: deploy.resources.reservations.{field} is not supported ({reason})"
             raise UnsupportedComposeError(msg)
     if "memory" in reservations:
         _validate_memory_size(name, "deploy.resources.reservations.memory", reservations["memory"])
