@@ -1739,29 +1739,44 @@ def test_tilde_bind_mount_needs_no_declaration() -> None:
     validate(_doc(volumes=["~/data:/var"]))
 
 
-@pytest.mark.parametrize("entry", ["C:\\data:/var", "C:/data:/var", "c:\\data:/var", "C:\\data:/var:ro", "v:/data:ro"])
-def test_drive_qualified_volume_source_is_refused_with_the_podman_reason(entry: str) -> None:
-    # Measured on both sides. `docker compose config` v5.1.2 ACCEPTS each of
-    # these as a bind whose source keeps the drive colon -- including
-    # `v:/data:ro`, read as `{source: v:/data, target: ro}` rather than the
-    # named volume its spelling suggests. podman 4.9.3 REJECTS the `-v` spec
-    # they render to (`invalid option type "/var"`): a spec splits into at
-    # most source:target:options, so a colon inside the source pushes the
-    # target into the option slot. Rule two -- a refusal that cites podman,
-    # where the old one named a phantom volume 'C' the document never wrote.
-    with pytest.raises(UnsupportedComposeError, match="Windows drive-letter path"):
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "C:\\data:/var",
+        "C:/data:/var",
+        "c:\\data:/var",
+        "C:\\data:/var:ro",
+        "C:\\data",
+        "C:data:/var",
+        "v:/data",
+        "a:/var",
+        "v:",
+    ],
+)
+def test_single_letter_volume_source_is_refused_with_the_podman_reason(entry: str) -> None:
+    # Measured against `docker compose config` v5.1.2: a leading single letter
+    # is a Windows drive marker whatever the letter is, so none of these names
+    # a volume. Docker reads a source keeping the drive colon
+    # (`C:\data:/var`, `v:/data:ro`), or an anonymous volume whose target is
+    # the whole string (`C:\data`, `v:/data`, `a:/var`, `v:`) -- even when the
+    # letter is declared top-level, which Docker ignores. podman 4.9.3 refuses
+    # every mount either reading makes: a colon inside a source has nowhere to
+    # go in a `-v` spec (`invalid option type "/var"`), and a container path
+    # that is not absolute is refused outright (`invalid container path`).
+    with pytest.raises(UnsupportedComposeError, match="Windows drive path"):
         validate(_doc(volumes=[entry]))
 
 
-def test_drive_shaped_entry_without_a_target_keeps_its_old_verdict() -> None:
-    # `C:\data` carries one colon, so Docker reads an anonymous volume whose
-    # target is the whole string, and podman refuses it as a non-absolute
-    # container path. Neither the source-with-a-colon shape the refusal above
-    # is about, nor a form this change rules on: it keeps the verdict it has
-    # always had, tracked in issue 105 with the other drive-adjacent
-    # spellings.
-    with pytest.raises(UnsupportedComposeError, match="undefined volume 'C'"):
-        validate(_doc(volumes=["C:\\data"]))
+def test_a_one_character_volume_can_still_be_named_in_the_long_form() -> None:
+    # The refusal is a short-syntax artifact, so the long form keeps the
+    # capability: Docker honours `source: v` there (measured, v5.1.2 -- the
+    # document resolves to the declared volume `v`, not to a drive path), and
+    # podman expresses it as an ordinary named-volume mount.
+    compose = {
+        "services": {"app": {"image": "nginx", "volumes": [{"type": "volume", "source": "v", "target": "/data"}]}},
+        "volumes": {"v": None},
+    }
+    assert validate(compose) == ["ignoring top-level 'volumes' (podman creates named volumes on first reference)"]
 
 
 def test_two_letter_drive_prefix_is_still_a_named_volume() -> None:
@@ -1923,8 +1938,8 @@ def _net_def_doc(definition: object) -> dict:
 
 
 def _vol_def_doc(definition: object) -> dict:
-    """One declared top-level volume 'v', referenced by a service, with 'definition' as its own body."""
-    return {"services": {"app": {"image": "nginx", "volumes": ["v:/data"]}}, "volumes": {"v": definition}}
+    """One declared top-level volume 'vol', referenced by a service, with 'definition' as its own body."""
+    return {"services": {"app": {"image": "nginx", "volumes": ["vol:/data"]}}, "volumes": {"vol": definition}}
 
 
 # Task 12: the top-level `networks:`/`volumes:` blocks' own DEFINITION contents

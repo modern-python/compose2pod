@@ -139,11 +139,10 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
     (tilde in particular) into "named" -- an over-rejection once paired with
     the reference check below, since neither needs a top-level declaration.
 
-    A drive-qualified source with a target (`C:\data:/var`) never reaches this
-    split: `_validate_service_volumes` refuses it first, so the leading `C`
-    this would otherwise read as a one-character volume name is not a verdict
-    anyone sees. A drive-shaped entry with no target (`C:\data`) does reach it,
-    and is still classified by the name grammar -- see issue 105.
+    No drive-shaped entry (`C:\data:/var`, `v:/data`) reaches this split:
+    `_validate_service_volumes` refuses the family first. So the name grammar
+    below never sees a one-character source, and the `named` verdict it can
+    return always names a volume Docker would name too.
     """
     if ":" not in volume:
         return "anonymous", None
@@ -153,21 +152,22 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
     return "bind", None
 
 
-# A source Docker reads as a Windows drive path, with a target after it: any
-# single letter, either separator, then a further colon. Measured against
-# `docker compose config` v5.1.2, the drive marker is what the letter means --
-# `C:\data:/var` and `C:/data:/var` are binds on `{source: C:\data, target:
-# /var}`, and so is `v:/data:ro`, read as `{source: v:/data, target: ro}`
-# rather than the named volume `v` its spelling suggests. Two letters
-# (`CC:\data:/var`) is an ordinary named-volume reference instead.
+# A short-syntax entry Docker reads as a Windows drive path. The marker is one
+# leading letter and a colon, whatever the letter is: measured against `docker
+# compose config` v5.1.2, `C:\data:/var` and `v:/data:ro` are both binds whose
+# source keeps the colon (`{source: v:/data, target: ro}`, not the named
+# volume `v` the spelling suggests), and `C:\data`, `v:/data`, `a:/var`, `v:`
+# are all anonymous volumes whose target is the whole string -- the last three
+# even when that letter is declared top-level, a declaration Docker ignores.
+# Two letters (`CC:\data:/var`) is an ordinary named-volume reference instead.
 #
-# The trailing colon is load-bearing: it is what makes the source carry a
-# colon, which is the thing podman's `-v` cannot take (it splits a spec into
-# at most source:target:options, measured against podman 4.9.3). Without it --
-# `C:\data`, `v:/data` -- Docker reads an anonymous volume whose target is the
-# whole string, a different divergence with its own verdict, tracked in issue
-# 105 rather than refused here.
-_WINDOWS_DRIVE_SOURCE = re.compile(r"^[a-zA-Z]:[\\/][^:]*:")
+# podman refuses every mount either reading makes (measured, podman 4.9.3): a
+# colon inside a source has nowhere to go in a `-v` spec, which splits into at
+# most source:target:options (`invalid option type "/var"`), and a container
+# path that is not absolute is refused outright (`invalid container path`).
+# So the whole family is a rule-two refusal, and a one-character volume name
+# is reachable only through the long form, where Docker honours `source: v`.
+_DRIVE_SHAPED_SOURCE = re.compile(r"^[a-zA-Z]:")
 
 
 _VOLUME_LONG_TYPES = ("bind", "volume", "tmpfs", "image")
@@ -203,13 +203,14 @@ def _validate_service_volumes(name: str, svc: dict[str, Any]) -> None:
         if not isinstance(volume, str):
             msg = f"service {name!r}: volume entry must be a string or mapping"
             raise UnsupportedComposeError(msg)
-        if _WINDOWS_DRIVE_SOURCE.match(volume):
-            # Refused before classification, so the drive colon is never read
-            # as the end of a one-character volume name (measured, podman
-            # 4.9.3: `invalid option type "/var"`).
+        if _DRIVE_SHAPED_SOURCE.match(volume):
+            # Refused before classification, so a single leading letter is
+            # never read as a one-character volume name the way Docker never
+            # reads it either.
             msg = (
-                f"service {name!r}: volume {volume!r}: a Windows drive-letter path "
-                "is not supported (podman cannot express it)"
+                f"service {name!r}: volume {volume!r}: a leading single letter is a Windows drive path "
+                "to Docker, not a volume name, and podman cannot express the mount it makes "
+                "(name a one-character volume through the long form instead)"
             )
             raise UnsupportedComposeError(msg)
         kind, _ = _classify_volume(volume)
