@@ -68,6 +68,8 @@ jobs:
       - run: uv python pin 3.12
       - run: just install
       - run: podman --version
+      # THROWAWAY (#105 measurement, not for merge).
+      - run: ./probe_podman_volumes.sh
       - run: just test-integration
 
   conformance:
