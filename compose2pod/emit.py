@@ -95,15 +95,17 @@ def _env_file_flags(svc: dict[str, Any], project_dir: str) -> list[Token]:
 
 
 def _nested_mount_parts(vtype: str, options: dict[str, Any]) -> list[str]:
-    """Map a long-form volume entry's validated `bind`/`volume`/`tmpfs`/`image` sub-map to `--mount` options."""
+    """Map a long-form volume entry's validated `bind`/`tmpfs` sub-map to `--mount` options.
+
+    A `volume`/`image` sub-map contributes nothing: the gate refuses every key it accepts.
+    """
     if vtype == "bind":
         parts = [f"bind-propagation={options['propagation']}"] if "propagation" in options else []
         if "selinux" in options:
             parts.append(f"relabel={'shared' if options['selinux'] == 'z' else 'private'}")
         return parts
-    if vtype in ("volume", "image"):
-        return [f"subpath={options['subpath']}"] if "subpath" in options else []
-    # vtype == "tmpfs": the gate validates `type` to bind/volume/tmpfs/image, so no other branch is reachable.
+    if vtype != "tmpfs":
+        return []
     parts = [f"tmpfs-size={options['size']}"] if "size" in options else []
     if "mode" in options:
         parts.append(f"tmpfs-mode={options['mode']}")

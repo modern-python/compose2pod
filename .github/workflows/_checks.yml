@@ -56,7 +56,10 @@ jobs:
       - run: just test-ci
 
   integration:
-    runs-on: ubuntu-latest
+    # Pinned to the runner that ships the supported podman floor (4.9.x, ADR-0006).
+    # On ubuntu-latest this job would measure whatever podman the newest image carries,
+    # which is not the version a document has to run on.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: extractions/setup-just@v4

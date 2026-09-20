@@ -157,8 +157,6 @@ class TestValidate:
             {"type": "image", "source": "nginx", "target": "/img", "read_only": True},
             {"type": "image", "source": "nginx", "target": "/img", "read_only": False},
             {"type": "image", "source": "nginx", "target": "/img", "image": {}},
-            {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": "/sub"}},
-            {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": "${SUB}"}},
         ):
             assert validate({"services": {"app": {"image": "x", "volumes": [entry]}}}) == []
 
@@ -168,14 +166,6 @@ class TestValidate:
             (
                 {"type": "image", "source": "nginx", "target": "/img", "image": {"bogus": 1}},
                 r"image options: unsupported keys",
-            ),
-            (
-                {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": 5}},
-                r"image 'subpath' must be a string",
-            ),
-            (
-                {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": "bin"}},
-                r"image 'subpath' must be an absolute path",
             ),
             (
                 {"type": "image", "source": "nginx", "target": "/img", "bind": {"propagation": "rshared"}},
@@ -195,18 +185,17 @@ class TestValidate:
         ):
             assert validate({"services": {"app": {"image": "x", "volumes": [entry]}}}) == []
 
-    def test_nested_volume_subpath_accepted(self) -> None:
-        # A declared named source warns about the ignored top-level block but accepts.
-        doc = {
-            "services": {
-                "app": {
-                    "image": "x",
-                    "volumes": [{"type": "volume", "source": "v", "target": "/d", "volume": {"subpath": "sub"}}],
-                }
-            },
-            "volumes": {"v": {}},
-        }
-        assert "ignoring top-level 'volumes'" in " ".join(validate(doc))
+    def test_an_image_subpath_is_refused_because_the_minimum_supported_podman_has_no_such_option(self) -> None:
+        for subpath in ("/sub", "sub", "${SUB}", 5):
+            entry = {"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": subpath}}
+            with pytest.raises(UnsupportedComposeError, match=r"image 'subpath' is not supported"):
+                validate({"services": {"app": {"image": "x", "volumes": [entry]}}})
+
+    def test_a_volume_subpath_is_refused_because_the_minimum_supported_podman_has_no_such_option(self) -> None:
+        for subpath in ("/sub", "sub", 5):
+            entry = {"type": "volume", "target": "/d", "volume": {"subpath": subpath}}
+            with pytest.raises(UnsupportedComposeError, match=r"volume 'subpath' is not supported"):
+                validate({"services": {"app": {"image": "x", "volumes": [entry]}}})
 
     def test_nested_option_rejects(self) -> None:
         cases = [
@@ -247,11 +236,6 @@ class TestValidate:
                 {"type": "bind", "source": "/a", "target": "/d", "bind": "notamap"},
                 r"bind options must be a mapping",
                 None,
-            ),
-            (
-                {"type": "volume", "source": "v", "target": "/d", "volume": {"subpath": 5}},
-                r"'subpath' must be a string",
-                {"v": {}},
             ),
             ({"type": "tmpfs", "target": "/d", "tmpfs": {"size": 1.5}}, r"tmpfs size", None),
             ({"type": "tmpfs", "target": "/d", "tmpfs": {"mode": "0755"}}, r"tmpfs mode", None),

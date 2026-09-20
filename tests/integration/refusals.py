@@ -19,11 +19,13 @@ rather than for podman's inability to mount, which would make a row pass for the
 wrong reason and hide an emit bug behind a parity claim.
 
 Not every refusal site can have a row. `network_mode` is refused under ADR-0003, not
-rule two, and podman honours it (#115); an image `subpath` cannot be probed until a
-minimum podman version is named, because the control fails too (#114); and `nocopy`
-and `deploy.resources.reservations.*` do not fit this shape at all (#116). The gate
-that every *rule-two* site has a row is issue #109 phase 3, and it has to know about
-those three exemptions before it can be written.
+rule two, and podman honours it (#115); `nocopy` and `deploy.resources.reservations.*`
+do not fit this shape at all (#116). The gate that every *rule-two* site has a row is
+issue #109 phase 3, and it has to know about those exemptions before it can be written.
+
+A `subpath` row measures the floor, not podman as such: podman gained the option above
+the supported minimum (ADR-0006), so the row goes red on a runner newer than the floor,
+which is the signal that the floor can be raised and the refusal dropped.
 """
 
 from dataclasses import dataclass
@@ -133,6 +135,23 @@ REFUSALS: list[Refusal] = [
         refusal_match="bind 'create_host_path' is not supported",
         podman_argv=["--mount", "type=bind,src={host}/absent,dst=/var"],
         control_argv=["--mount", "type=bind,src={host},dst=/var"],
+    ),
+    Refusal(
+        # `source=`/`target=` rather than the `src=`/`dst=` above: the spelling #114 measured.
+        id="image-subpath",
+        compose=_one_volume(
+            {"type": "image", "source": "busybox:1.36", "target": "/mnt", "image": {"subpath": "/bin"}}
+        ),
+        refusal_match="image 'subpath' is not supported",
+        podman_argv=["--mount", "type=image,source=busybox:1.36,target=/mnt,subpath=/bin"],
+        control_argv=["--mount", "type=image,source=busybox:1.36,target=/mnt"],
+    ),
+    Refusal(
+        id="volume-subpath",
+        compose=_one_volume({"type": "volume", "target": "/mnt", "volume": {"subpath": "/sub"}}),
+        refusal_match="volume 'subpath' is not supported",
+        podman_argv=["--mount", "type=volume,target=/mnt,subpath=/sub"],
+        control_argv=_ANONYMOUS_CONTROL,
     ),
 ]
 

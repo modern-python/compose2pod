@@ -28,6 +28,12 @@ Built for CI and test environments where you can't use `docker compose` or `podm
 
 ## Requirements
 
+**Podman 4.9 or newer.** Every form compose2pod accepts is one Podman expresses across that
+whole range, from the floor to the newest release measured (6.1): a mount option a later
+Podman adds is refused until the floor reaches it, so a document that compiles here runs on
+any supported Podman rather than only the newest one
+([ADR-0006](https://github.com/modern-python/compose2pod/blob/main/docs/adr/0006-docker-rejection-parity.md)).
+
 compose2pod's generated scripts own `/etc/hosts`: they write it to a temp
 file and bind-mount it read-only into every container under `--no-hosts`, so
 pod-internal name resolution works on any Podman version. `host.containers.internal` /
@@ -66,7 +72,7 @@ Within that boundary it covers most of what real compose files use:
 
 - **Services** — `image`/`build`, `command`/`entrypoint`, `environment` and
   `env_file` (string and long-form `{path, required, format}`), `volumes`
-  (short-form and long-form `--mount`, including the `bind`/`volume`/`tmpfs`
+  (short-form and long-form `--mount`, including the `bind` and `tmpfs`
   option maps), `tmpfs`, `healthcheck`, `depends_on` (all conditions), network
   `aliases`, `hostname`/`container_name`.
 - **Confinement & metadata** — `user`, `working_dir`, `read_only`, `init`,
