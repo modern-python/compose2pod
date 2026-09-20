@@ -143,3 +143,19 @@ def test_volume_windows_drive_letter_bind_is_a_catalogued_over_rejection(
     """
     path = Path(__file__).parent / "corpus" / "volume_windows_drive_letter_bind.yaml"
     assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
+
+
+def test_volume_single_letter_source_is_a_catalogued_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """Docker accepts `volumes: ['v:/data']` -- as an anonymous volume, not as the declared `v`.
+
+    The declaration in the file is deliberate: Docker ignores it, because a
+    leading single letter is a drive marker and never a volume name. Both
+    oracles once accepted this document while meaning different mounts, which
+    is a divergence the harness cannot see -- it compares verdicts, not
+    meanings. Refusing it makes the disagreement visible as an over-rejection,
+    and asserting the verdict here keeps it that way.
+    """
+    path = Path(__file__).parent / "corpus" / "volume_single_letter_source.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
