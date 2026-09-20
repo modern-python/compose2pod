@@ -1,60 +1,40 @@
 #!/bin/sh
-# Throwaway probe, deleted before merge. Rounds for #116 and #118.
+# Throwaway probe, round 2. Deleted before merge.
 set -u
 IMG=busybox:1.36
 podman pull -q "$IMG" >/dev/null 2>&1
 
-run() {  # run <label> <argv...>
-  label=$1; shift
-  out=$(podman run --rm "$@" 2>&1); rc=$?
-  printf '%-52s exit=%s %s\n' "$label" "$rc" "$(echo "$out" | tr '\n' ' ' | cut -c1-120)"
-}
-
-echo "=================== podman version ==================="
-podman --version
-
-echo
-echo "=== A. nocopy: is it parsed at all? (-v short form) ==="
-podman volume rm -f ncA >/dev/null 2>&1; podman volume create ncA >/dev/null
-run "-v ncA:/etc:nocopy" -v ncA:/etc:nocopy "$IMG" true
-podman volume rm -f ncB >/dev/null 2>&1; podman volume create ncB >/dev/null
-run "-v ncB:/etc:nosuchoption" -v ncB:/etc:nosuchoption "$IMG" true
-
-echo
-echo "=== A. nocopy: copy-up, counted exactly ==="
-echo "image /etc entry count (no volume):"
-podman run --rm "$IMG" sh -c 'ls -1A /etc | wc -l'
+echo "=== A2. nocopy: WHICH entries land in the volume ==="
 for opt in "" ":nocopy"; do
-  vol="ncv$(echo "$opt" | tr -d ':')x"
+  vol="v2$(echo "$opt" | tr -d ':')"
   podman volume rm -f "$vol" >/dev/null 2>&1; podman volume create "$vol" >/dev/null
-  seen=$(podman run --rm -v "${vol}:/etc${opt}" "$IMG" sh -c 'ls -1A /etc | wc -l' 2>&1)
-  # read the volume back through a SECOND container, at a different path, with no options:
-  ondisk=$(podman run --rm -v "${vol}:/mnt" "$IMG" sh -c 'ls -1A /mnt | wc -l' 2>&1)
-  printf '  -v vol:/etc%-10s  container sees=%-6s volume on disk afterwards=%s\n' "$opt" "$seen" "$ondisk"
+  podman run --rm -v "${vol}:/etc${opt}" "$IMG" true >/dev/null 2>&1
+  printf 'mounted at /etc%-8s -> volume contains: %s\n' "$opt" \
+    "$(podman run --rm -v "${vol}:/mnt" "$IMG" sh -c 'ls -1A /mnt | tr "\n" " "')"
 done
 
 echo
-echo "=== B. reservations: which flags exist on podman run? ==="
-echo "flags matching reserv:"; podman run --help | grep -iE '^\s+--\S*reserv' || echo "  (none)"
-echo "flags matching gpu:";    podman run --help | grep -iE '^\s+--\S*gpu'    || echo "  (none)"
-echo "flags matching device:"; podman run --help | grep -iE '^\s+--\S*device' || echo "  (none)"
-for f in --cpu-reservation --cpus-reservation --device-reservation --gpus; do
-  run "$f 1" "$f" 1 "$IMG" true
+echo "=== A2. candidate target dirs with content (not needed by the shell) ==="
+podman run --rm "$IMG" sh -c 'for d in /usr/sbin /var/spool/mail /home /root /var/www; do printf "%-18s %s\n" "$d" "$(ls -1A $d 2>/dev/null | wc -l)"; done'
+
+echo
+echo "=== A2. copy-up at /usr/sbin, away from podman's own /etc files ==="
+for opt in "" ":nocopy"; do
+  vol="v3$(echo "$opt" | tr -d ':')"
+  podman volume rm -f "$vol" >/dev/null 2>&1; podman volume create "$vol" >/dev/null
+  seen=$(podman run --rm -v "${vol}:/usr/sbin${opt}" "$IMG" sh -c 'ls -1A /usr/sbin | wc -l' 2>&1)
+  after=$(podman run --rm -v "${vol}:/mnt" "$IMG" sh -c 'ls -1A /mnt | wc -l' 2>&1)
+  printf '  -v vol:/usr/sbin%-8s container sees=%-5s volume afterwards=%s\n' "$opt" "$seen" "$after"
 done
 
 echo
-echo "=== C. acceptance side (#118): every nested option we emit ==="
-D=$(mktemp -d); echo hi > "$D/f"
-run "bind relabel=shared"        --mount "type=bind,src=$D,dst=/data,relabel=shared"    "$IMG" true
-run "bind relabel=private"       --mount "type=bind,src=$D,dst=/data,relabel=private"   "$IMG" true
-for p in private rprivate shared rshared slave rslave; do
-  run "bind bind-propagation=$p" --mount "type=bind,src=$D,dst=/data,bind-propagation=$p" "$IMG" true
+echo "=== B2. --gpus on 4.9.3: hidden, and does it do anything? ==="
+echo "grep -i gpu over the whole help text:"; podman run --help | grep -i gpu || echo "  (absent from --help)"
+for v in all 1 nonsense ""; do
+  out=$(podman run --rm --gpus "$v" "$IMG" true 2>&1); rc=$?
+  printf '  --gpus %-10s exit=%s %s\n' "'$v'" "$rc" "$(echo "$out" | tr '\n' ' ' | cut -c1-90)"
 done
-run "tmpfs tmpfs-size=1m"        --mount "type=tmpfs,dst=/data,tmpfs-size=1m"           "$IMG" true
-run "tmpfs tmpfs-size=1000"      --mount "type=tmpfs,dst=/data,tmpfs-size=1000"         "$IMG" true
-run "tmpfs tmpfs-mode=1777"      --mount "type=tmpfs,dst=/data,tmpfs-mode=1777"         "$IMG" true
-run "tmpfs size+mode"            --mount "type=tmpfs,dst=/data,tmpfs-size=1m,tmpfs-mode=1777" "$IMG" true
-run "--tmpfs /data"              --tmpfs /data                                          "$IMG" true
-run "bind ro"                    --mount "type=bind,src=$D,dst=/data,ro"                "$IMG" true
-run "volume ro"                  --mount "type=volume,dst=/data,ro"                     "$IMG" true
+echo "does --gpus all add any device? (nvidia entries in /dev):"
+podman run --rm --gpus all "$IMG" sh -c 'ls /dev | grep -ci nvidia'
+echo "man page mention:"; (podman run --help 2>&1; man podman-run 2>/dev/null) | grep -ci gpus
 echo "done."
