@@ -17,7 +17,7 @@ Single-context repo:
 /
 ├── CONTEXT.md
 ├── docs/adr/
-│   ├── 0001-healthcheck-start-period-retries-passthrough.md
+│   ├── 0001-healthcheck-wait-budget-is-not-coupled-to-retries.md
 │   └── 0002-zero-dependency-core.md
 └── compose2pod/
 ```
@@ -32,4 +32,4 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
-> _Contradicts ADR-0001 (healthcheck start period retries passthrough), but worth reopening because…_
+> _Contradicts ADR-0001 (the healthcheck wait budget is not coupled to `retries`), but worth reopening because…_
