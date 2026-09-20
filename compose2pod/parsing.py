@@ -50,6 +50,15 @@ IGNORED_SERVICE_KEYS: dict[str, Callable[[str, str, Any], None]] = {
     "stop_grace_period": values.validate_duration,
     "profiles": _validate_string_list,
 }
+# Refused for the pod model, not under the docker-parity rule: podman honours
+# `--network` for a container that joined a pod (measured, 4.9.3), and that is the
+# problem, not a limit (docs/adr/0003-the-shared-namespace-decides-key-classification.md).
+_POD_MODEL_REFUSALS = {
+    "network_mode": (
+        "honouring it would move the container out of the pod's shared network namespace, "
+        "where the localhost ports and hostnames its dependents use stop resolving"
+    ),
+}
 # The only service keys Docker tolerates an explicit null on, where it means
 # "not specified" (measured against `docker compose config`). Every other key
 # with a bare `key:` is refused -- see `_reject_null_values`.
@@ -782,6 +791,9 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
         if key in IGNORED_SERVICE_KEYS:
             IGNORED_SERVICE_KEYS[key](name, key, svc[key])
             warnings.append(f"service {name!r}: ignoring '{key}'")
+        elif key in _POD_MODEL_REFUSALS:
+            msg = f"service {name!r}: {key!r} is not supported: {_POD_MODEL_REFUSALS[key]}"
+            raise UnsupportedComposeError(msg)
         elif key not in SUPPORTED_SERVICE_KEYS:
             msg = f"service {name!r}: unsupported key '{key}'"
             raise UnsupportedComposeError(msg)
