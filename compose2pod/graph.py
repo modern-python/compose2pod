@@ -154,28 +154,62 @@ def hostnames(services: dict[str, Any]) -> list[str]:
     return names
 
 
-def startup_order(services: dict[str, Any], target: str) -> list[str]:
-    """Dependency closure of target in start order (dependencies first, target last)."""
-    if target not in services:
-        msg = f"target service '{target}' not found"
-        raise UnsupportedComposeError(msg)
+def _walk(services: dict[str, Any], roots: list[str]) -> list[str]:
+    """Depth-first walk from `roots`, in start order (dependencies first, root last).
+
+    One walker for both callers below: the closure a `--target` starts, and the
+    whole-document pass that validates it. Both need the same two refusals -- a
+    dependency naming no service, and a cycle -- so both come from here rather
+    than from two implementations that can drift apart in what they refuse.
+
+    `declared_by` is the service whose `depends_on` reached `name`, which is what
+    the unknown-dependency message needs: a whole-document walk refuses a typo in
+    a service the user never asked to run, so the refusal has to say where it is.
+    A root is passed as its own declarer and never uses it -- every root here is
+    already a key of `services`.
+    """
     order: list[str] = []
     state: dict[str, str] = {}
 
-    def visit(name: str) -> None:
+    def visit(name: str, declared_by: str) -> None:
         if state.get(name) == "visiting":
             msg = f"dependency cycle involving '{name}'"
             raise UnsupportedComposeError(msg)
         if state.get(name) == "done":
             return
         if name not in services:
-            msg = f"unknown dependency '{name}'"
+            msg = f"service {declared_by!r}: unknown dependency {name!r}"
             raise UnsupportedComposeError(msg)
         state[name] = "visiting"
         for dep in depends_on(services[name]):
-            visit(dep)
+            visit(dep, name)
         state[name] = "done"
         order.append(name)
 
-    visit(target)
+    for root in roots:
+        visit(root, root)
     return order
+
+
+def startup_order(services: dict[str, Any], target: str) -> list[str]:
+    """Dependency closure of target in start order (dependencies first, target last)."""
+    if target not in services:
+        msg = f"target service '{target}' not found"
+        raise UnsupportedComposeError(msg)
+    return _walk(services, [target])
+
+
+def validate_graph(services: dict[str, Any]) -> None:
+    """Refuse a dependency graph naming a service the document does not define, or a cycle.
+
+    Walks from every service, not from the `--target`, which is the difference
+    that closes issue 87. `docker compose config` validates the whole document
+    ("depends on undefined service", "dependency cycle detected") and a document
+    it refuses is one compose2pod must refuse (ADR-0006), even where the broken
+    service is one no target reaches and the generated script would never start.
+
+    The cost is the reason the issue stayed open: a typo in a service nobody
+    targets now refuses the whole file, for every target in it. That is Docker's
+    own behaviour, and the hard rule leaves no room to keep the difference.
+    """
+    _walk(services, list(services))

@@ -1,9 +1,0 @@
-# Docker rejects the document ("depends on undefined service"); compose2pod accepts it,
-# because `app` is the target and its closure never reaches `other`. Residual, issue 87.
-services:
-  app:
-    image: nginx
-  other:
-    image: nginx
-    depends_on:
-      - ghost

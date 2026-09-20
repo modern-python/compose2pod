@@ -6,7 +6,7 @@ from typing import Any
 
 from compose2pod import podman, stores, values
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.graph import depends_on, hostnames
+from compose2pod.graph import depends_on, hostnames, validate_graph
 from compose2pod.healthcheck import has_healthcheck, health_cmd, interval_seconds
 from compose2pod.keys import (
     SERVICE_KEYS,
@@ -1020,13 +1020,21 @@ def _sweep_document(compose: dict[str, Any]) -> None:
 
 
 def _validate_depends_on(services: dict[str, Any]) -> None:
-    """Cross-service depends_on checks: known conditions, service_healthy needs a healthcheck."""
+    """Cross-service depends_on checks: the graph resolves, conditions are known, service_healthy is met.
+
+    `validate_graph` runs first for a reason beyond ordering: it refuses every
+    dependency naming a service the document does not define, so `services[dep]`
+    below needs no membership guard. That guard used to be there and used to
+    matter -- a `service_healthy` dependency on a missing service was simply
+    skipped, which is the closure-scoped hole issue 87 closed.
+    """
+    validate_graph(services)
     for name, svc in services.items():
         for dep, condition in depends_on(svc).items():
             if condition not in DEPENDS_ON_CONDITIONS:
                 msg = f"service {name!r}: depends_on {dep!r} has unsupported condition {condition!r}"
                 raise UnsupportedComposeError(msg)
-            if condition == "service_healthy" and dep in services and not has_healthcheck(services[dep]):
+            if condition == "service_healthy" and not has_healthcheck(services[dep]):
                 msg = f"service {name!r}: depends on {dep!r} (service_healthy) but {dep!r} has no healthcheck"
                 raise UnsupportedComposeError(msg)
 
