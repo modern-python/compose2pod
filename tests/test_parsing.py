@@ -1739,6 +1739,37 @@ def test_tilde_bind_mount_needs_no_declaration() -> None:
     validate(_doc(volumes=["~/data:/var"]))
 
 
+def test_windows_drive_letter_bind_needs_no_declaration() -> None:
+    # Measured against `docker compose config` v5.1.2, no top-level 'volumes:'
+    # block: every spelling below resolves to `{type: bind, source: C:\data,
+    # target: /var}`. A leading `<letter>:` is a drive marker, so the source
+    # keeps it instead of being read as the one-character volume name a
+    # first-colon split yields, and either separator spells the drive.
+    validate(_doc(volumes=["C:\\data:/var"]))
+    validate(_doc(volumes=["C:/data:/var"]))
+    validate(_doc(volumes=["c:\\data:/var"]))
+    validate(_doc(volumes=["C:\\data:/var:ro"]))
+
+
+def test_drive_marker_without_a_target_keeps_its_old_split() -> None:
+    # `C:\data` carries no second colon, so it is one colon-form part and the
+    # drive marker does not apply: the split stays where it was, the source is
+    # still `C`, and the entry is still refused as an undeclared named volume.
+    # Docker reads it as an anonymous volume whose target is the whole string
+    # (measured, v5.1.2) -- an over-rejection this change neither introduces
+    # nor closes, kept visible here rather than silently widened into.
+    with pytest.raises(UnsupportedComposeError, match="undefined volume 'C'"):
+        validate(_doc(volumes=["C:\\data"]))
+
+
+def test_two_letter_drive_prefix_is_still_a_named_volume() -> None:
+    # The drive marker is exactly one letter wide: `CC:\data:/var` REJECTS as
+    # "refers to undefined volume CC" (measured, v5.1.2), so widening the
+    # prefix would start accepting a document Docker refuses -- rule one.
+    with pytest.raises(UnsupportedComposeError, match="undefined volume 'CC'"):
+        validate(_doc(volumes=["CC:\\data:/var"]))
+
+
 def test_hyphenated_and_underscored_named_volume_must_be_declared() -> None:
     # A bare identifier still needs a top-level declaration regardless of
     # which NAME_PATTERN characters it uses -- this is not weakened by the

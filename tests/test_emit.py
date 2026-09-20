@@ -127,6 +127,10 @@ class TestRunFlags:
         flags = run_flags("app", {"image": "x", "volumes": ["/var/cache/models"]}, "p", "/builds/x")
         assert flags[4:6] == ["-v", Expand(value="/var/cache/models")]
 
+    def test_windows_drive_letter_source_is_kept_as_is(self) -> None:
+        flags = run_flags("app", {"image": "x", "volumes": ["C:\\data:/var"]}, "p", "/builds/x")
+        assert flags[4:6] == ["-v", Expand(value="C:\\data:/var")]
+
     def test_named_volume_emitted_without_project_dir_translation(self) -> None:
         svc = {"image": "x", "volumes": ["pgdata:/var/lib/postgresql/data"]}
         flags = run_flags("db", svc, "p", "/builds/x")

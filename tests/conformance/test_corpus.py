@@ -128,3 +128,18 @@ def test_volumes_long_form_image_type_is_no_longer_an_over_rejection(
     """
     path = Path(__file__).parent / "corpus" / "volumes_long_form_image_type.yaml"
     assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
+
+
+def test_volume_windows_drive_letter_bind_is_no_longer_an_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    r"""`split_volume` keeps the drive marker attached instead of splitting on the first colon.
+
+    Same reasoning as the over-rejection tests above: the generic corpus run alone
+    would stay green even pre-fix, filing `volume_windows_drive_letter_bind` under
+    the allowed 'over-reject' verdict instead of catching a regression. The
+    stronger claim -- both oracles ACCEPT `volumes: ['C:\data:/var']` with no
+    top-level declaration -- needs this dedicated assertion on the verdict itself.
+    """
+    path = Path(__file__).parent / "corpus" / "volume_windows_drive_letter_bind.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
