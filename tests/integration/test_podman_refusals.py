@@ -17,6 +17,10 @@ from compose2pod.parsing import validate
 from tests.integration.refusals import LIMITATIONS, REFUSALS, Limitation, Refusal
 
 
+def _resolve(argv: list[str], host: Path) -> list[str]:
+    return [part.format(host=host) for part in argv]
+
+
 @pytest.mark.parametrize("refusal", REFUSALS, ids=lambda refusal: refusal.id)
 def test_a_documented_refusal_names_a_mount_podman_will_not_make(
     refusal: Refusal, probe_podman: Callable[[str, list[str]], int], tmp_path: Path
@@ -24,11 +28,11 @@ def test_a_documented_refusal_names_a_mount_podman_will_not_make(
     with pytest.raises(UnsupportedComposeError, match=refusal.refusal_match):
         validate(refusal.compose)
 
-    control = [part.format(host=tmp_path) for part in refusal.control_argv]
+    control = _resolve(refusal.control_argv, tmp_path)
     assert probe_podman(f"{refusal.id} [control]", control) == 0, (
         "the control mount failed, so this row proves nothing about podman's verdict"
     )
-    argv = [part.format(host=tmp_path) for part in refusal.podman_argv]
+    argv = _resolve(refusal.podman_argv, tmp_path)
     assert probe_podman(refusal.id, argv) != 0, (
         "podman made the mount this document asks for, so refusing it is a limitation, not rule two"
     )
@@ -43,7 +47,7 @@ def test_a_tracked_limitation_names_a_mount_podman_would_have_made(
 
     source = tmp_path / limitation.host_dir
     source.mkdir(parents=True)
-    argv = [part.format(host=source) for part in limitation.podman_argv]
+    argv = _resolve(limitation.podman_argv, source)
 
     assert probe_podman(f"{limitation.id} [limitation]", argv) == 0, (
         "podman refuses this mount too, so it is rule two and belongs in REFUSALS"

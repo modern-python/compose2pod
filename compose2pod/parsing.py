@@ -356,8 +356,10 @@ def _validate_image_options(name: str, options: dict[str, Any]) -> None:
         msg = f"service {name!r}: image 'subpath' must be a string"
         raise UnsupportedComposeError(msg)
     if not subpath.startswith("/") and not values.has_variable(subpath):
-        # podman requires an absolute image subpath (`must be an absolute path`);
-        # docker accepts a relative one -> a rule-two narrowing. A ${VAR} is host-dependent.
+        # Docker accepts a relative subpath -> a rule-two narrowing. A ${VAR} is
+        # host-dependent. The reason is unverified on podman 4.9.3, which rejects
+        # `subpath` on every mount type before reading its value
+        # (https://github.com/modern-python/compose2pod/issues/114).
         msg = f"service {name!r}: image 'subpath' must be an absolute path"
         raise UnsupportedComposeError(msg)
 

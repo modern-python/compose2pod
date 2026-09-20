@@ -14,8 +14,8 @@ The two are held apart in the refusal messages as well as here: a drive-shaped e
 a *bind* is refused for the short form's own limit, not for podman's, and says so. A refusal this
 rule does not reach is one this rule must not claim: `network_mode` is refused because honouring it
 pulls a container out of the pod's shared namespace
-([0003-the-shared-namespace-decides-key-classification.md](0003-the-shared-namespace-decides-key-classification.md)),
-which podman expresses perfectly well even inside a pod (measured, 4.9.3)
+([ADR-0003](0003-the-shared-namespace-decides-key-classification.md)), which podman expresses
+perfectly well even inside a pod (measured, 4.9.3)
 ([#115](https://github.com/modern-python/compose2pod/issues/115)).
 Docker's verdict binds only on the document, not the host: `env_file` existence, `${VAR:?}`, and a
 negative on a top-level numeric key are facts about the machine that runs the script and are
@@ -25,12 +25,14 @@ it is added, and `tests/integration/refusals.py` measures the other side, pairin
 refusal above with the `--mount` that expresses what Docker says the document means, so a claim that
 podman cannot express something cannot go stale unnoticed either. It carries both verdicts:
 `REFUSALS` for the mounts podman will not make, `LIMITATIONS` for the ones it would, which is what
-keeps a limitation from quietly reading as rule two. The rest of the refusals get rows, and a gate
-that every site has one, under [#109](https://github.com/modern-python/compose2pod/issues/109).
+keeps a limitation from quietly reading as rule two. A gate that every rule-two site has a row is
+[#109](https://github.com/modern-python/compose2pod/issues/109) phase 3, and it has to carry the
+exemptions first: not every refusal this document names turns out to be one podman makes.
 Verdicts are per version: the rulings here are measured against `docker compose config` v5.1.2 and
-podman 4.9.3. No minimum podman is stated anywhere, and one acceptance already outruns the version
-CI tests -- an absolute image `subpath` passes the gate and podman 4.9.3 rejects the flag outright
-([#114](https://github.com/modern-python/compose2pod/issues/114)). Two residuals are open by design: `depends_on` errors among services outside the
+podman 4.9.3. No minimum podman is stated anywhere, and one acceptance already outruns the
+version CI tests: an absolute image `subpath` passes the gate, and podman 4.9.3 rejects the flag
+outright ([#114](https://github.com/modern-python/compose2pod/issues/114)).
+Two residuals are open by design: `depends_on` errors among services outside the
 target's closure are accepted here and rejected by Docker
 ([#87](https://github.com/modern-python/compose2pod/issues/87)), and the drive-qualified *bind*
 (`C:\data:/var`) is a limitation rather than rule two, since podman mounts that source through
