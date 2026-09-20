@@ -19,15 +19,17 @@ from tests.integration.refusals import LIMITATIONS, REFUSALS, Limitation, Refusa
 
 @pytest.mark.parametrize("refusal", REFUSALS, ids=lambda refusal: refusal.id)
 def test_a_documented_refusal_names_a_mount_podman_will_not_make(
-    refusal: Refusal, probe_podman: Callable[[str, list[str]], int]
+    refusal: Refusal, probe_podman: Callable[[str, list[str]], int], tmp_path: Path
 ) -> None:
     with pytest.raises(UnsupportedComposeError, match=refusal.refusal_match):
         validate(refusal.compose)
 
-    assert probe_podman(f"{refusal.id} [control]", refusal.control_argv) == 0, (
+    control = [part.format(host=tmp_path) for part in refusal.control_argv]
+    assert probe_podman(f"{refusal.id} [control]", control) == 0, (
         "the control mount failed, so this row proves nothing about podman's verdict"
     )
-    assert probe_podman(refusal.id, refusal.podman_argv) != 0, (
+    argv = [part.format(host=tmp_path) for part in refusal.podman_argv]
+    assert probe_podman(refusal.id, argv) != 0, (
         "podman made the mount this document asks for, so refusing it is a limitation, not rule two"
     )
 

@@ -28,7 +28,11 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Refusal:
-    """A refusal podman agrees with: it will not make the mount the document asks for."""
+    """A refusal podman agrees with: it will not make the mount the document asks for.
+
+    `{host}` in either argv is substituted with the test's `tmp_path`, for a row whose
+    counterfactual turns on a host path rather than on the spec's grammar.
+    """
 
     id: str
     compose: dict[str, Any]
@@ -53,7 +57,7 @@ class Limitation:
     podman_argv: list[str]
 
 
-def _one_volume(entry: str) -> dict[str, Any]:
+def _one_volume(entry: "str | dict[str, Any]") -> dict[str, Any]:
     return {"services": {"app": {"image": "busybox:1.36", "volumes": [entry]}}}
 
 
@@ -65,6 +69,7 @@ _ANONYMOUS_CONTROL = ["--mount", "type=volume,dst=/data"]
 
 _NOT_ABSOLUTE = "podman refuses a container path that is not absolute"
 _SHORT_FORM_CANNOT_EMIT = "which the short form cannot emit"
+_LONG_FORM_TYPES = "volume 'type' must be one of"
 
 
 REFUSALS: list[Refusal] = [
@@ -95,6 +100,36 @@ REFUSALS: list[Refusal] = [
         refusal_match=_NOT_ABSOLUTE,
         podman_argv=["--mount", "type=volume,dst=v:"],
         control_argv=_ANONYMOUS_CONTROL,
+    ),
+    Refusal(
+        id="long-form-relative-target",
+        compose=_one_volume({"type": "volume", "target": "rel"}),
+        refusal_match="volume 'target' must be an absolute path",
+        podman_argv=["--mount", "type=volume,dst=rel"],
+        control_argv=_ANONYMOUS_CONTROL,
+    ),
+    Refusal(
+        id="long-form-type-cluster",
+        compose=_one_volume({"type": "cluster", "target": "/data"}),
+        refusal_match=_LONG_FORM_TYPES,
+        podman_argv=["--mount", "type=cluster,dst=/data"],
+        control_argv=_ANONYMOUS_CONTROL,
+    ),
+    Refusal(
+        id="long-form-type-npipe",
+        compose=_one_volume({"type": "npipe", "target": "/data"}),
+        refusal_match=_LONG_FORM_TYPES,
+        podman_argv=["--mount", "type=npipe,dst=/data"],
+        control_argv=_ANONYMOUS_CONTROL,
+    ),
+    Refusal(
+        # Docker creates a missing bind source; podman creates one in no spelling
+        # at all, so `create_host_path: true` has no counterfactual that succeeds.
+        id="bind-create-host-path",
+        compose=_one_volume({"type": "bind", "source": "./src", "target": "/var", "bind": {"create_host_path": True}}),
+        refusal_match="bind 'create_host_path' is not supported",
+        podman_argv=["--mount", "type=bind,src={host}/absent,dst=/var"],
+        control_argv=["--mount", "type=bind,src={host},dst=/var"],
     ),
 ]
 
