@@ -210,6 +210,10 @@ _VOLUME_OPTION_KEYS = {
     "tmpfs": {"size", "mode"},
     "image": {"subpath"},
 }
+# compose2pod supports podman 4.9 and up (README, docs/adr/0006-docker-rejection-parity.md):
+# a form is accepted only when podman expresses it across that whole range, so a key
+# that arrives in a later podman is refused until the floor reaches it.
+_PODMAN_FLOOR = "4.9"
 _PROPAGATION_VALUES = {"private", "rprivate", "shared", "rshared", "slave", "rslave"}
 _SELINUX_VALUES = {"z", "Z"}
 
@@ -307,19 +311,28 @@ def _validate_bind_options(name: str, options: dict[str, Any]) -> None:
         raise UnsupportedComposeError(msg)
 
 
+def _reject_subpath(name: str, vtype: str, added_in: str) -> None:
+    """Refuse a nested `subpath`: podman gained the mount option after the supported floor."""
+    msg = (
+        f"service {name!r}: {vtype} 'subpath' is not supported "
+        f"(podman {added_in} adds the mount option, and compose2pod supports podman {_PODMAN_FLOOR} and up)"
+    )
+    raise UnsupportedComposeError(msg)
+
+
 def _validate_volume_type_options(name: str, options: dict[str, Any]) -> None:
     """Check a long-form volume entry's `volume:` sub-map (measured, v5.1.2).
 
-    `nocopy` is a real Docker key, but podman's `--mount` cannot express it,
-    so it is refused with a "not supported" message rather than folded into
-    the generic unknown-key check the caller already ran.
+    Both keys are real Docker keys that the runtime will not honour: podman's
+    `--mount` cannot express `nocopy` at any version, and `subpath` on a named
+    volume arrives in podman 5.4. Each is refused with a "not supported" message
+    rather than folded into the generic unknown-key check the caller already ran.
     """
     if "nocopy" in options:
         msg = f"service {name!r}: volume 'nocopy' is not supported (podman cannot express it)"
         raise UnsupportedComposeError(msg)
-    if "subpath" in options and not isinstance(options["subpath"], str):
-        msg = f"service {name!r}: volume 'subpath' must be a string"
-        raise UnsupportedComposeError(msg)
+    if "subpath" in options:
+        _reject_subpath(name, "volume", "5.4")
 
 
 def _validate_tmpfs_options(name: str, options: dict[str, Any]) -> None:
@@ -348,20 +361,9 @@ def _validate_tmpfs_options(name: str, options: dict[str, Any]) -> None:
 
 
 def _validate_image_options(name: str, options: dict[str, Any]) -> None:
-    """Check an image entry's nested `image:` option map (measured: strict, `subpath` only, absolute)."""
-    if "subpath" not in options:
-        return
-    subpath = options["subpath"]
-    if not isinstance(subpath, str):
-        msg = f"service {name!r}: image 'subpath' must be a string"
-        raise UnsupportedComposeError(msg)
-    if not subpath.startswith("/") and not values.has_variable(subpath):
-        # Docker accepts a relative subpath -> a rule-two narrowing. A ${VAR} is
-        # host-dependent. The reason is unverified on podman 4.9.3, which rejects
-        # `subpath` on every mount type before reading its value
-        # (https://github.com/modern-python/compose2pod/issues/114).
-        msg = f"service {name!r}: image 'subpath' must be an absolute path"
-        raise UnsupportedComposeError(msg)
+    """Check an image entry's nested `image:` map: `subpath` is its only key, and podman 5.1 adds it."""
+    if "subpath" in options:
+        _reject_subpath(name, "image", "5.1")
 
 
 _VOLUME_OPTION_VALIDATORS: dict[str, Callable[[str, dict[str, Any]], None]] = {

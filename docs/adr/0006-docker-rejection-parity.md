@@ -28,10 +28,17 @@ podman cannot express something cannot go stale unnoticed either. It carries bot
 keeps a limitation from quietly reading as rule two. A gate that every rule-two site has a row is
 [#109](https://github.com/modern-python/compose2pod/issues/109) phase 3, and it has to carry the
 exemptions first: not every refusal this document names turns out to be one podman makes.
-Verdicts are per version: the rulings here are measured against `docker compose config` v5.1.2 and
-podman 4.9.3. No minimum podman is stated anywhere, and one acceptance already outruns the
-version CI tests: an absolute image `subpath` passes the gate, and podman 4.9.3 rejects the flag
-outright ([#114](https://github.com/modern-python/compose2pod/issues/114)).
+Verdicts are per version, and the supported range is stated rather than implied: the rulings here
+are measured against `docker compose config` v5.1.2 and podman 4.9.3, and compose2pod supports
+podman 4.9 and up. Rule two reads across that whole range. A form is accepted only where podman
+expresses it at the floor as well as at the newest release measured (6.1), so a mount option a
+later podman adds is refused until the floor reaches it, and one that a later podman breaks is
+refused too. That is one rule where the repo previously had two and stated neither: a nested
+`subpath` is refused because podman adds it above the floor (5.1 for an image mount, 5.4 for a
+named volume) ([#114](https://github.com/modern-python/compose2pod/issues/114)), and a float tmpfs
+`mode` is refused at the other end of the range, where podman 6.0.1's `crun` will not mount it.
+The `integration` job pins `ubuntu-24.04` for the same reason: it is the runner that ships the
+floor, and on a newer one the job would measure a podman no user of the floor has.
 Two residuals are open by design: `depends_on` errors among services outside the
 target's closure are accepted here and rejected by Docker
 ([#87](https://github.com/modern-python/compose2pod/issues/87)), and the drive-qualified *bind*

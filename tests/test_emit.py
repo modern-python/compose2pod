@@ -176,14 +176,6 @@ class TestRunFlags:
         flags = run_flags("app", svc, "p", "/proj")
         assert flags[4:6] == ["--mount", Expand(value="type=bind,source=/a,target=/d,relabel=private")]
 
-    def test_mount_volume_subpath(self) -> None:
-        svc = {
-            "image": "x",
-            "volumes": [{"type": "volume", "source": "v", "target": "/d", "volume": {"subpath": "sub"}}],
-        }
-        flags = run_flags("app", svc, "p", "/proj")
-        assert flags[4:6] == ["--mount", Expand(value="type=volume,source=v,target=/d,subpath=sub")]
-
     def test_mount_tmpfs_size_and_mode(self) -> None:
         svc = {"image": "x", "volumes": [{"type": "tmpfs", "target": "/d", "tmpfs": {"size": "1m", "mode": 1777}}]}
         flags = run_flags("app", svc, "p", "/proj")
@@ -193,14 +185,6 @@ class TestRunFlags:
         svc = {"image": "x", "volumes": [{"type": "image", "source": "nginx:alpine", "target": "/img"}]}
         flags = run_flags("app", svc, "p", "/proj")
         assert flags[4:6] == ["--mount", Expand(value="type=image,source=nginx:alpine,target=/img")]
-
-    def test_mount_image_subpath(self) -> None:
-        svc = {
-            "image": "x",
-            "volumes": [{"type": "image", "source": "nginx", "target": "/img", "image": {"subpath": "/etc"}}],
-        }
-        flags = run_flags("app", svc, "p", "/proj")
-        assert flags[4:6] == ["--mount", Expand(value="type=image,source=nginx,target=/img,subpath=/etc")]
 
     def test_mount_image_read_only_emits_no_ro(self) -> None:
         # podman image mounts are inherently read-only; `ro` is rejected. read_only is validated but not emitted.

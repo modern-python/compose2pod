@@ -57,9 +57,12 @@ The two directions of the Docker-rejection parity rule
 in `parsing.py` comments and in tests, with no restatement at the call site.
 **Rule one**: a document `docker compose config` rejects, compose2pod
 rejects too — hard, no exceptions. **Rule two**: a document Docker accepts,
-compose2pod accepts whenever podman can express it; where it cannot, that is a
-*rule-two refusal* (measured, legitimate) or a *rule-two narrowing*. A refusal that
-cannot cite podman is a tracked limitation, never a design position.
+compose2pod accepts whenever podman can express it. That means every *supported*
+podman, from the declared floor to the newest version measured, so a mount option
+only a later podman has is refused until the floor reaches it. Where podman cannot
+express it, that is a *rule-two refusal* (measured, legitimate) or a *rule-two
+narrowing*. A refusal that cannot cite podman is a tracked limitation, never a
+design position.
 
 **Store**:
 The umbrella noun for a Compose `secret` or `config` — the two `StoreKind`s in
