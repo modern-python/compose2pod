@@ -486,6 +486,23 @@ def _validate_port_entry(name: str, key: str, entry: Any) -> None:  # noqa: ANN4
     raise UnsupportedComposeError(msg)
 
 
+def validate_expose(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
+    """Check `value` is a list of strings or whole numbers, which is all Docker checks.
+
+    Unlike `ports`, the content is never validated: `docker compose config` v5.1.2 keeps
+    `expose: [banana]`, `[""]` and `[-1]` verbatim, and enumerating a port grammar here
+    would refuse files it runs. What it does refuse is a non-list, and an entry that is
+    null, a bool, a float, a map or a list.
+    """
+    if not isinstance(value, list):
+        msg = f"service {name!r}: {key!r} must be a list"
+        raise UnsupportedComposeError(msg)
+    for entry in value:
+        if not isinstance(entry, str) and not _is_int(entry):
+            msg = f"service {name!r}: {key!r} entry {entry!r} must be a string or a whole number"
+            raise UnsupportedComposeError(msg)
+
+
 def validate_ports(name: str, key: str, value: Any) -> None:  # noqa: ANN401 - Compose values are untyped YAML/JSON
     """Check `value` is a list of port mappings. A bare string is refused, as Docker refuses it."""
     if not isinstance(value, list):

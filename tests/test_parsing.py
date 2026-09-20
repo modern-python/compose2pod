@@ -72,6 +72,41 @@ class TestValidate:
             with pytest.raises(UnsupportedComposeError, match=r"out of the pod's shared network namespace"):
                 validate({"services": {"app": {"image": "x", "network_mode": mode}}})
 
+    def test_links_is_refused_as_a_key_compose2pod_does_not_read_yet(self) -> None:
+        # `docker compose config` v5.1.2 normalises links into a depends_on edge plus an
+        # alias, so it is neither inert nor a namespace escape -- ADR-0003 swept it up with
+        # network_mode, and the measurement in issue 120 says otherwise.
+        for entry in (["db"], ["db:database"]):
+            with pytest.raises(UnsupportedComposeError, match=r"'links' is not supported: docker reads it as"):
+                validate({"services": {"db": {"image": "x"}, "app": {"image": "x", "links": entry}}})
+
+    def test_links_refusal_names_the_two_keys_that_replace_it(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'depends_on'.*aliases") as refusal:
+            validate({"services": {"db": {"image": "x"}, "app": {"image": "x", "links": ["db:database"]}}})
+
+        assert "podman" not in str(refusal.value)
+
+    def test_external_links_is_refused_for_naming_a_container_the_script_never_creates(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"'external_links' is not supported:.*extra_hosts"):
+            validate({"services": {"app": {"image": "x", "external_links": ["other:alias"]}}})
+
+    def test_expose_is_ignored_with_a_warning_rather_than_refused(self) -> None:
+        # Inert in a shared namespace: no dependency edge, never published, and docker
+        # validates nothing beyond the list shape (it keeps `banana`, measured v5.1.2).
+        warnings = validate({"services": {"app": {"image": "x", "expose": [8080, "9000/udp", "banana", ""]}}})
+
+        assert any("expose" in warning for warning in warnings)
+
+    def test_expose_shape_is_checked_even_though_it_is_ignored(self) -> None:
+        for bad in ("8080", 8080, {"a": 1}, [None], [True], [1.5], [{"target": 80}], [[80]]):
+            with pytest.raises(UnsupportedComposeError, match=r"'expose'"):
+                validate({"services": {"app": {"image": "x", "expose": bad}}})
+
+    def test_expose_accepts_the_empty_list(self) -> None:
+        # Warned like any ignored key, as `ports: []` is -- docker takes it, so the shape
+        # check must not treat an empty list as a missing one.
+        assert validate({"services": {"app": {"image": "x", "expose": []}}}) == ["service 'app': ignoring 'expose'"]
+
     def test_unsupported_healthcheck_key_raises(self) -> None:
         compose = {"services": {"app": {"image": "x", "healthcheck": {"test": "true", "start_interval": "1s"}}}}
         with pytest.raises(UnsupportedComposeError, match="start_interval"):

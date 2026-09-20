@@ -1,0 +1,7 @@
+services:
+  db:
+    image: nginx
+  app:
+    image: nginx
+    links:
+      - db:database

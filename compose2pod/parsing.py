@@ -43,6 +43,7 @@ def _validate_string_list(name: str, key: str, value: Any) -> None:  # noqa: ANN
 # here, or we would refuse a file it runs.
 IGNORED_SERVICE_KEYS: dict[str, Callable[[str, str, Any], None]] = {
     "ports": values.validate_ports,
+    "expose": values.validate_expose,
     "restart": values.validate_string,
     "stdin_open": _validate_bool,
     "tty": _validate_bool,
@@ -58,7 +59,24 @@ _POD_MODEL_REFUSALS = {
         "honouring it would move the container out of the pod's shared network namespace, "
         "where the localhost ports and hostnames its dependents use stop resolving"
     ),
+    "external_links": (
+        "it names a container this script does not create, and every name compose2pod writes "
+        "into the pod's hosts file resolves to 127.0.0.1 -- give the address explicitly in "
+        "'extra_hosts' instead"
+    ),
 }
+# Refused because compose2pod does not read the key yet, which ADR-0006 calls a tracked
+# limitation rather than a design position. Kept apart from the table above so the two
+# never share a sentence: this one is expected to shrink.
+_UNIMPLEMENTED_REFUSALS = {
+    "links": (
+        "docker reads it as a dependency on the linked service plus a hostname alias "
+        "(measured, v5.1.2), and compose2pod takes neither from this key -- declare the "
+        "dependency in 'depends_on' and the alias in 'networks.<network>.aliases'"
+    ),
+}
+# The categories above are the documented distinction; the gate only needs the reason.
+_REFUSAL_REASONS = _POD_MODEL_REFUSALS | _UNIMPLEMENTED_REFUSALS
 # The only service keys Docker tolerates an explicit null on, where it means
 # "not specified" (measured against `docker compose config`). Every other key
 # with a bare `key:` is refused -- see `_reject_null_values`.
@@ -797,8 +815,8 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
         if key in IGNORED_SERVICE_KEYS:
             IGNORED_SERVICE_KEYS[key](name, key, svc[key])
             warnings.append(f"service {name!r}: ignoring '{key}'")
-        elif key in _POD_MODEL_REFUSALS:
-            msg = f"service {name!r}: {key!r} is not supported: {_POD_MODEL_REFUSALS[key]}"
+        elif key in _REFUSAL_REASONS:
+            msg = f"service {name!r}: {key!r} is not supported: {_REFUSAL_REASONS[key]}"
             raise UnsupportedComposeError(msg)
         elif key not in SUPPORTED_SERVICE_KEYS:
             msg = f"service {name!r}: unsupported key '{key}'"
