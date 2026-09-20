@@ -130,19 +130,31 @@ def test_volumes_long_form_image_type_is_no_longer_an_over_rejection(
     assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
 
 
-def test_service_links_is_a_catalogued_over_rejection(
+def test_service_links_is_no_longer_an_over_rejection(
     assert_rule: Callable[[dict[str, Any]], str],
 ) -> None:
-    """Docker accepts `links: [db:database]`; compose2pod does not read the key yet.
+    """Docker accepts `links: [db:database]`, and since issue 132 so does compose2pod.
 
-    Asserted rather than left to the generic corpus run because `over-reject` is an allowed
-    verdict either way. What it pins is the measurement that reclassified this key in issue
-    120: docker normalises it to a `depends_on` edge plus an alias, so ignoring it with a
-    warning would drop a dependency the closure is built from. The day compose2pod reads
-    both halves, this flips to `both-accept` and the assertion says so.
+    This assertion is the one the issue said would report when the limitation closed: it
+    asserted `over-reject` while the key was refused, and the verdict it asserts now is the
+    measurement that replaced it. Left to the generic corpus run it would stay green either
+    way, `over-reject` being an allowed verdict -- which is exactly why the flip needs saying.
     """
     path = Path(__file__).parent / "corpus" / "service_links_alias.yaml"
-    assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
+
+
+def test_service_links_empty_alias_is_accepted_by_both(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """`links: ['db:']` is accepted by docker with a blank alias, so it cannot be refused here.
+
+    Asserted on the verdict for the same reason as the row above: an over-rejection of this
+    shape would pass the generic run silently, and refusing a document docker runs over an
+    alias that names nothing would be a limitation invented rather than measured.
+    """
+    path = Path(__file__).parent / "corpus" / "service_links_empty_alias.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"
 
 
 def test_service_external_links_is_a_catalogued_over_rejection(

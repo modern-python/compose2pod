@@ -43,15 +43,15 @@ variable's value is a fact about the machine the script runs on, which is not th
 machine that read the compose file.
 
 **Closure**:
-The target service and everything reachable from it through `depends_on`
-(`graph.startup_order`). It is the unit of scope for almost everything: only the
-closure joins the pod, so only the closure is emitted, only its hostnames are
-resolvable, and pod-level options (`dns`, `sysctls`, `extra_hosts`) are unioned and
-conflict-checked across it and nothing else. A service outside the closure never runs,
-which is why `profiles` is inert. Validation is not scoped to it, though: the dependency
-graph is checked document-wide (`graph.validate_graph`), because whether Docker rejects a
-document cannot depend on which service the caller happened to target
-([#87](https://github.com/modern-python/compose2pod/issues/87)).
+The target service and everything reachable from it through `depends_on` or `links`
+(`graph.startup_order`, over the one graph `graph.depends_on` returns for both keys). It is
+the unit of scope for almost everything: only the closure joins the pod, so only the closure
+is emitted, only its hostnames are resolvable, and pod-level options (`dns`, `sysctls`,
+`extra_hosts`) are unioned and conflict-checked across it and nothing else. A service outside
+the closure never runs, which is why `profiles` is inert. Validation is not scoped to it,
+though: the dependency graph is checked document-wide (`graph.validate_graph`), because
+whether Docker rejects a document cannot depend on which service the caller happened to
+target ([#87](https://github.com/modern-python/compose2pod/issues/87)).
 
 **Rule one / rule two**:
 The two directions of the Docker-rejection parity rule

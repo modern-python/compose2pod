@@ -73,7 +73,8 @@ Within that boundary it covers most of what real compose files use:
 - **Services** — `image`/`build`, `command`/`entrypoint`, `environment` and
   `env_file` (string and long-form `{path, required, format}`), `volumes`
   (short-form and long-form `--mount`, including the `bind` and `tmpfs`
-  option maps), `tmpfs`, `healthcheck`, `depends_on` (all conditions), network
+  option maps), `tmpfs`, `healthcheck`, `depends_on` (all conditions), `links`
+  (read as a dependency plus a hostname alias, as Docker reads it), network
   `aliases`, `hostname`/`container_name`.
 - **Confinement & metadata** — `user`, `working_dir`, `read_only`, `init`,
   `privileged`, `cap_add`/`cap_drop`, `security_opt`, `devices`, `group_add`,

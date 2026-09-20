@@ -347,8 +347,8 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     host_tokens = hosts_file_tokens(services, order, hosts)
     completion_gated = {
         dep
-        for svc in services.values()
-        for dep, condition in depends_on(svc).items()
+        for svc_name, svc in services.items()
+        for dep, condition in depends_on(svc_name, svc).items()
         if condition == "service_completed_successfully"
     }
     names: set[str] = set()
@@ -381,7 +381,7 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     names |= stores.referenced_variables(compose, order, options.project_dir)
     waited: set[str] = set()
     for name in order:
-        for dep, condition in depends_on(services[name]).items():
+        for dep, condition in depends_on(name, services[name]).items():
             if condition == "service_healthy" and dep not in waited:
                 interval = interval_seconds((services[dep].get("healthcheck") or {}).get("interval"))
                 attempts = max(HEALTHY_WAIT_BUDGET_SECONDS // interval, 1)

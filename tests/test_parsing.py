@@ -72,19 +72,24 @@ class TestValidate:
             with pytest.raises(UnsupportedComposeError, match=r"out of the pod's shared network namespace"):
                 validate({"services": {"app": {"image": "x", "network_mode": mode}}})
 
-    def test_links_is_refused_as_a_key_compose2pod_does_not_read_yet(self) -> None:
+    def test_links_is_accepted_in_both_forms_without_a_warning(self) -> None:
         # `docker compose config` v5.1.2 normalises links into a depends_on edge plus an
-        # alias, so it is neither inert nor a namespace escape -- ADR-0003 swept it up with
-        # network_mode, and the measurement in issue 120 says otherwise.
+        # alias, both of which compose2pod reads (issue 132). It is not inert, so unlike
+        # `expose` it is accepted silently rather than ignored with a warning.
         for entry in (["db"], ["db:database"]):
-            with pytest.raises(UnsupportedComposeError, match=r"'links' is not supported: docker reads it as"):
-                validate({"services": {"db": {"image": "x"}, "app": {"image": "x", "links": entry}}})
+            assert validate({"services": {"db": {"image": "x"}, "app": {"image": "x", "links": entry}}}) == []
 
-    def test_links_refusal_names_the_two_keys_that_replace_it(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match=r"'depends_on'.*aliases") as refusal:
-            validate({"services": {"db": {"image": "x"}, "app": {"image": "x", "links": ["db:database"]}}})
+    def test_links_naming_an_undefined_service_is_refused_at_the_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app': unknown dependency 'ghost'"):
+            validate({"services": {"app": {"image": "x", "links": ["ghost"]}}})
 
-        assert "podman" not in str(refusal.value)
+    def test_a_self_link_is_refused_at_the_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"dependency cycle involving 'app'"):
+            validate({"services": {"app": {"image": "x", "links": ["app"]}}})
+
+    def test_malformed_links_is_refused_at_the_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"service 'app': 'links' must be a list"):
+            validate({"services": {"db": {"image": "x"}, "app": {"image": "x", "links": "db"}}})
 
     def test_external_links_is_refused_for_naming_a_container_the_script_never_creates(self) -> None:
         with pytest.raises(UnsupportedComposeError, match=r"'external_links' is not supported:.*extra_hosts"):

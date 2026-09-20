@@ -65,18 +65,6 @@ _POD_MODEL_REFUSALS = {
         "'extra_hosts' instead"
     ),
 }
-# Refused because compose2pod does not read the key yet, which ADR-0006 calls a tracked
-# limitation rather than a design position. Kept apart from the table above so the two
-# never share a sentence: this one is expected to shrink.
-_UNIMPLEMENTED_REFUSALS = {
-    "links": (
-        "docker reads it as a dependency on the linked service plus a hostname alias "
-        "(measured, v5.1.2), and compose2pod takes neither from this key -- declare the "
-        "dependency in 'depends_on' and the alias in 'networks.<network>.aliases'"
-    ),
-}
-# The categories above are the documented distinction; the gate only needs the reason.
-_REFUSAL_REASONS = _POD_MODEL_REFUSALS | _UNIMPLEMENTED_REFUSALS
 # The only service keys Docker tolerates an explicit null on, where it means
 # "not specified" (measured against `docker compose config`). Every other key
 # with a bare `key:` is refused -- see `_reject_null_values`.
@@ -815,8 +803,8 @@ def _validate_service(name: str, svc: Any) -> list[str]:  # noqa: ANN401 - Compo
         if key in IGNORED_SERVICE_KEYS:
             IGNORED_SERVICE_KEYS[key](name, key, svc[key])
             warnings.append(f"service {name!r}: ignoring '{key}'")
-        elif key in _REFUSAL_REASONS:
-            msg = f"service {name!r}: {key!r} is not supported: {_REFUSAL_REASONS[key]}"
+        elif key in _POD_MODEL_REFUSALS:
+            msg = f"service {name!r}: {key!r} is not supported: {_POD_MODEL_REFUSALS[key]}"
             raise UnsupportedComposeError(msg)
         elif key not in SUPPORTED_SERVICE_KEYS:
             msg = f"service {name!r}: unsupported key '{key}'"
@@ -1030,7 +1018,7 @@ def _validate_depends_on(services: dict[str, Any]) -> None:
     """
     validate_graph(services)
     for name, svc in services.items():
-        for dep, condition in depends_on(svc).items():
+        for dep, condition in depends_on(name, svc).items():
             if condition not in DEPENDS_ON_CONDITIONS:
                 msg = f"service {name!r}: depends_on {dep!r} has unsupported condition {condition!r}"
                 raise UnsupportedComposeError(msg)

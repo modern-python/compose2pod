@@ -1195,6 +1195,63 @@ class TestHostsFileClosureScope:
             assert f"127.0.0.1 {host}" in script
 
 
+class TestLinksInTheEmittedScript:
+    """`links` supplies a startup edge and a hosts-file name, nothing else (issue 132)."""
+
+    def _options(self, target: str) -> EmitOptions:
+        return EmitOptions(
+            target=target,
+            ci_image="ci:latest",
+            command="",
+            pod="test-pod",
+            project_dir=".",
+            artifacts=[],
+            allow_exit_codes=[],
+        )
+
+    def test_a_linked_service_starts_before_the_target(self) -> None:
+        compose = {"services": {"db": {"image": "x"}, "app": {"image": "x", "links": ["db:database"]}}}
+        script = emit_script(compose=compose, options=self._options("app"))
+        assert "test-pod-db" in script
+        assert script.index("test-pod-db") < script.index("test-pod-app")
+
+    def test_the_alias_resolves_and_so_does_the_linked_service_name(self) -> None:
+        compose = {"services": {"db": {"image": "x"}, "app": {"image": "x", "links": ["db:database"]}}}
+        script = emit_script(compose=compose, options=self._options("app"))
+        for host in ("db", "database", "app"):
+            assert f"127.0.0.1 {host}" in script
+
+    def test_the_plain_form_adds_the_dependency_and_no_name(self) -> None:
+        compose = {"services": {"db": {"image": "x"}, "app": {"image": "x", "links": ["db"]}}}
+        script = emit_script(compose=compose, options=self._options("app"))
+        assert "test-pod-db" in script
+        assert "127.0.0.1 db" in script
+
+    def test_an_alias_colliding_with_extra_hosts_is_refused(self) -> None:
+        # A links alias is fixed at 127.0.0.1 like every other pod-internal name, so an
+        # `extra_hosts` entry giving the same name a real address is the same conflict
+        # `hosts_file_tokens` already refuses for a hostname or a network alias.
+        compose = {
+            "services": {
+                "db": {"image": "x"},
+                "app": {"image": "x", "links": ["db:database"], "extra_hosts": ["database:1.2.3.4"]},
+            }
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"conflicting host 'database'"):
+            emit_script(compose=compose, options=self._options("app"))
+
+    def test_an_alias_declared_outside_the_closure_does_not_reach_the_hosts_file(self) -> None:
+        compose = {
+            "services": {
+                "app": {"image": "x"},
+                "db": {"image": "x"},
+                "other": {"image": "x", "links": ["db:unreachable"]},
+            }
+        }
+        script = emit_script(compose=compose, options=self._options("app"))
+        assert "unreachable" not in script
+
+
 class TestGuardedEnvFileDependencyWiring:
     def test_env_file_guarded_on_dependency_service(self) -> None:
         # Proves the prelude wiring on the `-d` dependency branch (not just the target),

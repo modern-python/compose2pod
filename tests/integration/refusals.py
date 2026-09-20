@@ -39,10 +39,8 @@ is the short form's rather than podman's.
 Four claims, four experiments. The keys refused under ADR-0003 have no rows, because
 their reason is the pod model rather than rule two: podman honours `network_mode` for a
 container that joined a pod (#115), and `external_links` names a container the generated
-script never creates, which is a fact about the script. `links` has none either, for a
-third reason -- it is a form compose2pod does not read yet (#120). The gate that every
-rule-two site has a row is issue #109 phase 3, and those are the exemptions it has to
-know about.
+script never creates, which is a fact about the script. The gate that every rule-two site
+has a row is issue #109 phase 3, and those are the exemptions it has to know about.
 
 A `subpath` row measures the floor, not podman as such: podman gained the option above
 the supported minimum (ADR-0006), so the row goes red on a runner newer than the floor,
