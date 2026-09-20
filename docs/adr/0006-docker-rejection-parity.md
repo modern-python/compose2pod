@@ -30,7 +30,10 @@ four kinds of claim need four experiments: `REFUSALS` for the mounts podman will
 two), and, where the claim is about podman's flag surface rather than a mount, `ABSENT_FLAGS` for a
 flag podman does not have and `STUB_FLAGS` for one it has that validates nothing -- a flag accepting
 `nonsense` is a worse reason to emit it than a flag that fails, since the script would report
-success for something it never did. A gate that every rule-two site has a row is
+success for something it never did. `tests/integration/acceptances.py` runs the
+mirror image, every flag a long-form mount compiles to, because a rule-two claim fails in both
+directions: #104 and #114 each shipped a form the gate accepted and podman would not run. A gate
+that every rule-two site has a row is
 [#109](https://github.com/modern-python/compose2pod/issues/109) phase 3, and it has to carry the
 exemptions first: not every refusal this document names turns out to be one podman makes.
 Verdicts are per version, and the supported range is stated rather than implied: the rulings here

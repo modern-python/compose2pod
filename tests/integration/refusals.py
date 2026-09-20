@@ -4,7 +4,8 @@ ADR-0006 draws a line: compose2pod accepts whatever Docker accepts *whenever pod
 can express it*, and refuses where podman cannot. Nothing ran podman to check which
 side of that line a refusal sat on, which is how issue #86's unmeasured "podman can
 express it" became #104's shipped acceptance of a script that dies at `podman run`.
-These tables turn each claim back into a measurement, in both directions:
+These tables turn each claim back into a measurement. The mirror image, that a form
+the gate *accepts* compiles to a flag podman runs, is `acceptances.py`.
 
 - `REFUSALS` -- podman will not make this mount, so refusing is rule two.
 - `LIMITATIONS` -- podman *will* make it and we refuse anyway, so the refusal is the
