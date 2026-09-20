@@ -5,7 +5,8 @@ Two rules, one direction each. A document `docker compose config` rejects, compo
 rootless runners and accepting a file Docker refuses turns a hard error into a green CI run. A
 document Docker accepts, compose2pod accepts whenever podman can express it inside a pod. Where
 podman cannot, that is a legitimate refusal (`network_mode`; `sysctls: ["a"]` with no value;
-`volumes: ["a"]`, which podman rejects as a relative mount target), and where compose2pod merely
+`volumes: ["a"]`, which podman rejects as a relative mount target; a drive-qualified volume source
+such as `C:\data:/var`, whose colon podman's `-v` cannot carry), and where compose2pod merely
 does not parse a form yet, that is a tracked limitation, never a design position. Docker's
 verdict binds only on the document, not the host: `env_file` existence, `${VAR:?}`, and a
 negative on a top-level numeric key are facts about the machine that runs the script and are
