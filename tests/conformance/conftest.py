@@ -65,7 +65,9 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
         terminalreporter.write_line(label)
     terminalreporter.write_line(
         f"{len(over_rejections)} over-rejection(s) -- catalogued limitations, not failures; "
-        "cross-check against the open limitation issues"
+        "each is ruled on in docs/adr/0003-the-shared-namespace-decides-key-classification.md "
+        "or docs/adr/0006-docker-rejection-parity.md, and one with no ruling there is the thing "
+        "to chase"
     )
 
 

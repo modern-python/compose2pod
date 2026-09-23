@@ -68,8 +68,14 @@ rule allows. The price is the reason the issue stayed open rather than something
 service's typo now refuses the file for every target in it. Both documents moved out of a residual
 catalogue and into `tests/conformance/corpus/`, where `assert_rule` -- which raises on exactly that
 combination -- is what holds them closed, so the rule is hard everywhere with nothing suspended.
-What remains open is a limitation rather than a residual: the drive-qualified *bind*
-(`C:\data:/var`), since podman mounts that source through `--mount` and only the short `-v` spec
-cannot spell it -- the long form already emits `--mount`, so the capability is reachable today and
-only the short spelling is missing
-([#111](https://github.com/modern-python/compose2pod/issues/111)).
+One over-rejection is settled rather than open: the drive-qualified *bind* (`C:\data:/var`).
+podman mounts that source through `--mount` and only the short `-v` spec cannot spell it, so the
+capability is reachable today -- the long form emits exactly the invocation measured at exit 0,
+and a `LIMITATIONS` row asserts it continuously. What was left was the ergonomic question, and
+[#111](https://github.com/modern-python/compose2pod/issues/111) closed it as working as intended:
+on Linux that spelling overwhelmingly means a Windows user pointed at a drive that is
+not there, and falling back to `--mount` would bind a relative directory literally named
+`C:\data`, surfacing much later as an empty mount instead of at once as an error naming the long
+form. So the refusal is the tool, not a gap waiting to be filled. What would reopen it is a real
+document wanting a colon in a short-form bind source on Linux, which is the evidence
+[#86](https://github.com/modern-python/compose2pod/issues/86) never had.
