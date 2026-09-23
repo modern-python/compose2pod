@@ -195,48 +195,29 @@ def _flags_for(svc: dict[str, Any], pod: str, kind: StoreKind) -> list[Token]:
     return tokens
 
 
-def _create_lines_for(
-    compose: dict[str, Any],
-    pod: str,
-    project_dir: str,
-    names: list[str],
-    kind: StoreKind,
-) -> list[str]:
-    """`podman secret create` lines for the referenced stores (file or environment source)."""
-    defs = compose.get(kind.top_key) or {}
-    lines: list[str] = []
-    for name in names:
-        definition = defs[name]
-        store = f"{pod}-{kind.prefix}{name}"
-        if isinstance(definition.get("file"), str):
-            path = to_shell(str(Path(project_dir, definition["file"])))
-            lines.append(f"podman secret create {store} {path}")
-        elif isinstance(definition.get("content"), str):
-            lines.append(f"printf '%s' {to_shell(definition['content'])} | podman secret create {store} -")
-        else:
-            var = definition["environment"]
-            lines.append(f"printf '%s' \"${{{var}-}}\" | podman secret create {store} -")
-    return lines
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class CreateStep:
+    """One `podman secret create` line paired with the run-time variables it expands."""
+
+    line: str
+    variables: frozenset[str]
 
 
-def _referenced_variables_for(
-    compose: dict[str, Any],
-    project_dir: str,
-    names: list[str],
-    kind: StoreKind,
-) -> set[str]:
-    """Run-time variable names the create lines expand (env-source vars + file-path vars)."""
-    defs = compose.get(kind.top_key) or {}
-    result: set[str] = set()
-    for name in names:
-        definition = defs[name]
-        if isinstance(definition.get("file"), str):
-            result |= variable_names(str(Path(project_dir, definition["file"])))
-        elif isinstance(definition.get("content"), str):
-            result |= variable_names(definition["content"])
-        else:
-            result.add(definition["environment"])
-    return result
+def _create(definition: dict[str, Any], store: str, project_dir: str) -> CreateStep:
+    """Render one store's create line and the variables that line expands, from one binding.
+
+    Whichever source the store declares, the expandable text is bound once and
+    both outputs are read off that binding, so a line cannot expand a variable
+    the caller is never told about.
+    """
+    if isinstance(definition.get("file"), str):
+        value = str(Path(project_dir, definition["file"]))
+        line = f"podman secret create {store} {to_shell(value)}"
+    else:
+        content = definition.get("content")
+        value = content if isinstance(content, str) else "${" + definition["environment"] + "}"
+        line = f"printf '%s' {to_shell(value)} | podman secret create {store} -"
+    return CreateStep(line=line, variables=frozenset(variable_names(value)))
 
 
 def validate(compose: dict[str, Any]) -> None:
@@ -268,19 +249,14 @@ def teardown_line(compose: dict[str, Any], order: list[str], pod: str) -> str:
     return f"podman secret rm {' '.join(names)} >/dev/null 2>&1 || true"
 
 
-def create_lines(compose: dict[str, Any], order: list[str], pod: str, project_dir: str) -> list[str]:
-    """`podman secret create` lines for every referenced store (secrets, then configs)."""
+def create_steps(compose: dict[str, Any], order: list[str], pod: str, project_dir: str) -> list[CreateStep]:
+    """Create line plus expanded variables for every referenced store (secrets, then configs)."""
     services = compose.get("services") or {}
-    lines: list[str] = []
+    steps: list[CreateStep] = []
     for kind in _STORE_KINDS:
-        lines += _create_lines_for(compose, pod, project_dir, _referenced_names(services, order, kind), kind)
-    return lines
-
-
-def referenced_variables(compose: dict[str, Any], order: list[str], project_dir: str) -> set[str]:
-    """Run-time variable names every referenced store's create lines expand."""
-    services = compose.get("services") or {}
-    result: set[str] = set()
-    for kind in _STORE_KINDS:
-        result |= _referenced_variables_for(compose, project_dir, _referenced_names(services, order, kind), kind)
-    return result
+        defs = compose.get(kind.top_key) or {}
+        steps += [
+            _create(defs[name], f"{pod}-{kind.prefix}{name}", project_dir)
+            for name in _referenced_names(services, order, kind)
+        ]
+    return steps
