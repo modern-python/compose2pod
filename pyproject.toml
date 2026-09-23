@@ -22,10 +22,13 @@ classifiers = [
 version = "0"
 
 [project.optional-dependencies]
-# Split rather than raised: 6.0.3 is the first PyYAML with a cp314 wheel, and 6.0's sdist
-# does not build on 3.14, but an older interpreter has no reason to lose the lower floor.
+# Split per interpreter because PyYAML's wheel coverage is: 6.0.1 is the first with a cp312
+# wheel, 6.0.2 the first with cp313 and 6.0.3 the first with cp314, whose sdist 6.0 cannot
+# build. An older interpreter has no reason to lose the lower floor.
 yaml = [
-    "PyYAML>=6; python_version < '3.14'",
+    "PyYAML>=6; python_version < '3.12'",
+    "PyYAML>=6.0.1; python_version == '3.12'",
+    "PyYAML>=6.0.2; python_version == '3.13'",
     "PyYAML>=6.0.3; python_version >= '3.14'",
 ]
 
