@@ -51,6 +51,7 @@ module-root = ""
 
 [dependency-groups]
 dev = [
+    "packaging",
     "pytest",
     "pytest-cov",
 ]
