@@ -54,6 +54,7 @@ dev = [
     "packaging",
     "pytest",
     "pytest-cov",
+    "tomli",
 ]
 lint = [
     "ruff",
