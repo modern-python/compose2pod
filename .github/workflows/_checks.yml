@@ -56,7 +56,9 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml"
       - run: uv python install ${{ matrix.python-version }}
       - run: uv venv --python ${{ matrix.python-version }}
-      - run: uv pip install --resolution lowest-direct --only-binary PyYAML ".[yaml]"
+      - name: Pin every declared floor
+        run: uv run --no-project --with packaging --with tomli python scripts/floor_constraints.py > floors.txt
+      - run: uv pip install --resolution lowest-direct --constraints floors.txt --only-binary PyYAML ".[yaml]"
       - run: uv run --no-project python -c "import compose2pod, yaml; print(yaml.__version__)"
 
   pytest:
