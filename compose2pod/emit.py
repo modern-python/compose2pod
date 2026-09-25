@@ -377,8 +377,9 @@ def _plan(compose: dict[str, Any], options: EmitOptions) -> PlannedScript:
     # running as a non-root user can read the bind-mounted /etc/hosts. Without
     # this, glibc falls through to DNS and name resolution fails.
     lines.append('chmod 644 "$hostsfile"')
-    lines.extend(stores.create_lines(compose, order, options.pod, options.project_dir))
-    names |= stores.referenced_variables(compose, order, options.project_dir)
+    for step in stores.create_steps(compose, order, options.pod, options.project_dir):
+        lines.append(step.line)
+        names |= step.variables
     waited: set[str] = set()
     for name in order:
         for dep, condition in depends_on(name, services[name]).items():
