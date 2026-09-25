@@ -42,6 +42,7 @@ jobs:
     # compiling an sdist is not a floor a user of one can install.
     # 3.14t is out: no PyYAML release ships a cp314t wheel, so that job would measure
     # upstream's gap rather than this repo's floor.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
