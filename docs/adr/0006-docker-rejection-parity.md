@@ -79,10 +79,10 @@ named volume) ([#114](https://github.com/modern-python/compose2pod/issues/114)),
 `mode` is refused at the other end of the range, where podman 6.0.1's `crun` will not mount it.
 The `integration` job pins `ubuntu-24.04` for the same reason: it is the runner that ships the
 floor, and on a newer one the job would measure a podman no user of the floor has.
-The hard rule has no exceptions left. It had three classes, and the third outlived the sentence
-that first said this. Docker's identifier grammar, `[a-zA-Z0-9._-]+`, was never modelled: a
-service, volume, secret or config could be named `a b`, `a/b` or `""`, all of which
-`docker compose config` refuses outright and all of which compose2pod took
+The hard rule has no exceptions left. It has had four classes, and each of the last two
+outlived a version of that sentence. Docker's identifier grammar, `[a-zA-Z0-9._-]+`, was
+never modelled: a service, volume, secret or config could be named `a b`, `a/b` or `""`,
+all of which `docker compose config` refuses outright and all of which compose2pod took
 ([#143](https://github.com/modern-python/compose2pod/issues/143)). One pattern in `values`
 holds it now, applied where Docker applies it -- which is not where it reads: the keys of
 top-level `services`, `volumes`, `secrets` and `configs`, and a service's *long-form* `networks`
@@ -98,7 +98,14 @@ form is a third: there `type` has already said which kind the entry is, so any s
 volume.
 Why the harness never saw it: the generated matrix varies a key's *value* over hostile shapes and
 never touches a map key, so no probe could reach a name. `test_identifier_grammar_matches_docker`
-now generates the missing axis from the same tuple the gate reads.
+now generates the missing axis from the same tuple the gate reads. The fourth class turned
+up on the sweep meant to confirm the third was the last, and it is a shape neither a
+grammar nor a probe over hostile keys could have caught: Docker does not judge the
+top-level `name`, it *rewrites* it, and refuses only when nothing survives, so
+`name: "ä"` is a document it will not read. `parsing._validate_project_name` measures that rewrite.
+Twice now "no exceptions left" has been written and then falsified, which is the argument
+for the generated axes over the enumeration: what keeps the claim true is the probes, not
+the list.
 The first two exceptions were the same one: a `depends_on`
 naming an undefined service, and a dependency cycle, among services outside the target's closure
 were rejected by Docker and accepted here

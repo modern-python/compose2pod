@@ -2421,3 +2421,42 @@ class TestNamedVolumeSourceGrammar:
             "services": {"app": {"image": "x", "volumes": [{"type": "volume", "source": "${V}", "target": "/x"}]}}
         }
         validate(doc)
+
+
+class TestProjectName:
+    """Docker rewrites the project name and refuses the result if nothing survives."""
+
+    def _doc(self, name: str) -> dict:
+        return {"name": name, "services": {"app": {"image": "x"}}}
+
+    @pytest.mark.parametrize("name", ["\xe4", "!!!", "\u4e2d\u6587", "   ", "...", "_-_", "-"])
+    def test_a_name_that_normalizes_to_nothing_is_refused(self, name: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match="empty project name"):
+            validate(self._doc(name))
+
+    @pytest.mark.parametrize("name", ["ok", "A B", "_z", "a.b", "9", "z-", "\xe41"])
+    def test_a_name_with_a_surviving_character_is_accepted(self, name: str) -> None:
+        validate(self._doc(name))
+
+    @pytest.mark.parametrize("name", ["\u0130", "\u212a", "\u0130\u212a"])
+    def test_a_character_that_lowercases_into_ascii_survives(self, name: str) -> None:
+        """Docker lowercases before it strips, and exactly two codepoints exploit that.
+
+        U+0130 and U+212A are the only characters above ASCII whose lowercase is an
+        ASCII letter, so docker reads them as `i` and `k` and accepts. Refusing them
+        would be an over-rejection on a two-character corner of Unicode.
+        """
+        validate(self._doc(name))
+
+    def test_an_empty_name_is_unset_rather_than_invalid(self) -> None:
+        """Measured: docker falls back to the directory name instead of refusing."""
+        validate(self._doc(""))
+
+    @pytest.mark.parametrize("name", ["${_}", "-${_}-"])
+    def test_a_variable_name_is_left_to_the_shell_that_reads_the_file(self, name: str) -> None:
+        """Measured: `${P}` is refused unset and accepted with `P=ok`, so the verdict is the host's.
+
+        Both names carry no ASCII character of their own, so the carve-out is what
+        decides them -- `${P}` would pass on the `P` alone and prove nothing.
+        """
+        validate(self._doc(name))

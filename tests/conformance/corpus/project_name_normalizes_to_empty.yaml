@@ -1,0 +1,8 @@
+# Measured REJECT by `docker compose config` v5.1.2: `project name must not be empty`.
+# The rewrite this document falls foul of is described at
+# `parsing._validate_project_name`; a non-ASCII letter leaves nothing behind, so this is
+# rule one.
+name: "ä"
+services:
+  app:
+    image: nginx

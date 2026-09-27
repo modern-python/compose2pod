@@ -1587,6 +1587,40 @@ def _validate_top_level_scalar_strings(compose: dict[str, Any]) -> None:
             raise UnsupportedComposeError(msg)
 
 
+# `str.isalnum` cannot stand in for this: it is Unicode-aware and would count
+# the `ä` Docker throws away.
+_PROJECT_NAME_SURVIVOR = re.compile(r"[a-zA-Z0-9]")
+
+
+def _validate_project_name(compose: dict[str, Any]) -> None:
+    """Refuse a top-level `name` Docker normalizes away to nothing.
+
+    Docker holds the project name to no pattern; it rewrites it and refuses
+    the result only if it is empty. Measured against `docker compose config`
+    v5.1.2: it lowercases, drops every character outside `[a-z0-9_-]`, then
+    drops leading `_` and `-`, so `A B` becomes `ab`, `_z` becomes `z` and
+    `z-` stays `z-`. Only a character that is, or lowercases into, an ASCII
+    letter or digit is sure to survive -- which is why the test runs over
+    `name.lower()`: `İ` (U+0130) and `K` (U+212A) are the two codepoints in
+    Unicode whose lowercase is ASCII, docker reads them as `i` and `k`, and
+    refusing them would be an over-rejection.
+
+    An absent or empty `name:` is an unset name, not a bad one: Docker falls
+    back to the directory name and accepts.
+
+    A `${VAR}` reference is skipped: `name: "${P}"` is refused with `P` unset
+    and accepted with `P=ok`, so the verdict belongs to the shell reading the
+    file. Runs after `_validate_top_level_scalar_strings`, which has already
+    refused a non-string `name`, so an absent one is the only non-`str` left.
+    """
+    name = compose.get("name")
+    if not name or values.has_variable(name):
+        return
+    if not _PROJECT_NAME_SURVIVOR.search(name.lower()):
+        msg = f"top-level 'name' {name!r} normalizes to an empty project name (Docker keeps only [a-z0-9_-])"
+        raise UnsupportedComposeError(msg)
+
+
 # The top-level blocks whose KEYS Docker holds to its name grammar. `networks`
 # is absent by measurement, not oversight: `networks: {"a b": {}}` on its own
 # is accepted by `docker compose config` v5.1.2, and the grammar bites on the
@@ -1627,6 +1661,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
         raise UnsupportedComposeError(msg)
     _reject_null_top_level_blocks(compose)
     _validate_top_level_scalar_strings(compose)
+    _validate_project_name(compose)
     _validate_top_level_names(compose)
     if "networks" in compose:
         warnings.append("ignoring top-level 'networks' (all services share the pod namespace)")
