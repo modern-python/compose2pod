@@ -4,7 +4,7 @@ import re
 from typing import Any, cast
 
 from compose2pod.exceptions import UnsupportedComposeError
-from compose2pod.values import has_variable, is_bool_like
+from compose2pod.values import has_variable, is_bool_like, validate_hosts_file_field
 
 
 # Docker's own schema for a long-form `depends_on` entry (measured against
@@ -183,12 +183,19 @@ def _link_aliases(name: str, svc: dict[str, Any]) -> list[str]:
     127.0.0.1 -- only for the service it names to be running, which is what the
     edge `depends_on` takes from the same entry guarantees.
     """
-    return [alias for _service, alias in _link_entries(name, svc) if alias]
+    aliases = [alias for _service, alias in _link_entries(name, svc) if alias]
+    for alias in aliases:
+        validate_hosts_file_field(name, "links alias", alias)
+    return aliases
 
 
 def _host_names(name: str, svc: dict[str, Any]) -> list[str]:
     """Names one service is reachable by: hostname, container_name, and network aliases."""
-    result: list[str] = [value for key in ("hostname", "container_name") if (value := _validated_name(name, key, svc))]
+    result: list[str] = []
+    for key in ("hostname", "container_name"):
+        if value := _validated_name(name, key, svc):
+            validate_hosts_file_field(name, key, value)
+            result.append(value)
     networks = svc.get("networks")
     if networks is not None and not isinstance(networks, list | dict):
         msg = f"service {name!r}: networks must be a list or mapping"
@@ -203,6 +210,8 @@ def _host_names(name: str, svc: dict[str, Any]) -> list[str]:
                 if not isinstance(aliases, list) or not all(isinstance(alias, str) for alias in aliases):
                     msg = f"service {name!r}: aliases must be a list of strings"
                     raise UnsupportedComposeError(msg)
+                for alias in aliases:
+                    validate_hosts_file_field(name, "network alias", alias)
                 result.extend(aliases)
     return result
 
@@ -218,6 +227,7 @@ def hostnames(services: dict[str, Any]) -> list[str]:
     """
     names = list(services)
     for name, svc in services.items():
+        validate_hosts_file_field(name, "name", name)
         names.extend(_host_names(name, svc))
         names.extend(_link_aliases(name, svc))
     return names

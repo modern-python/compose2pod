@@ -345,3 +345,37 @@ class TestLinksInTheGraph:
     def test_a_linked_service_joins_the_startup_closure(self) -> None:
         services = {"db": {"image": "x"}, "app": {"image": "x", "links": ["db:database"]}}
         assert startup_order(services, "app") == ["db", "app"]
+
+
+class TestNamesTheHostsFileCannotSpell:
+    def test_hostname_with_a_space(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="service 'app': hostname 'a b'"):
+            hostnames({"app": {"image": "x", "hostname": "a b"}})
+
+    def test_container_name_with_a_space(self) -> None:
+        # `_CONTAINER_NAME` is a `search`, so a name whose first two characters
+        # are legal passes it however it continues.
+        with pytest.raises(UnsupportedComposeError, match="container_name 'ab cd'"):
+            hostnames({"app": {"image": "x", "container_name": "ab cd"}})
+
+    def test_network_alias_with_a_hash(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="network alias 'a#b'"):
+            hostnames({"app": {"image": "x", "networks": {"n": {"aliases": ["a#b"]}}}})
+
+    def test_network_alias_that_is_empty(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="network alias ''"):
+            hostnames({"app": {"image": "x", "networks": {"n": {"aliases": [""]}}}})
+
+    def test_links_alias_with_a_space(self) -> None:
+        services = {"db": {"image": "x"}, "app": {"image": "x", "links": ["db:a b"]}}
+        with pytest.raises(UnsupportedComposeError, match="service 'app': links alias 'a b'"):
+            hostnames(services)
+
+    def test_service_name_with_a_newline(self) -> None:
+        # Docker refuses this service name under its own grammar too (issue 143),
+        # so here the narrowing and rule one land on the same document.
+        with pytest.raises(UnsupportedComposeError, match=r"service 'a\\nb': name 'a\\nb'"):
+            hostnames({"a\nb": {"image": "x"}})
+
+    def test_a_blank_link_alias_still_contributes_nothing(self) -> None:
+        assert hostnames({"db": {"image": "x"}, "app": {"image": "x", "links": ["db:"]}}) == ["db", "app"]

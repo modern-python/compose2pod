@@ -1,0 +1,12 @@
+# Measured ACCEPT by `docker compose config` v5.1.2: an alias is a free string. In the pod's
+# /etc/hosts a `#` starts a comment, so `a#b` would grant the name `a` and silently drop the
+# rest. Refused (issue 142).
+services:
+  app:
+    image: nginx
+    networks:
+      n:
+        aliases:
+          - "a#b"
+networks:
+  n: {}

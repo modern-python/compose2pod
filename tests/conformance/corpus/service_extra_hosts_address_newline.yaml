@@ -1,0 +1,9 @@
+# Measured ACCEPT by `docker compose config` v5.1.2: the address half of an `extra_hosts`
+# entry is as unconstrained as the host half. A newline there ends the hosts-file line, so
+# the pod's file would gain a second entry at an address the document chose rather than the
+# one it declared. Refused (issue 142).
+services:
+  app:
+    image: nginx
+    extra_hosts:
+      - "good:1.2.3.4\n5.6.7.8 evil"

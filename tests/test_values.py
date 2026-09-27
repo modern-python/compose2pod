@@ -615,3 +615,20 @@ def test_as_bool_true(value: object) -> None:
 @pytest.mark.parametrize("value", [False, *BOOL_FALSE_SPELLINGS])
 def test_as_bool_false(value: object) -> None:
     assert as_bool(value) is False
+
+
+class TestValidateHostsFileField:
+    """The grammar of either field the pod's own /etc/hosts can carry: a name or an address."""
+
+    @pytest.mark.parametrize("value", ["a b", "a\tb", "a\nb", "a\rb", "a\vb", "a\fb", "a#b", ""])
+    def test_a_name_the_file_cannot_spell_is_refused(self, value: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match="/etc/hosts"):
+            values.validate_hosts_file_field("app", "hostname", value)
+
+    @pytest.mark.parametrize("value", ["ab", "a-b", "a_b", "a.b", "a\xa0b", "1.2.3.4", "${IP}"])
+    def test_a_name_it_can_spell_is_accepted(self, value: str) -> None:
+        values.validate_hosts_file_field("app", "hostname", value)
+
+    def test_the_refusal_names_the_service_and_the_key(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="service 'db': network alias 'a b'"):
+            values.validate_hosts_file_field("db", "network alias", "a b")

@@ -309,6 +309,30 @@ def validate_duration(name: str, key: str, value: Any) -> None:  # noqa: ANN401 
     raise UnsupportedComposeError(msg)
 
 
+_UNSPELLABLE_IN_HOSTS_FILE = frozenset(" \t\n\r\v\f#")
+
+
+def validate_hosts_file_field(name: str, key: str, value: str) -> None:
+    """Refuse a field compose2pod cannot write into the pod's own /etc/hosts.
+
+    Docker takes all of these, because it answers names from a DNS server and
+    never has to spell one in a file. compose2pod owns the file instead
+    (`pod.hosts_file_tokens`, under `--no-hosts`), and its grammar is
+    `ADDRESS NAME...` with fields split on ASCII blanks and `#` opening a
+    comment. Either field carrying one is read back as something the document
+    did not ask for -- two names, a truncated one, or, for a newline, an
+    entire extra entry at an address of the author's choosing. Non-ASCII
+    whitespace is left alone on purpose: no libc reading the file treats it as
+    a separator, so refusing it would be a narrowing the format does not force.
+    """
+    if not value or _UNSPELLABLE_IN_HOSTS_FILE.intersection(value):
+        msg = (
+            f"service {name!r}: {key} {value!r} cannot go in the pod's /etc/hosts "
+            "(a field cannot be empty or contain whitespace or '#')"
+        )
+        raise UnsupportedComposeError(msg)
+
+
 def _parse_port_range(value: str) -> tuple[int, int]:
     if "-" in value:
         start, end = value.split("-", 1)

@@ -1,0 +1,8 @@
+# Measured ACCEPT by `docker compose config` v5.1.2: a `hostname` is a free string, so a
+# newline in it is a document docker runs. compose2pod writes the pod's /etc/hosts itself,
+# and a newline there ends the line -- the file would gain an entry the document never
+# asked for, mapping an arbitrary name to an arbitrary address. Refused (issue 142).
+services:
+  app:
+    image: nginx
+    hostname: "web\n1.2.3.4 evil"

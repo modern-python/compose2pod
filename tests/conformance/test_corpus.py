@@ -226,3 +226,30 @@ def test_volume_single_letter_source_is_a_catalogued_over_rejection(
     """
     path = Path(__file__).parent / "corpus" / "volume_single_letter_source.yaml"
     assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
+
+
+def test_hostname_newline_is_a_catalogued_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """Docker accepts a newline in `hostname`; the pod's /etc/hosts cannot carry one.
+
+    Pinned rather than left to the generic run because `over-reject` is an allowed
+    verdict, so that run stays green whichever way the file falls. The claim worth
+    holding is the stronger one: docker really does take this document, which is what
+    makes the refusal a narrowing the hosts-file format forces rather than rule one.
+    """
+    path = Path(__file__).parent / "corpus" / "service_hostname_newline.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
+
+
+def test_extra_hosts_address_newline_is_a_catalogued_over_rejection(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """The address half, pinned for the same reason as the hostname above and one more.
+
+    Docker accepts it, so a regression here would fall back to `both-accept` and the
+    generic run would stay green while the injection returned. The verdict is the only
+    assertion that can tell those two states apart.
+    """
+    path = Path(__file__).parent / "corpus" / "service_extra_hosts_address_newline.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"

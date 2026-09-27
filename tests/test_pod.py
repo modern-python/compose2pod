@@ -254,3 +254,40 @@ def test_dns_opt_must_be_a_list() -> None:
     validate({"services": {"app": {"image": "nginx", "dns_opt": ["ndots:2"]}}})
     validate({"services": {"app": {"image": "nginx", "dns": "8.8.8.8"}}})
     validate({"services": {"app": {"image": "nginx", "dns_search": "example.com"}}})
+
+
+class TestExtraHostsFieldsTheHostsFileCannotSpell:
+    """Both halves of an entry: the line is `ADDRESS NAME`, and either field can break it."""
+
+    def _svc(self, entry: object) -> dict[str, object]:
+        return {"image": "x", "extra_hosts": entry if isinstance(entry, dict) else [entry]}
+
+    def test_host_with_a_space_is_refused(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="service 'app': extra_hosts host 'a b'"):
+            validate_pod_options("app", self._svc("a b:1.2.3.4"))
+
+    def test_empty_host_is_refused(self) -> None:
+        # Docker refuses this one too (`bad host name ''`), so it is rule one
+        # rather than the narrowing the rest of this class covers.
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts host ''"):
+            validate_pod_options("app", self._svc(":1.2.3.4"))
+
+    def test_address_with_a_newline_is_refused(self) -> None:
+        entry = "good:1.2.3.4\n5.6.7.8 evil"
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts address"):
+            validate_pod_options("app", self._svc(entry))
+
+    def test_address_with_a_space_is_refused(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"extra_hosts address '1\.2\.3\.4 evil'"):
+            validate_pod_options("app", self._svc("good:1.2.3.4 evil"))
+
+    def test_empty_address_is_refused(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts address ''"):
+            validate_pod_options("app", self._svc("good:"))
+
+    def test_mapping_form_is_checked_too(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="extra_hosts host 'a#b'"):
+            validate_pod_options("app", self._svc({"a#b": "1.2.3.4"}))
+
+    def test_a_variable_address_is_still_accepted(self) -> None:
+        validate_pod_options("app", self._svc("good:${IP}"))

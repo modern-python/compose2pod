@@ -1,0 +1,10 @@
+# Measured ACCEPT by `docker compose config` v5.1.2: `links` takes the alias verbatim. The
+# pod's /etc/hosts splits fields on blanks, so this would grant two names, `a` and `b`, and
+# not the one the document asked for. Refused (issue 142).
+services:
+  db:
+    image: nginx
+  app:
+    image: nginx
+    links:
+      - "db:a b"

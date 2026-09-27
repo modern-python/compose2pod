@@ -63,8 +63,11 @@ compose2pod accepts whenever podman can express it. That means every *supported*
 podman, from the declared floor to the newest version measured, so a mount option
 only a later podman has is refused until the floor reaches it. Where podman cannot
 express it, that is a *rule-two refusal* (measured, legitimate) or a *rule-two
-narrowing*. A refusal that cannot cite podman is a tracked limitation, never a
-design position.
+narrowing*. A refusal citing neither podman nor a ruling of its own is a tracked
+limitation, never a design position. Two rulings stand on their own: the pod's
+shared namespace ([ADR-0003](docs/adr/0003-the-shared-namespace-decides-key-classification.md))
+and the grammar of the `/etc/hosts` compose2pod writes
+([ADR-0006](docs/adr/0006-docker-rejection-parity.md)).
 
 **Store**:
 The umbrella noun for a Compose `secret` or `config` — the two `StoreKind`s in
