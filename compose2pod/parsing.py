@@ -130,19 +130,45 @@ def _validate_service_healthcheck(name: str, svc: dict[str, Any]) -> None:
             _HEALTHCHECK_SCALAR_VALIDATORS[key](name, key, healthcheck[key])
 
 
+# A short-form volume source Docker reads as a host path rather than a volume
+# name. Measured over 19 spellings against `docker compose config` v5.1.2.
+_BIND_SOURCE_PREFIXES = (".", "/", "~")
+
+
+def _is_named_volume_source(source: str) -> bool:
+    r"""Whether a SHORT-form volume source names a volume, as Docker reads it.
+
+    A leading `.`, `/` or `~` makes it a host path; every other spelling is a
+    volume name, `a/b`, `a b` and `a@b` included -- each measured as
+    `refers to undefined volume` with no top-level declaration. The name
+    grammar does not decide this and must not be asked to: it would call
+    those three binds, which is exactly how they stayed accepted until issue
+    143 measured them. An earlier split used this same leading-character rule
+    without `~` and swept `~/data` into "named" wrongly; `~` was the missing
+    prefix, not the grammar.
+
+    A `${VAR}`-carrying source stays unnamed on purpose: what it resolves to
+    is a fact about the shell that will run the script, not about the
+    document, the carve-out `_validate_volume_references` documents.
+
+    No drive-shaped entry (`C:\\data:/var`, `v:/data`) reaches this:
+    `_validate_service_volumes` refuses the family first, so a `named` verdict
+    here always names a volume Docker would name too.
+    """
+    return not source.startswith(_BIND_SOURCE_PREFIXES) and not values.has_variable(source)
+
+
 def _classify_volume(volume: str) -> tuple[str, str | None]:
     r"""Classify one short-syntax volume entry: its kind, and its source when the kind is 'named'.
 
     Returns `("anonymous", None)` for a colon-less entry (a bare container
-    path), `("named", source)` for a colon-form entry whose source matches
-    Docker's own volume-name grammar (`stores.NAME_PATTERN`, the identical
-    pattern a secret/config name is checked against:
-    `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`), or `("bind", None)` for every other
-    colon-form entry -- a relative (`./rel`) or absolute (`/abs`) host path, a
-    `~`-prefixed home-relative path (`~/data`, measured ACCEPT against
-    `docker compose config` v5.1.2 with no top-level declaration -- Docker
-    expands it against the invoking user's home directory), or a `${VAR}`
-    reference (`$`, `{`, `}` are none of them pattern characters either).
+    path), `("named", source)` per `_is_named_volume_source` above, or
+    `("bind", None)` for every other colon-form entry -- a relative (`./rel`)
+    or absolute (`/abs`) host path, a `~`-prefixed home-relative path
+    (`~/data`, measured ACCEPT against `docker compose config` v5.1.2 with no
+    top-level declaration -- Docker expands it against the invoking user's
+    home directory), or a `${VAR}` reference (`$`, `{`, `}` are none of them
+    name-grammar characters either).
 
     Shared by `_validate_service_volumes` (only cares whether an entry is
     anonymous, to check its own shape) and `_named_volume_source` (only cares
@@ -162,7 +188,7 @@ def _classify_volume(volume: str) -> tuple[str, str | None]:
     if ":" not in volume:
         return "anonymous", None
     source, _, _ = volume.partition(":")
-    if stores.NAME_PATTERN.fullmatch(source):
+    if _is_named_volume_source(source):
         return "named", source
     return "bind", None
 
@@ -427,14 +453,17 @@ def _named_volume_source(volume: object) -> str | None:
     """Return a volume entry's bare-identifier named source, or None if it needs no declaration.
 
     A colon-form short-syntax string is classified via `_classify_volume`. A
-    long-syntax mapping needs its own check: only a `volume`-type entry names
-    a volume at all, and only when its `source` is a bare identifier (an
+    long-syntax mapping needs its own check, and a laxer one: `type` has
+    already said which kind the entry is, so a `volume`-type entry names a
+    volume whatever its `source` looks like -- `source: /abs` and
+    `source: ./r` are both `refers to undefined volume` to Docker, where the
+    short form reads the same strings as host paths (measured, v5.1.2). An
     absent source is an anonymous volume; a `bind`/`tmpfs` entry's `source`,
-    if any, is a host path, never a name to cross-check).
+    if any, is a host path, never a name to cross-check.
     """
     if isinstance(volume, dict):
         source = volume.get("source")
-        if volume.get("type") == "volume" and isinstance(source, str) and stores.NAME_PATTERN.fullmatch(source):
+        if volume.get("type") == "volume" and isinstance(source, str) and not values.has_variable(source):
             return source
         return None
     # _validate_service_volumes has already confirmed every non-dict entry is
@@ -1105,9 +1134,8 @@ def _validate_volume_references(compose: dict[str, Any], services: dict[str, Any
     undeclared when it resolves to a bare identifier, a fact about the shell
     that will later run the generated script, not about this document, so it
     does not bind here either way. `_named_volume_source` already returns None
-    for any `${...}`-carrying source unconditionally -- `$`, `{`, and `}` are
-    none of them `stores.NAME_PATTERN` characters -- so this function never
-    needs to ask `values.has_variable` itself.
+    for any `${...}`-carrying source, in both syntaxes and by an explicit
+    `values.has_variable` test, so this function never needs to ask again.
     """
     top_volumes = compose.get("volumes")
     if top_volumes is not None and not isinstance(top_volumes, dict):
@@ -1175,6 +1203,7 @@ def _validate_network_entry_value(name: str, network: str, value: Any) -> None: 
     can never satisfy "must be a mapping" regardless of its runtime value --
     the rejection is a fact about the document, not the host.
     """
+    values.validate_compose_name(f"service {name!r}: network name", network)
     if value is None:
         return
     if not isinstance(value, dict):
@@ -1558,6 +1587,25 @@ def _validate_top_level_scalar_strings(compose: dict[str, Any]) -> None:
             raise UnsupportedComposeError(msg)
 
 
+# The top-level blocks whose KEYS Docker holds to its name grammar. `networks`
+# is absent by measurement, not oversight: `networks: {"a b": {}}` on its own
+# is accepted by `docker compose config` v5.1.2, and the grammar bites on the
+# service's long-form `networks` mapping key instead (`_validate_network_entries`).
+NAME_CHECKED_TOP_LEVEL_BLOCKS = ("services", "volumes", "secrets", "configs")
+
+
+def _validate_top_level_names(compose: dict[str, Any]) -> None:
+    """Every key of every name-checked top-level block, against Docker's one grammar.
+
+    A block that is not a mapping is left to the validator that owns its shape.
+    """
+    for block in NAME_CHECKED_TOP_LEVEL_BLOCKS:
+        definitions = compose.get(block)
+        if isinstance(definitions, dict):
+            for name in definitions:
+                values.validate_compose_name(f"top-level {block!r}: name", name)
+
+
 def validate(compose: dict[str, Any]) -> list[str]:
     """Check the compose document against the supported subset.
 
@@ -1579,6 +1627,7 @@ def validate(compose: dict[str, Any]) -> list[str]:
         raise UnsupportedComposeError(msg)
     _reject_null_top_level_blocks(compose)
     _validate_top_level_scalar_strings(compose)
+    _validate_top_level_names(compose)
     if "networks" in compose:
         warnings.append("ignoring top-level 'networks' (all services share the pod namespace)")
     if "volumes" in compose:

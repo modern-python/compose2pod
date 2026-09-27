@@ -1,0 +1,11 @@
+# Measured ACCEPT by `docker compose config` v5.1.2: a top-level `networks:` key is NOT
+# held to the identifier grammar the other blocks' keys are, and neither is a service's
+# short-form (list) reference to one. Only the long-form mapping key is. Pinned so the
+# grammar cannot be tidied into applying everywhere, which would over-reject (issue 143).
+services:
+  app:
+    image: nginx
+    networks:
+      - "a b"
+networks:
+  "a b": {}

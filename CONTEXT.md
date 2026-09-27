@@ -69,6 +69,17 @@ shared namespace ([ADR-0003](docs/adr/0003-the-shared-namespace-decides-key-clas
 and the grammar of the `/etc/hosts` compose2pod writes
 ([ADR-0006](docs/adr/0006-docker-rejection-parity.md)).
 
+**Name grammar / volume discriminator**:
+Two different questions Docker answers with two different rules, once conflated
+here into one pattern. The *name grammar* (`values.TOP_LEVEL_NAME`,
+`[a-zA-Z0-9._-]+`) is what a top-level `services`/`volumes`/`secrets`/`configs`
+key and a service's long-form `networks` key must match. The *discriminator*
+(`parsing._is_named_volume_source`) asks a different thing of a short-form
+volume source — named volume, or bind? — and does not use the grammar at all:
+a leading `.`, `/` or `~` is a host path, anything else is a volume name. Say
+which one you mean; one pattern doing both jobs is the bug
+[ADR-0006](docs/adr/0006-docker-rejection-parity.md) records.
+
 **Store**:
 The umbrella noun for a Compose `secret` or `config` — the two `StoreKind`s in
 `stores.py`. Use *store* for anything true of both, which is nearly everything.
