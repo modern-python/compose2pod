@@ -78,7 +78,9 @@ key and a service's long-form `networks` key must match. The *discriminator*
 volume source — named volume, or bind? — and does not use the grammar at all:
 a leading `.`, `/` or `~` is a host path, anything else is a volume name. Say
 which one you mean; one pattern doing both jobs is the bug
-[ADR-0006](docs/adr/0006-docker-rejection-parity.md) records.
+[ADR-0006](docs/adr/0006-docker-rejection-parity.md) records. Neither covers the
+top-level `name`, which Docker does not judge at all — it *rewrites* it and
+refuses only an empty result (`parsing._validate_project_name`).
 
 **Store**:
 The umbrella noun for a Compose `secret` or `config` — the two `StoreKind`s in
