@@ -56,7 +56,8 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml"
       - run: uv python install ${{ matrix.python-version }}
       - run: uv venv --python ${{ matrix.python-version }}
-      - run: uv pip install --resolution lowest-direct --only-binary PyYAML ".[yaml]"
+      - run: uv pip compile pyproject.toml --all-extras --no-deps --resolution lowest-direct -o floors.txt
+      - run: uv pip install -r pyproject.toml --all-extras --constraints floors.txt --no-build
       - run: uv run --no-project python -c "import compose2pod, yaml; print(yaml.__version__)"
 
   pytest:
