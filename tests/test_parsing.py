@@ -2299,3 +2299,28 @@ def test_build_secrets_empty_mapping_entry_rejected_cleanly() -> None:
     doc["secrets"] = _BUILD_SECRETS_UNDECLARED_STORE
     with pytest.raises(UnsupportedComposeError, match="undefined secret"):
         validate(doc)
+
+
+class TestHostsFileNamesAtTheGate:
+    def test_an_unspellable_alias_is_refused_outside_every_closure(self) -> None:
+        """The gate walks all services, so the verdict does not depend on the target."""
+        doc = {
+            "services": {
+                "app": {"image": "x"},
+                "other": {"image": "x", "networks": {"n": {"aliases": ["a b"]}}},
+            },
+            "networks": {"n": {}},
+        }
+        with pytest.raises(UnsupportedComposeError, match="service 'other': network alias 'a b'"):
+            validate(doc)
+
+    def test_an_unspellable_extra_hosts_address_is_refused_outside_every_closure(self) -> None:
+        """The injection the hosts file allows: a newline in the address appends an entry."""
+        doc = {
+            "services": {
+                "app": {"image": "x"},
+                "other": {"image": "x", "extra_hosts": ["good:1.2.3.4\n5.6.7.8 evil"]},
+            },
+        }
+        with pytest.raises(UnsupportedComposeError, match="service 'other': extra_hosts address"):
+            validate(doc)

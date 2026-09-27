@@ -1,0 +1,8 @@
+# Measured ACCEPT by `docker compose config` v5.1.2: the host half of an `extra_hosts` entry
+# is unconstrained. It lands in the same file with the same problem as an alias, at the
+# address the entry names rather than 127.0.0.1. Refused (issue 142).
+services:
+  app:
+    image: nginx
+    extra_hosts:
+      - "a b:1.2.3.4"

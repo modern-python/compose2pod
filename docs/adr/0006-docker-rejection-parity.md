@@ -18,6 +18,28 @@ pulls a container out of the pod's shared namespace
 perfectly well even inside a pod (measured, 4.9.3). It carries a refusal site of its own that says
 so, rather than the generic unsupported-key message, so the distinction reaches the user who hits
 it and not only the reader of this file.
+A second refusal cites neither Docker nor podman: a name the pod's `/etc/hosts` cannot
+spell. compose2pod writes that file itself under `--no-hosts`, and its grammar is
+`ADDRESS NAME...`, fields split on ASCII blanks and `#` opening a comment, so a name
+carrying either is read back as something the document never asked for -- two names, a
+truncated one, or, for a newline, an extra entry at an address the author chose
+([#142](https://github.com/modern-python/compose2pod/issues/142)). Docker takes all of
+them, because it answers names from a DNS server and never spells one in a file. The
+check sits at the gate, in the two places a *document* can put a field there:
+`graph.hostnames` for every name a service is reachable by, and
+`pod.validate_pod_options` for both halves of an `extra_hosts` entry -- the address as
+much as the host, since a newline in the address is what appends an entry at an address
+the document chose. The pod name reaches the same file from the CLI rather than the
+document, and is held to `POD_NAME_PATTERN`, which admits no separator either.
+Each refusal names the service and the key that declared the field, because seven
+sources reach one file and the file cannot say which. One of the seven, a service's own
+name, Docker refuses under its own grammar, so there this is rule one arriving early;
+[#143](https://github.com/modern-python/compose2pod/issues/143) is what gives that case
+the message it deserves. Non-ASCII whitespace is deliberately left through: no libc reading the file
+treats it as a separator, so refusing it would be a narrowing the format does not force.
+Like `network_mode` this claims nothing about podman and so owes no `REFUSALS` row;
+unlike `network_mode` what would lift it is mechanical rather than a position, a
+resolver that is not a file.
 Docker's verdict binds only on the document, not the host: `env_file` existence, `${VAR:?}`, and a
 negative on a top-level numeric key are facts about the machine that runs the script and are
 deferred to it. `tests/conformance/` runs both oracles for real over a probe matrix generated

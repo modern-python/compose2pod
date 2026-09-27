@@ -4,6 +4,7 @@ from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.keys import Expand, Token, extra_host_entries, validate_map
+from compose2pod.values import validate_hosts_file_field
 
 
 _DNS_KEYS = {"dns": "--dns", "dns_search": "--dns-search", "dns_opt": "--dns-option"}
@@ -79,6 +80,21 @@ def _check_extra_host_value_types(name: str, value: Any) -> None:  # noqa: ANN40
             raise UnsupportedComposeError(msg)
 
 
+def _check_extra_host_fields(name: str, value: list[Any] | dict[str, Any]) -> None:
+    """Check both halves of every entry can be written into the pod's /etc/hosts.
+
+    Both, because the line is `ADDRESS NAME` and either field carrying a blank,
+    a `#` or a newline breaks it the same way. The address is the more
+    dangerous half: a newline there ends the line, so the file gains an entry
+    whose address the document chose. A `${VAR}` address passes, carrying no
+    separator of its own; what it expands to at run time is the shell's
+    business, as everywhere else.
+    """
+    for host, address in extra_host_entries(value):
+        validate_hosts_file_field(name, "extra_hosts host", host)
+        validate_hosts_file_field(name, "extra_hosts address", address)
+
+
 def validate_pod_options(name: str, svc: dict[str, Any]) -> None:
     """Shape-check a service's pod-level dns/sysctls declarations."""
     for key in _DNS_KEYS:
@@ -93,6 +109,7 @@ def validate_pod_options(name: str, svc: dict[str, Any]) -> None:
         validate_map(name, "extra_hosts", svc["extra_hosts"])
         _check_extra_host_separators(name, svc["extra_hosts"])
         _check_extra_host_value_types(name, svc["extra_hosts"])
+        _check_extra_host_fields(name, svc["extra_hosts"])
 
 
 def uses_pod_options(services: dict[str, Any]) -> bool:
