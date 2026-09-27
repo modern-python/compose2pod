@@ -632,3 +632,23 @@ class TestValidateHostsFileField:
     def test_the_refusal_names_the_service_and_the_key(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="service 'db': network alias 'a b'"):
             values.validate_hosts_file_field("db", "network alias", "a b")
+
+
+class TestValidateComposeName:
+    """Docker's one identifier grammar, wherever its schema applies it."""
+
+    @pytest.mark.parametrize("name", ["ab", "a.b", "a_b", "A-b", "9a", ".a", "-a", "_a", "a" * 100])
+    def test_a_name_docker_accepts(self, name: str) -> None:
+        values.validate_compose_name("top-level 'services': name", name)
+
+    @pytest.mark.parametrize(
+        "name",
+        ["a b", "a/b", "a:b", "a#b", "ab!", "", "a\nb", "\xe4", "a+b", "a~b", "a@b", "a$b"],
+    )
+    def test_a_name_docker_refuses(self, name: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must match"):
+            values.validate_compose_name("top-level 'services': name", name)
+
+    def test_the_refusal_carries_the_caller_s_label(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="service 'app': network name 'a b'"):
+            values.validate_compose_name("service 'app': network name", "a b")

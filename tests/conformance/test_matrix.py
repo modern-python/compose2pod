@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from compose2pod.keys import SERVICE_KEYS, STRUCTURAL_KEYS
-from compose2pod.parsing import IGNORED_SERVICE_KEYS
+from compose2pod.parsing import IGNORED_SERVICE_KEYS, NAME_CHECKED_TOP_LEVEL_BLOCKS
 
 
 KEYS = sorted(set(SERVICE_KEYS) | STRUCTURAL_KEYS | set(IGNORED_SERVICE_KEYS))
@@ -84,3 +84,56 @@ def test_docker_rejection_implies_our_rejection(
         pytest.skip("host-dependent shape -- see CARVE_OUT's comment")
     compose = {"services": {"app": {"image": "nginx:alpine", key: SHAPES[shape]}}}
     assert_rule(compose)
+
+
+REFUSED_NAMES = ["a b", "a/b", "a:b", "a#b", "ab!", "a+b", "a~b", "a@b", "a$b", "", "\xe4"]
+# The four Docker takes that the old store-only pattern refused -- the over-rejection
+# issue 143 lifted. They carry `both-accept` below, so lifting it cannot silently undo.
+ACCEPTED_NAMES = [".a", "-a", "_a", "a.b"]
+# The full set on the two positions the grammar is enforced from, a hostile pair on the
+# remaining blocks: Docker applies one grammar to all of them (measured), and the pair is
+# what would catch a block that stopped sharing it.
+CROSS_BLOCK_NAMES = ("a b", "")
+_OTHER_BLOCKS = [block for block in NAME_CHECKED_TOP_LEVEL_BLOCKS if block != "services"]
+NAME_POSITIONS = (
+    [("services", name, "both-reject") for name in REFUSED_NAMES]
+    + [("services", name, "both-accept") for name in ACCEPTED_NAMES]
+    + [("service-networks", name, "both-reject") for name in REFUSED_NAMES]
+    + [("service-networks", name, "both-accept") for name in ACCEPTED_NAMES]
+    + [(block, name, "both-reject") for block in _OTHER_BLOCKS for name in CROSS_BLOCK_NAMES]
+)
+
+
+def _document_named(position: str, name: str) -> dict[str, Any]:
+    """Build a document whose only variable is one identifier, in the position under probe."""
+    app: dict[str, Any] = {"image": "nginx:alpine"}
+    compose: dict[str, Any] = {"services": {"app": app}}
+    if position == "services":
+        compose["services"][name] = {"image": "nginx:alpine"}
+    elif position == "service-networks":
+        app["networks"] = {name: {}}
+        compose["networks"] = {name: {}}
+    elif position in ("secrets", "configs"):
+        compose[position] = {name: {"file": "./f"}}
+    else:
+        compose[position] = {name: {}}
+    return compose
+
+
+@pytest.mark.parametrize(("position", "name", "verdict"), NAME_POSITIONS, ids=lambda value: repr(value).strip("'"))
+def test_identifier_grammar_matches_docker(
+    position: str,
+    name: str,
+    verdict: str,
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """Both directions, per position: what Docker refuses we refuse, what it takes we take.
+
+    The verdict is asserted rather than left to `assert_rule` alone, which tolerates an
+    over-rejection -- and an over-rejection on `ACCEPTED_NAMES` is precisely the defect
+    issue 143 removed, so the generic contract cannot see the thing under test.
+
+    Generated from `NAME_CHECKED_TOP_LEVEL_BLOCKS` so a block added to that tuple is
+    probed the moment it is added, the way a new `SERVICE_KEYS` entry is above.
+    """
+    assert assert_rule(_document_named(position, name)) == verdict

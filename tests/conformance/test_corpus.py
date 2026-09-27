@@ -253,3 +253,16 @@ def test_extra_hosts_address_newline_is_a_catalogued_over_rejection(
     """
     path = Path(__file__).parent / "corpus" / "service_extra_hosts_address_newline.yaml"
     assert assert_rule(yaml.safe_load(path.read_text())) == "over-reject"
+
+
+def test_top_level_network_name_is_accepted_by_both(
+    assert_rule: Callable[[dict[str, Any]], str],
+) -> None:
+    """Docker's identifier grammar does not reach a top-level `networks:` key.
+
+    Pinned to `both-accept` rather than left to the generic run, which tolerates an
+    over-rejection: the risk here is the opposite of the usual one, that the grammar
+    issue 143 added gets extended to a position Docker leaves alone.
+    """
+    path = Path(__file__).parent / "corpus" / "networks_top_level_name_unchecked.yaml"
+    assert assert_rule(yaml.safe_load(path.read_text())) == "both-accept"

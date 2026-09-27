@@ -109,20 +109,12 @@ class TestValidateSecretKind:
         with pytest.raises(UnsupportedComposeError, match="entry 'source' must be a string"):
             stores.validate(_doc("secrets", {"a": {"file": "./a"}}, [{"source": 123}]))
 
-    def test_injecting_secret_name_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="must match"):
-            stores.validate(_doc("secrets", {"n'; touch /tmp/x; '": {"file": "./a"}}))
-
     def test_dotted_dashed_secret_name_accepted(self) -> None:
         stores.validate(_doc("secrets", {"db.pw-1": {"file": "./a"}}, ["db.pw-1"]))
 
     def test_bad_env_var_name_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="is not a valid identifier"):
             stores.validate(_doc("secrets", {"s": {"environment": 'X"; touch /tmp/x; "'}}))
-
-    def test_newline_in_secret_name_rejected(self) -> None:
-        with pytest.raises(UnsupportedComposeError, match="must match"):
-            stores.validate(_doc("secrets", {"db\n": {"file": "./a"}}))
 
     def test_newline_in_env_var_name_rejected(self) -> None:
         with pytest.raises(UnsupportedComposeError, match="is not a valid identifier"):

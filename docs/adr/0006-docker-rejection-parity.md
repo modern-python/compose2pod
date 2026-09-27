@@ -79,7 +79,27 @@ named volume) ([#114](https://github.com/modern-python/compose2pod/issues/114)),
 `mode` is refused at the other end of the range, where podman 6.0.1's `crun` will not mount it.
 The `integration` job pins `ubuntu-24.04` for the same reason: it is the runner that ships the
 floor, and on a newer one the job would measure a podman no user of the floor has.
-The hard rule has no exceptions left. It had two, and both were the same one: a `depends_on`
+The hard rule has no exceptions left. It had three classes, and the third outlived the sentence
+that first said this. Docker's identifier grammar, `[a-zA-Z0-9._-]+`, was never modelled: a
+service, volume, secret or config could be named `a b`, `a/b` or `""`, all of which
+`docker compose config` refuses outright and all of which compose2pod took
+([#143](https://github.com/modern-python/compose2pod/issues/143)). One pattern in `values`
+holds it now, applied where Docker applies it -- which is not where it reads: the keys of
+top-level `services`, `volumes`, `secrets` and `configs`, and a service's *long-form* `networks`
+mapping key, but neither a top-level `networks:` key nor a short-form list entry, each measured
+rather than assumed and each pinned. The same pattern had a second job it was quietly bad at:
+`stores.NAME_PATTERN` demanded an alphanumeric first character Docker does not, over-rejecting
+`.a`, `-a` and `_a`, while doubling as the short-form bind-versus-named-volume test, which is not
+a grammar question at all: Docker reads a leading `.`, `/` or `~` as a host path and every other
+spelling as a volume name, `a/b` and `a b` included. One pattern could not be both -- widening it
+would have read `.env:/app/.env` as a named volume, and leaving it would have kept `a/b:/x`
+accepted where Docker says `refers to undefined volume`. They are two rules now, and the long
+form is a third: there `type` has already said which kind the entry is, so any source names a
+volume.
+Why the harness never saw it: the generated matrix varies a key's *value* over hostile shapes and
+never touches a map key, so no probe could reach a name. `test_identifier_grammar_matches_docker`
+now generates the missing axis from the same tuple the gate reads.
+The first two exceptions were the same one: a `depends_on`
 naming an undefined service, and a dependency cycle, among services outside the target's closure
 were rejected by Docker and accepted here
 ([#87](https://github.com/modern-python/compose2pod/issues/87)), because both checks lived in the

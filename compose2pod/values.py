@@ -309,6 +309,32 @@ def validate_duration(name: str, key: str, value: Any) -> None:  # noqa: ANN401 
     raise UnsupportedComposeError(msg)
 
 
+NAME_GRAMMAR = re.compile(r"^[a-zA-Z0-9._-]+\Z")
+
+
+def validate_compose_name(where: str, name: str) -> None:
+    """Refuse an identifier Docker's schema will not take in the position `where` names.
+
+    One grammar, `[a-zA-Z0-9._-]+`, measured against `docker compose config`
+    v5.1.2 and pinned by `tests/conformance/test_matrix.py`. A leading `.`,
+    `-` or `_` is legal, which is where the old store-only pattern was
+    stricter than Docker. `where` is pre-formatted by the caller, as
+    `keys.require_string_keys` takes one, because the positions this is
+    enforced from share no argument shape.
+
+    Where Docker enforces it is not where it reads most naturally: the keys of
+    top-level `services`, `volumes`, `secrets` and `configs`, and a service's
+    long-form `networks` mapping key, but NOT a top-level `networks:` key --
+    `networks: {"a b": {}}` alone is a document Docker accepts.
+
+    This is rule one, not a narrowing: a document carrying one of these is a
+    document `docker compose config` rejects outright.
+    """
+    if not NAME_GRAMMAR.fullmatch(name):
+        msg = f"{where} {name!r} must match [a-zA-Z0-9._-]+"
+        raise UnsupportedComposeError(msg)
+
+
 _UNSPELLABLE_IN_HOSTS_FILE = frozenset(" \t\n\r\v\f#")
 
 

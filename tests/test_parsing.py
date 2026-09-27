@@ -2324,3 +2324,100 @@ class TestHostsFileNamesAtTheGate:
         }
         with pytest.raises(UnsupportedComposeError, match="service 'other': extra_hosts address"):
             validate(doc)
+
+
+class TestTopLevelNames:
+    """Docker's name grammar on the keys of all five named blocks (issue 143)."""
+
+    def _doc(self, block: str, name: str) -> dict:
+        doc: dict = {"services": {"app": {"image": "x"}}}
+        if block == "services":
+            doc["services"][name] = {"image": "x"}
+        elif block in ("secrets", "configs"):
+            doc[block] = {name: {"file": "./a"}}
+        else:
+            doc[block] = {name: {}}
+        return doc
+
+    @pytest.mark.parametrize("block", ["services", "volumes", "secrets", "configs"])
+    def test_a_name_docker_refuses_is_refused_in_every_checked_block(self, block: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must match"):
+            validate(self._doc(block, "a b"))
+
+    def test_a_top_level_network_name_is_not_checked(self) -> None:
+        """Measured: `networks: {"a b": {}}` alone is a document docker accepts."""
+        validate(self._doc("networks", "a b"))
+
+    def test_a_service_long_form_network_name_is_checked(self) -> None:
+        """Where docker does apply the grammar to a network name (measured)."""
+        doc: dict = {
+            "services": {"app": {"image": "x", "networks": {"a b": {}}}},
+            "networks": {"a b": {}},
+        }
+        with pytest.raises(UnsupportedComposeError, match="service 'app': network name 'a b'"):
+            validate(doc)
+
+    def test_a_service_short_form_network_name_is_not_checked(self) -> None:
+        """The list form escapes docker's pattern too (measured)."""
+        validate({"services": {"app": {"image": "x", "networks": ["a b"]}}, "networks": {"a b": {}}})
+
+    def test_a_shell_injecting_store_name_is_refused_at_the_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must match"):
+            validate(self._doc("secrets", "n'; touch /tmp/x; '"))
+
+    def test_a_newline_in_a_store_name_is_refused_at_the_gate(self) -> None:
+        with pytest.raises(UnsupportedComposeError, match="must match"):
+            validate(self._doc("secrets", "db\n"))
+
+    @pytest.mark.parametrize("name", [".a", "-a", "_a"])
+    def test_a_leading_punctuation_store_name_is_no_longer_over_rejected(self, name: str) -> None:
+        """Docker accepts these; the old store pattern required an alphanumeric first."""
+        validate(self._doc("secrets", name))
+
+
+class TestNamedVolumeSourceGrammar:
+    """Which short-form sources name a volume, and which are binds (issue 143)."""
+
+    def _doc(self, source: str, *, declared: bool) -> dict:
+        doc: dict = {"services": {"app": {"image": "x", "volumes": [f"{source}:/x"]}}}
+        if declared:
+            doc["volumes"] = {source: {}}
+        return doc
+
+    @pytest.mark.parametrize("source", ["-a", "_a", "data", "a.b"])
+    def test_an_undeclared_named_source_is_refused(self, source: str) -> None:
+        with pytest.raises(UnsupportedComposeError, match=r"undeclared|undefined|not declared"):
+            validate(self._doc(source, declared=False))
+
+    @pytest.mark.parametrize("source", ["-a", "_a", "data", "a.b"])
+    def test_a_declared_named_source_is_accepted(self, source: str) -> None:
+        validate(self._doc(source, declared=True))
+
+    @pytest.mark.parametrize("source", [".env", ".a", "..", "./d", "~/d"])
+    def test_a_leading_dot_or_tilde_source_is_a_bind_needing_no_declaration(self, source: str) -> None:
+        validate(self._doc(source, declared=False))
+
+    @pytest.mark.parametrize("source", ["a/b", "d/e/f", "a b", "a@b", "a+b", "a\\b"])
+    def test_a_path_shaped_source_without_a_bind_prefix_is_still_a_named_volume(self, source: str) -> None:
+        """Measured: docker calls these `undefined volume`, not host paths."""
+        with pytest.raises(UnsupportedComposeError, match=r"undeclared|undefined|not declared"):
+            validate(self._doc(source, declared=False))
+
+    @pytest.mark.parametrize("source", ["${VAR}", "$VAR"])
+    def test_a_variable_source_is_left_to_the_shell_that_runs_the_script(self, source: str) -> None:
+        validate(self._doc(source, declared=False))
+
+    @pytest.mark.parametrize("source", ["/abs", "./r", "~/d", ".a", "a b", "a/b", "data"])
+    def test_an_undeclared_long_form_volume_source_is_refused_whatever_its_shape(self, source: str) -> None:
+        """`type: volume` has already said which kind it is, so no prefix rule applies (measured)."""
+        doc: dict = {
+            "services": {"app": {"image": "x", "volumes": [{"type": "volume", "source": source, "target": "/x"}]}}
+        }
+        with pytest.raises(UnsupportedComposeError, match=r"undeclared|undefined|not declared"):
+            validate(doc)
+
+    def test_a_long_form_variable_source_is_left_to_the_shell(self) -> None:
+        doc: dict = {
+            "services": {"app": {"image": "x", "volumes": [{"type": "volume", "source": "${V}", "target": "/x"}]}}
+        }
+        validate(doc)
