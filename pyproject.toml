@@ -27,7 +27,7 @@ version = "0"
 # build. An older interpreter has no reason to lose the lower floor.
 yaml = [
     "PyYAML>=6; python_version < '3.12'",
-    "PyYAML>=6.0.1; python_version == '3.12'",
+    "PyYAML>=6; python_version == '3.12'",
     "PyYAML>=6.0.2; python_version == '3.13'",
     "PyYAML>=6.0.3; python_version >= '3.14'",
 ]
