@@ -1,6 +1,7 @@
 import io
 import json
 import math
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -300,6 +301,16 @@ class TestModuleEntrypoint:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.startswith("#!/bin/sh")
+
+    def test_run_as_main_exits_with_the_cli_status(
+        self, chats_compose: dict, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["compose2pod", "--target", "application", "--image", "i"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(chats_compose)))
+        with pytest.raises(SystemExit) as exc_info:
+            runpy.run_module("compose2pod", run_name="__main__")
+        assert exc_info.value.code == 0
+        assert capsys.readouterr().out.startswith("#!/bin/sh")
 
 
 class TestYaml12Booleans:
