@@ -1,9 +1,14 @@
+import re
 from typing import Any
 
 import pytest
 
 from compose2pod import stores
 from compose2pod.exceptions import UnsupportedComposeError
+
+
+_ESCAPE = re.compile(r"\\.")
+_RENDERED_VARIABLE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)")
 
 
 def _doc(top_key: str, defs: Any = None, refs: Any = None) -> dict[str, Any]:  # noqa: ANN401 - Compose values are untyped
@@ -14,6 +19,20 @@ def _doc(top_key: str, defs: Any = None, refs: Any = None) -> dict[str, Any]:  #
     if defs is not None:
         doc[top_key] = defs
     return doc
+
+
+def _lines(doc: dict[str, Any]) -> list[str]:
+    return [step.line for step in stores.create_steps(doc, ["app"], "p", "/proj")]
+
+
+def _variables(doc: dict[str, Any]) -> set[str]:
+    return {name for step in stores.create_steps(doc, ["app"], "p", "/proj") for name in step.variables}
+
+
+def _expanded_names(line: str) -> set[str]:
+    """Variables a rendered line really expands, read back off the text `to_shell` produced."""
+    # `to_shell` escapes a literal dollar as `\$`, so a rendered `\${A}` is inert text.
+    return set(_RENDERED_VARIABLE.findall(_ESCAPE.sub("", line)))
 
 
 class TestValidateSecretKind:
@@ -222,27 +241,23 @@ class TestSecretEmission:
 
     def test_file_source_create_line(self) -> None:
         doc = {"services": {"app": {"secrets": ["db"]}}, "secrets": {"db": {"file": "./db.txt"}}}
-        assert stores.create_lines(doc, ["app"], "p", "/proj") == ['podman secret create p-db "/proj/db.txt"']
+        assert _lines(doc) == ['podman secret create p-db "/proj/db.txt"']
 
     def test_environment_source_create_line(self) -> None:
         doc = {"services": {"app": {"secrets": ["k"]}}, "secrets": {"k": {"environment": "API_KEY"}}}
-        assert stores.create_lines(doc, ["app"], "p", "/proj") == [
-            "printf '%s' \"${API_KEY-}\" | podman secret create p-k -"
-        ]
+        assert _lines(doc) == ["printf '%s' \"${API_KEY-}\" | podman secret create p-k -"]
 
     def test_referenced_variables_from_env_and_path(self) -> None:
         doc = {
             "services": {"app": {"secrets": ["k", "f"]}},
             "secrets": {"k": {"environment": "API_KEY"}, "f": {"file": "${DIR}/s.txt"}},
         }
-        assert stores.referenced_variables(doc, ["app"], "/proj") == {"API_KEY", "DIR"}
+        assert _variables(doc) == {"API_KEY", "DIR"}
 
     def test_non_string_file_takes_environment_branch(self) -> None:
         doc = {"services": {"app": {"secrets": ["k"]}}, "secrets": {"k": {"file": ["x"], "environment": "API_KEY"}}}
-        assert stores.create_lines(doc, ["app"], "p", "/proj") == [
-            "printf '%s' \"${API_KEY-}\" | podman secret create p-k -"
-        ]
-        assert stores.referenced_variables(doc, ["app"], "/proj") == {"API_KEY"}
+        assert _lines(doc) == ["printf '%s' \"${API_KEY-}\" | podman secret create p-k -"]
+        assert _variables(doc) == {"API_KEY"}
 
 
 class TestConfigEmission:
@@ -258,17 +273,15 @@ class TestConfigEmission:
 
     def test_content_source_create_line_expands_at_run_time(self) -> None:
         doc = {"services": {"app": {"configs": ["c"]}}, "configs": {"c": {"content": "token=${API_TOKEN}"}}}
-        assert stores.create_lines(doc, ["app"], "p", "/proj") == [
-            "printf '%s' \"token=${API_TOKEN-}\" | podman secret create p-config-c -"
-        ]
+        assert _lines(doc) == ["printf '%s' \"token=${API_TOKEN-}\" | podman secret create p-config-c -"]
 
     def test_file_source_create_line_is_config_prefixed(self) -> None:
         doc = {"services": {"app": {"configs": ["c"]}}, "configs": {"c": {"file": "./c.conf"}}}
-        assert stores.create_lines(doc, ["app"], "p", "/proj") == ['podman secret create p-config-c "/proj/c.conf"']
+        assert _lines(doc) == ['podman secret create p-config-c "/proj/c.conf"']
 
     def test_content_referenced_variables(self) -> None:
         doc = {"services": {"app": {"configs": ["c"]}}, "configs": {"c": {"content": "a=${A} b=${B}"}}}
-        assert stores.referenced_variables(doc, ["app"], "/proj") == {"A", "B"}
+        assert _variables(doc) == {"A", "B"}
 
 
 class TestBothKinds:
@@ -287,3 +300,18 @@ class TestBothKinds:
 
     def test_teardown_line_empty_without_stores(self) -> None:
         assert stores.teardown_line({"services": {"app": {"image": "x"}}}, ["app"], "p") == ""
+
+
+class TestCreateStepPairing:
+    def test_each_step_reports_the_variables_its_own_line_expands(self) -> None:
+        doc = {
+            "services": {"app": {"secrets": ["k", "f"], "configs": ["c"]}},
+            "secrets": {"k": {"environment": "API_KEY"}, "f": {"file": "${DIR}/s.txt"}},
+            "configs": {"c": {"content": "a=${A} b=$$B c=$${D}"}},
+        }
+        steps = stores.create_steps(doc, ["app"], "p", "/proj")
+        assert [(_expanded_names(step.line), set(step.variables)) for step in steps] == [
+            ({"API_KEY"}, {"API_KEY"}),
+            ({"DIR"}, {"DIR"}),
+            ({"A"}, {"A"}),
+        ]
