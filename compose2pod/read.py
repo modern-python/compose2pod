@@ -70,7 +70,7 @@ def _build_yaml_loader(yaml_module: ModuleType) -> type:
 
 def _load_yaml(text: str) -> Any:  # noqa: ANN401 - returns arbitrary parsed compose data
     if _yaml is None:
-        msg = "YAML input requires the 'yaml' extra: pip install compose2pod[yaml] (or pipe JSON via yq)"
+        msg = "YAML input requires the 'yaml' extra: pip install 'compose2pod[yaml]' (or pipe JSON via yq)"
         raise UnsupportedComposeError(msg)
     try:
         return _yaml.load(text, Loader=_build_yaml_loader(_yaml))  # noqa: S506 - SafeLoader subclass, not full load

@@ -96,7 +96,14 @@ class TestMain:
         monkeypatch.setattr(read_module, "_yaml", None)
         rc = run_main("services: {}", ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
         assert rc == EXIT_USAGE_ERROR
-        assert "requires the 'yaml' extra" in capsys.readouterr().err
+        assert "pip install 'compose2pod[yaml]'" in capsys.readouterr().err
+
+    def test_help_describes_pod_name_and_format(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(SystemExit):
+            main(["--help"])
+        help_text = " ".join(capsys.readouterr().out.split())
+        assert "--pod-name POD_NAME name of the podman pod" in help_text
+        assert "--format {auto,json,yaml} input format" in help_text
 
     def test_invalid_yaml_returns_2(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
         rc = run_main("a: [1, 2", ["--target", "app", "--image", "i", "--format", "yaml"], monkeypatch)
