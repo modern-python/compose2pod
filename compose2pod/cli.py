@@ -21,8 +21,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--image", required=True, help="CI image replacing services that have a build section")
     parser.add_argument("--project-dir", default=".", help="host path relative volume/env_file sources resolve to")
     parser.add_argument("--command", default="", help="shell command overriding the target service command")
-    parser.add_argument("--pod-name", default="test-pod")
-    parser.add_argument("--format", choices=("auto", "json", "yaml"), default="auto")
+    parser.add_argument(
+        "--pod-name",
+        default="test-pod",
+        help="name of the podman pod, also the container name prefix (default: test-pod)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("auto", "json", "yaml"),
+        default="auto",
+        help="input format; auto tries JSON, then YAML (default: auto)",
+    )
     parser.add_argument(
         "--artifact",
         action="append",
