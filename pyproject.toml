@@ -2,14 +2,13 @@
 name = "compose2pod"
 description = "Convert a Docker Compose file into a script that runs its services as a single Podman pod"
 authors = [{ name = "Artur Shiriev", email = "me@shiriev.ru" }]
-requires-python = ">=3.10,<4"
+requires-python = ">=3.11,<4"
 license = "MIT"
 readme = "README.md"
 keywords = ["podman", "docker-compose", "docker", "containers", "cli", "python"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
