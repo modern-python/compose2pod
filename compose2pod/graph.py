@@ -1,7 +1,7 @@
 """Dependency graph: normalize depends_on, collect hostnames, compute startup order."""
 
 import re
-from typing import Any, cast
+from typing import Any
 
 from compose2pod.exceptions import UnsupportedComposeError
 from compose2pod.values import has_variable, is_bool_like, validate_hosts_file_field
@@ -94,7 +94,7 @@ def _declared_depends_on(svc: dict[str, Any]) -> dict[str, str]:
             if not isinstance(dep, str):
                 msg = f"depends_on entry {dep!r} must be a string"
                 raise UnsupportedComposeError(msg)
-        return cast(dict[str, str], dict.fromkeys(deps, "service_started"))
+        return dict.fromkeys(deps, "service_started")
     if not isinstance(deps, dict):
         msg = "'depends_on' must be a list or mapping"
         raise UnsupportedComposeError(msg)
