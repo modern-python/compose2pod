@@ -106,4 +106,14 @@ are recorded in [`docs/adr/`](https://github.com/modern-python/compose2pod/tree/
 
 ## Status
 
-Beta. Part of the [modern-python](https://github.com/modern-python) family. MIT licensed.
+Beta.
+
+## Links
+
+- [PyPI](https://pypi.org/project/compose2pod)
+- [License](https://github.com/modern-python/compose2pod/blob/main/LICENSE)
+
+## Part of `modern-python`
+
+Browse the full list of templates and libraries in
+[`modern-python`](https://github.com/modern-python); see the org profile for the categorized index.
