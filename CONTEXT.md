@@ -9,20 +9,20 @@ Built for CI and test environments where neither `docker compose` nor
 
 A term is listed only when there is a synonym to reject, or a meaning subtle enough
 that code, tests and docs must agree on it. General programming vocabulary does not
-belong here, however heavily this package uses it — nor does anything a module
+belong here, however heavily this package uses it, and neither does anything a module
 docstring already states in its first lines.
 
 **Service-key registry**:
 `SERVICE_KEYS` in `keys.py`: the table mapping each *declarative* Compose service key
-to its `KeySpec` — the `(validate, emit, merge)` triple saying how that key is
+to its `KeySpec`: the `(validate, emit, merge)` triple saying how that key is
 checked, how it renders to `podman run` flags, and (for list/map-shaped keys) how it
 merges across `extends`. It is the single source both the gate (`validate`) and the
-emitter (`run_flags`) derive from, so the two cannot drift apart; that single-sourcing
-is the whole point of the table, not an incidental property of it.
+emitter (`run_flags`) derive from, so the two cannot drift apart. That single-sourcing
+is the reason the table exists.
 
 **Structural key**:
 A supported service key handled *outside* the service-key registry, listed in
-`STRUCTURAL_KEYS`, because the `emit(value)` interface cannot express it — it needs
+`STRUCTURAL_KEYS`, because the `emit(value)` interface cannot express it: it needs
 `project_dir` (`env_file`, `volumes`), spans keys, or occupies the image/command slot
 (`entrypoint`). Structural keys keep their own validate/emit machinery, in the module
 that owns the concern. Which side of this line a key falls on is a design ruling, not
@@ -32,8 +32,8 @@ a convenience: see
 **Token**:
 The result of rendering one Compose value into a `podman run`/`pod create` argument:
 `Token = str | Expand | GuardedEnvFile` in `keys.py`. A `str` is already shell-safe
-and final; the other two members are deferred — they carry something the *generated
-script*, not compose2pod, resolves. Anything walking a flag list has to handle all
+and final; the other two members are deferred: they carry something that the generated
+script resolves, not compose2pod. Anything walking a flag list has to handle all
 three.
 
 **Expand**:
@@ -58,7 +58,7 @@ The two directions of the Docker-rejection parity rule
 ([ADR-0006](docs/adr/0006-docker-rejection-parity.md)). "Rule two" is named bare
 in `parsing.py` comments and in tests, with no restatement at the call site.
 **Rule one**: a document `docker compose config` rejects, compose2pod
-rejects too — hard, no exceptions. **Rule two**: a document Docker accepts,
+rejects too, as a hard rule with no exceptions. **Rule two**: a document Docker accepts,
 compose2pod accepts whenever podman can express it. That means every *supported*
 podman, from the declared floor to the newest version measured, so a mount option
 only a later podman has is refused until the floor reaches it. Where podman cannot
@@ -75,15 +75,15 @@ here into one pattern. The *name grammar* (`values.TOP_LEVEL_NAME`,
 `[a-zA-Z0-9._-]+`) is what a top-level `services`/`volumes`/`secrets`/`configs`
 key and a service's long-form `networks` key must match. The *discriminator*
 (`parsing._is_named_volume_source`) asks a different thing of a short-form
-volume source — named volume, or bind? — and does not use the grammar at all:
+volume source (named volume, or bind?) and does not use the grammar at all:
 a leading `.`, `/` or `~` is a host path, anything else is a volume name. Say
 which one you mean; one pattern doing both jobs is the bug
 [ADR-0006](docs/adr/0006-docker-rejection-parity.md) records. Neither covers the
-top-level `name`, which Docker does not judge at all — it *rewrites* it and
+top-level `name`, which Docker does not judge at all; it rewrites it and
 refuses only an empty result (`parsing._validate_project_name`).
 
 **Store**:
-The umbrella noun for a Compose `secret` or `config` — the two `StoreKind`s in
+The umbrella noun for a Compose `secret` or `config`: the two `StoreKind`s in
 `stores.py`. Use *store* for anything true of both, which is nearly everything.
 *Secret* is reserved for the podman primitive both kinds render as, and is spoken
 only inside `stores.py`; elsewhere it would read as the Compose `secrets:` key and

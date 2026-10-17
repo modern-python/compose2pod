@@ -6,23 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `compose2pod` is a stdlib-only Python package and CLI that converts a Docker Compose document into a
 POSIX `sh` script running one service and its dependencies as a single Podman pod;
-[`CONTEXT.md`](CONTEXT.md) opens with what it does and owns the vocabulary — read it before naming a
+[`CONTEXT.md`](CONTEXT.md) opens with what it does and owns the vocabulary. Read it before naming a
 concept in code, a test name, or an issue title.
 
 ## Commands
 
-`just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth —
-`just --list`, or read it. Every recipe carries its intent as a comment. The one thing it does not
-say: **never run bare `ruff check`** — `[tool.ruff]` sets `fix = true` and `unsafe-fixes = true`, so
+`just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth:
+run `just --list`, or read it. Every recipe carries its intent as a comment. The one thing it does not
+say: **never run bare `ruff check`**. `[tool.ruff]` sets `fix = true` and `unsafe-fixes = true`, so
 an unqualified invocation rewrites the tree.
 
 ## Architecture
 
 The pipeline is `read → resolve_extends → validate → emit_script`, one module per stage, each named
-for what it does; read them. What reading a single module will **not** tell you:
+for what it does; read them. What reading a single module will not tell you:
 
-- `validate()` (`parsing.py`) is the gate, but it is not the only door: `emit._plan` — the single
-  traversal both public entry points (`emit_script`, `referenced_variables`) project from — calls
+- `validate()` (`parsing.py`) is the gate, but it is not the only door: `emit._plan`, the single
+  traversal both public entry points (`emit_script`, `referenced_variables`) project from, calls
   `validate()` itself, so a library caller cannot reach either with a document the gate would
   reject. That call site is load-bearing, not defensive.
 - The `SERVICE_KEYS` / `STRUCTURAL_KEYS` split in `keys.py` is a design ruling about which keys can
@@ -45,7 +45,7 @@ description, and PyPI does not rewrite relative links, so a relative one 404s on
 
 ## Code Style
 
-- The core package stays **zero-dependency**; PyYAML is the optional `[yaml]` extra and nothing else
+- The core package stays zero-dependency; PyYAML is the optional `[yaml]` extra and nothing else
   is added.
 - Commit messages: conventional-commit subjects, no `Co-authored-by` trailer.
 

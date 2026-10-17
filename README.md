@@ -18,7 +18,7 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
 
-Convert a Docker Compose file into a POSIX `sh` script that runs its services as a **single Podman pod**.
+Convert a Docker Compose file into a POSIX `sh` script that runs its services as a single Podman pod.
 
 Built for CI and test environments where you can't use `docker compose` or `podman kube play`:
 
