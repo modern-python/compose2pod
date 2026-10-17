@@ -12,7 +12,7 @@ concept in code, a test name, or an issue title.
 ## Commands
 
 `just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth:
-run `just --list`, or read it. Every recipe carries its intent as a comment. The one thing it does not
+`just --list`, or read it. Every recipe carries its intent as a comment. The one thing it does not
 say: **never run bare `ruff check`**. `[tool.ruff]` sets `fix = true` and `unsafe-fixes = true`, so
 an unqualified invocation rewrites the tree.
 
