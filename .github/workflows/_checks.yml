@@ -36,7 +36,8 @@ jobs:
             '**/*.md'
 
   floors:
-    # The declared dependency floors, installed. Every other job resolves highest, so the
+    # The declared floors, installed exactly on 3.11 and as the lowest versions with a wheel
+    # on every other entry (CI10). Every other job resolves highest, so the
     # bottom of the range is otherwise never exercised and can rot unnoticed -- a PyYAML
     # floor that could not build on 3.14 shipped for exactly that reason (issue 126).
     # Binary-only, because the pitch is minimal images: a floor reachable only by
@@ -57,7 +58,10 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml"
       - run: uv python install ${{ matrix.python-version }}
       - run: uv venv --python ${{ matrix.python-version }}
-      - run: uv pip compile pyproject.toml --all-extras --no-deps --resolution lowest-direct -o floors.txt
+      - if: matrix.python-version == '3.11'
+        run: uv pip compile pyproject.toml --all-extras --no-deps --resolution lowest-direct -o floors.txt
+      - if: matrix.python-version != '3.11'
+        run: uv pip compile pyproject.toml --all-extras --resolution lowest-direct --no-build -o floors.txt
       - run: uv pip install -r pyproject.toml --all-extras --constraints floors.txt --no-build
       - run: uv run --no-project python -c "import compose2pod, yaml; print(yaml.__version__)"
 
