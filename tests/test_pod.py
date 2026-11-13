@@ -217,7 +217,7 @@ class TestExtraHostsSeparators:
         # pod.py never emits a GuardedEnvFile (only emit.py's env_file path does), so this
         # is always str at runtime; the Token union just doesn't narrow that far statically.
         tokens = hosts_file_tokens(services, ["a"], [])[2:]  # drop the two fixed localhost lines
-        return [t.value if isinstance(t, Expand) else t for t in tokens]  # ty: ignore[invalid-return-type]
+        return [t.value if isinstance(t, Expand) else t for t in tokens]  # ty: ignore[invalid-explicit-return]
 
     def test_equals_separator_is_split_correctly(self) -> None:
         # Used to emit the whole string as the hostname: '1.2.3.4: somehost'
