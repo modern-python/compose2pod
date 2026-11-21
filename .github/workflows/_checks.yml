@@ -42,14 +42,12 @@ jobs:
     # floor that could not build on 3.14 shipped for exactly that reason (issue 126).
     # Binary-only, because the pitch is minimal images: a floor reachable only by
     # compiling an sdist is not a floor a user of one can install.
-    # 3.14t is out: no PyYAML release ships a cp314t wheel, so that job would measure
-    # upstream's gap rather than this repo's floor.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15", "3.15t"]
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v8.2.0
